@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#eef5e6">
+<title>Buddy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bagel+Fat+One&family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #3f4a3c; --soft: #9aa394; --white: #ffffff; --paper: #f6f8f2; --tile: #f1f4ec; --line: #e4e9dd;
+    --green: #56c26d; --green-lip: #3ea457; --green-light: #e5f6e3;
+    --yellow: #ffc83d; --yellow-lip: #eba51c;
+    --blue: #5bb2f2; --blue-lip: #3d93d6;
+    --coral: #ff8f7a;
+    --shadow: 0 10px 30px rgba(42, 66, 38, .14), 0 2px 6px rgba(42, 66, 38, .08);
+    --title: "Bagel Fat One", "Nunito", ui-rounded, sans-serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--paper); overflow: hidden; overscroll-behavior: none; }
+  body { font-family: "Nunito", ui-rounded, "SF Pro Rounded", system-ui, sans-serif; font-weight: 800; color: var(--ink); user-select: none; -webkit-user-select: none; }
+  canvas#game { display: block; touch-action: none; position: fixed; inset: 0; width: 100vw; height: 100dvh; }
+  button { font: inherit; color: inherit; border: none; background: none; cursor: pointer; padding: 0; }
+  .ico { width: 24px; height: 24px; fill: currentColor; flex: none; }
+
+  /* color grading over the 3D view */
+  .grade { position: fixed; inset: 0; pointer-events: none; }
+  .grade.tint { background: linear-gradient(180deg, rgba(255,205,140,.20), rgba(255,170,110,.06) 60%, rgba(255,190,130,.12)); mix-blend-mode: soft-light; }
+  .grade.sun { background: radial-gradient(120% 60% at 50% -8%, rgba(255,226,170,.4), rgba(255,226,170,0) 55%); mix-blend-mode: screen; }
+  .grade.vig { background: radial-gradient(130% 95% at 50% 42%, rgba(0,0,0,0) 55%, rgba(120,80,40,.22) 100%); mix-blend-mode: multiply; }
+  body[data-biome="desert"] .grade.tint { background: linear-gradient(180deg, rgba(255,200,120,.28), rgba(255,170,90,.1) 60%, rgba(255,190,120,.18)); }
+  body[data-biome="snow"] .grade.tint { background: linear-gradient(180deg, rgba(190,220,255,.3), rgba(200,225,255,.1) 60%, rgba(210,230,255,.2)); }
+  body[data-biome="snow"] .grade.sun { background: radial-gradient(120% 60% at 50% -8%, rgba(235,245,255,.45), rgba(235,245,255,0) 55%); }
+  body[data-biome="autumn"] .grade.tint { background: linear-gradient(180deg, rgba(255,170,90,.3), rgba(255,140,70,.12) 60%, rgba(255,160,90,.2)); }
+  body[data-biome="cave"] .grade.tint { background: linear-gradient(180deg, rgba(40,110,220,.25), rgba(30,140,210,.12) 60%, rgba(40,100,200,.2)); }
+  body[data-biome="cave"] .grade.sun { background: none; }
+  body[data-biome="cave"] .grade.vig { background: radial-gradient(130% 95% at 50% 42%, rgba(0,0,0,0) 45%, rgba(3,10,25,.55) 100%); }
+
+  /* ---------- building blocks: soft white cards, candy buttons with a little lip ---------- */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 13px 30px 15px; border-radius: 18px;
+    background: var(--white); color: var(--ink); font-weight: 900; font-size: 19px; letter-spacing: .01em;
+    box-shadow: inset 0 -5px 0 var(--line), 0 6px 16px rgba(42,66,38,.12); transition: transform .12s, box-shadow .12s, filter .12s; }
+  .btn:hover { transform: translateY(-2px); filter: brightness(1.03); }
+  .btn:active { transform: translateY(2px); box-shadow: inset 0 -2px 0 var(--line), 0 2px 6px rgba(42,66,38,.12); }
+  .btn .ico { color: var(--green); }
+  .green, .yellow, .blue { color: #fff !important; text-shadow: 0 2px 0 rgba(0,0,0,.12); }
+  .green .ico, .yellow .ico, .blue .ico { color: #fff; }
+  .btn.green { background: var(--green); box-shadow: inset 0 -5px 0 var(--green-lip), 0 8px 18px rgba(62,164,87,.3); }
+  .btn.yellow { background: var(--yellow); box-shadow: inset 0 -5px 0 var(--yellow-lip), 0 8px 18px rgba(235,165,28,.3); color: #6b4a06 !important; text-shadow: none; }
+  .btn.yellow .ico { color: #6b4a06; }
+  .btn.blue { background: var(--blue); box-shadow: inset 0 -5px 0 var(--blue-lip), 0 8px 18px rgba(61,147,214,.28); }
+  .btn.green:active { box-shadow: inset 0 -2px 0 var(--green-lip); }
+  .btn.yellow:active { box-shadow: inset 0 -2px 0 var(--yellow-lip); }
+  .btn.blue:active { box-shadow: inset 0 -2px 0 var(--blue-lip); }
+  .btn.small { font-size: 16px; padding: 10px 20px 12px; border-radius: 15px; }
+  .btn.small .ico { width: 20px; height: 20px; }
+  .round { width: 54px; height: 54px; border-radius: 18px; display: grid; place-items: center; background: var(--white); color: var(--green);
+    box-shadow: inset 0 -4px 0 var(--line), 0 6px 16px rgba(42,66,38,.12); transition: transform .12s, box-shadow .12s; flex: none; position: relative; }
+  .round:hover { transform: translateY(-2px); }
+  .round:active { transform: translateY(2px); box-shadow: inset 0 -2px 0 var(--line); }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; border-radius: 999px; background: var(--white); font-weight: 900; font-size: 17px; box-shadow: var(--shadow); }
+  .pill small { color: var(--soft); font-weight: 800; font-size: 12px; letter-spacing: .06em; margin: 0 2px 0 8px; }
+  .pill small:first-child { margin-left: 0; }
+
+  /* ---------- screens ---------- */
+  .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; opacity: 0; pointer-events: none; transition: opacity .35s; padding: 24px 32px; }
+  .screen.show { opacity: 1; pointer-events: auto; }
+  .screen:not(.show) * { pointer-events: none !important; } /* a hidden screen's buttons must never catch clicks */
+  .screen.show .pop { animation: pop .55s cubic-bezier(.2,1.4,.4,1) both; }
+  @keyframes pop { from { transform: scale(.85) translateY(14px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+  @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+  @keyframes fadein { from { opacity: 0; transform: translateX(-30px); } to { opacity: 1; transform: none; } }
+  @keyframes slidein { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: none; } }
+
+  /* menus: a warm, soft studio backdrop with Buddy standing in the middle */
+  .warm { background: radial-gradient(60% 70% at 50% 46%, #fffaf0 0%, #f9efdc 55%, #efdfc2 100%); overflow: hidden; }
+  .warm::after { content: ""; position: absolute; left: 50%; bottom: 13.5%; width: 22vw; height: 6vh; transform: translateX(-50%); border-radius: 50%; background: radial-gradient(closest-side, rgba(120,85,40,.22), rgba(120,85,40,0)); pointer-events: none; }
+  .warm > * { position: relative; z-index: 1; }
+
+  .faceSlot { position: absolute !important; inset: 0; pointer-events: none; z-index: 1; }
+  .faceSlot canvas { width: 100%; height: 100%; display: block; }
+  .screen.show .faceSlot { animation: rise .8s .05s cubic-bezier(.2,1.2,.4,1) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: none; } }
+
+  /* top-right counters */
+  .counters { position: absolute !important; z-index: 3; right: 36px; top: 28px; display: flex; gap: 12px; pointer-events: none; }
+  .counter { display: inline-flex; align-items: center; gap: 8px; padding: 4px 18px 4px 4px; border-radius: 999px; background: #fff; box-shadow: inset 0 -3px 0 #f1e2cf, 0 8px 18px rgba(120,85,40,.12); font-weight: 900; font-size: 16px; }
+  .counter .cico { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--green); color: #fff; box-shadow: inset 0 -3px 0 rgba(0,0,0,.12); }
+  .counter .cico.star { background: var(--yellow); }
+  .counter .ico { width: 18px; height: 18px; }
+
+  /* title: logo + text menu on the left, Buddy in the middle, a "continue" card on the right */
+  #title { padding: 0; }
+  .side-menu { position: absolute !important; left: 6vw; top: 58%; transform: translateY(-50%); display: flex; flex-direction: column; align-items: flex-start; gap: 4px; z-index: 2; animation: slidein-l .6s .1s ease-out both; }
+  @keyframes slidein-l { from { opacity: 0; transform: translate(-30px, -50%); } to { opacity: 1; transform: translateY(-50%); } }
+  .logo { position: absolute !important; left: 0; right: 0; top: 4vh; text-align: center; z-index: 2; pointer-events: none; animation: rise .7s ease-out both; }
+  .logo .word { display: inline-block; font-family: var(--title); font-size: clamp(96px, 11vw, 170px); line-height: .95; color: #fff; letter-spacing: .01em;
+    color: #6cc36f; text-shadow: 0 7px 0 #4b9f55, 0 20px 34px rgba(90,70,30,.2); animation: bob 3.2s ease-in-out infinite; }
+  .logo .sub { margin-top: 2px; font-size: 16px; font-weight: 900; color: #b29a78; letter-spacing: .12em; text-transform: uppercase; opacity: .9; }
+  .mitem { display: inline-flex; align-items: center; gap: 10px; padding: 10px 22px 11px 18px; border-radius: 14px; font-size: 21px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase;
+    color: #8a7558; transition: background .15s, color .15s, transform .15s, box-shadow .15s; }
+  .mitem .ico { width: 18px; height: 18px; opacity: 0; margin-left: -6px; transition: opacity .15s, margin .15s; }
+  .mitem small { font-size: 12px; letter-spacing: .04em; opacity: .8; margin-left: 4px; text-transform: none; }
+  .mitem:hover { color: var(--ink); }
+  .mitem.sel { background: #fff; color: var(--ink); text-shadow: none; transform: translateX(6px); box-shadow: inset 0 -4px 0 #efe4d2, 0 10px 22px rgba(120,85,40,.16); }
+  .mitem.sel .ico { opacity: 1; margin-left: 0; color: #f08a2c; }
+  .mitem.sel small { color: var(--soft); opacity: 1; }
+  /* the continue card: a soft tall card with a colored ribbon on top */
+  .cont { position: absolute !important; right: 6vw; top: 58%; transform: translateY(-50%); width: 230px; border-radius: 26px; background: #fff; padding: 8px; z-index: 2; text-align: center;
+    box-shadow: inset 0 -5px 0 #f1e2cf, 0 18px 40px rgba(120,85,40,.16); animation: slidein-r .6s .15s ease-out both; transition: transform .15s; }
+  @keyframes slidein-r { from { opacity: 0; transform: translate(30px, -50%); } to { opacity: 1; transform: translateY(-50%); } }
+  @keyframes slidein { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: none; } }
+  .cont:hover { transform: translateY(calc(-50% - 4px)); }
+  .cont .ribbon { margin: -22px auto 8px; width: max-content; padding: 7px 18px; border-radius: 12px; background: #8e6cf0; color: #fff; font-size: 14px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; box-shadow: inset 0 -3px 0 rgba(0,0,0,.15), 0 6px 14px rgba(110,80,200,.35); transform: rotate(-3deg); }
+  .cont .art { height: 190px; border-radius: 20px; display: grid; place-items: center; font-size: 84px; background: radial-gradient(circle at 50% 40%, #fff6, transparent 60%), var(--wc, #9fdc8c); box-shadow: inset 0 -6px 0 rgba(0,0,0,.08); }
+  .cont .art span { filter: drop-shadow(0 8px 10px rgba(0,0,0,.18)); animation: bob 2.4s ease-in-out infinite; }
+  .cont h3 { margin: 12px 0 0; font-family: var(--title); font-weight: 400; font-size: 24px; line-height: 1.1; color: var(--ink); }
+  .cont p { margin: 2px 0 12px; font-size: 14px; color: var(--soft); font-weight: 800; }
+  .cont .btn { width: 100%; }
+
+  /* outfit: Buddy in the middle, a picker card on the right */
+  #outfit { flex-direction: row; justify-content: flex-end; align-items: center; padding-right: 5vw; }
+  .panel { position: relative; z-index: 2; width: min(380px, 32vw); background: rgba(255,255,255,.96); border-radius: 30px; box-shadow: var(--shadow); padding: 22px 24px 24px; animation: slidein .6s .05s ease-out both; }
+  .panel-head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .panel-head h2 { margin: 0; font-family: var(--title); font-weight: 400; font-size: 34px; color: var(--green); flex: 1; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; padding: 5px; border-radius: 16px; background: var(--tile); }
+  .tabs span { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border-radius: 12px; font-size: 15px; color: var(--soft); }
+  .tabs span.on { background: #fff; color: var(--ink); box-shadow: 0 2px 8px rgba(42,66,38,.1); }
+  .tabs .ico { width: 18px; height: 18px; }
+  .skins { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
+  .skins button { position: relative; aspect-ratio: 1; border-radius: 18px; background: var(--tile); display: grid; place-items: center; transition: transform .15s cubic-bezier(.2,1.6,.4,1), background .15s; }
+  .skins button:hover { transform: translateY(-2px); }
+  .skins button::before { content: ""; width: 62%; height: 62%; border-radius: 50%; background: var(--c); box-shadow: inset 0 -5px 0 rgba(0,0,0,.14), 0 3px 8px rgba(0,0,0,.12); }
+  .skins button.on { background: var(--green-light); box-shadow: inset 0 0 0 3px var(--green); }
+  .skins button.on::after { content: "✓"; position: absolute; right: -6px; top: -6px; width: 22px; height: 22px; border-radius: 50%; background: var(--green); color: #fff; font-size: 13px; font-weight: 900; line-height: 22px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,.15); }
+  .panel .row { display: flex; gap: 12px; }
+  .panel .row .btn { flex: 1; }
+
+  /* ---------- adventure map ---------- */
+  #worlds { padding: 0; background: #e9f3dd; }
+  .maptop { position: absolute; top: 22px; left: 28px; right: 28px; display: flex; align-items: center; gap: 14px; pointer-events: none; z-index: 5; }
+  .maptop > * { pointer-events: auto; }
+  .map { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
+  .map::-webkit-scrollbar { display: none; }
+  .map .inner { position: relative; width: 100%; }
+  .zone { position: absolute; left: 0; right: 0; overflow: hidden; }
+  .zone .deco { position: absolute; font-size: 40px; opacity: .9; }
+  .zone .banner { position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%); z-index: 2; white-space: nowrap; }
+  .zone .banner .pill { font-size: 19px; padding: 10px 22px; }
+  .zone.locked { filter: grayscale(.75) brightness(1.05); }
+  .zone .lockveil { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; background: rgba(255,255,255,.35); }
+  .zone .mapimg { position: absolute; inset: 0; background-size: cover; background-position: center; background-repeat: no-repeat;
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 10%, #000 90%, transparent 100%); mask-image: linear-gradient(180deg, transparent 0, #000 10%, #000 90%, transparent 100%); }
+  .map svg.path { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+  /* level stops: golden coins with the number, grey with a lock until open */
+  .node { position: absolute; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 5px; z-index: 2; }
+  .node .dot { width: 60px; height: 60px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 24px; font-weight: 900;
+    background: radial-gradient(circle at 50% 38%, #ffe27a 0%, #ffc83d 55%, #f4b02a 100%); box-shadow: inset 0 -6px 0 #e29a17, inset 0 3px 0 rgba(255,255,255,.55), 0 6px 14px rgba(120,80,10,.25); transition: transform .12s; }
+  .node .dot b { text-shadow: 0 2px 0 rgba(180,110,0,.5); }
+  .node:hover .dot { transform: translateY(-3px) scale(1.04); }
+  .node:active .dot { transform: scale(.92); }
+  .node .stars { display: flex; gap: 1px; padding: 3px 8px; border-radius: 999px; background: #fff; box-shadow: 0 3px 8px rgba(42,66,38,.15); }
+  .node .stars svg { width: 14px; height: 14px; fill: #e1e5da; }
+  .node .stars svg.on { fill: var(--yellow); }
+  .node.locked .dot { background: radial-gradient(circle at 50% 38%, #f2f3f1 0%, #d9ddd6 70%); box-shadow: inset 0 -6px 0 #b9bfb3, inset 0 3px 0 rgba(255,255,255,.7), 0 5px 12px rgba(0,0,0,.15); color: #9ba394; }
+  .node.next::before { content: "Play here!"; position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); white-space: nowrap; padding: 7px 14px; border-radius: 14px; background: #fff; color: var(--coral); font-size: 15px; font-weight: 900; box-shadow: var(--shadow); animation: bob 1.4s ease-in-out infinite; }
+  .node.next .dot { box-shadow: inset 0 -6px 0 #e29a17, inset 0 3px 0 rgba(255,255,255,.55), 0 0 0 6px rgba(255,255,255,.85), 0 6px 18px rgba(120,80,10,.3); }
+  .screen.show .node.next .dot { animation: pulse 1.3s ease-in-out infinite; }
+
+  /* ---------- in-game HUD ---------- */
+  .hud { position: fixed; left: 0; right: 0; top: 0; padding: 22px 28px 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; opacity: 0; pointer-events: none; transition: opacity .3s; }
+  .hud .left { display: flex; align-items: center; gap: 12px; }
+  .hud #level { font-size: 19px; }
+  .peek { position: fixed; right: 28px; bottom: 28px; opacity: 0; pointer-events: none; transition: opacity .3s; }
+  .camzoom { bottom: 96px; }
+  .camzoom span { position: absolute; right: -6px; top: -6px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: var(--yellow); color: #6b4a06; font-size: 12px; font-weight: 900; line-height: 22px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,.15); }
+  body[data-state="play"] .hud, body[data-state="play"] .peek { opacity: 1; pointer-events: auto; }
+  body[data-state="play"] .hud .pill { pointer-events: none; }
+  .hint { position: fixed; left: 0; right: 0; bottom: 30px; text-align: center; pointer-events: none; opacity: 0; transition: opacity .6s; }
+  .hint .pill { font-size: 15px; color: var(--soft); }
+  .hint kbd { font: inherit; color: var(--ink); background: var(--tile); border-radius: 7px; padding: 1px 7px; box-shadow: inset 0 -2px 0 var(--line); }
+  body[data-state="play"] .hint.on { opacity: 1; }
+
+  /* ---------- modals ---------- */
+  .modal { justify-content: center; background: rgba(46,40,30,.35); } /* no backdrop blur: it hides the card over the 3D view */
+  .card { width: min(400px, 92vw); background: var(--white); border-radius: 30px; padding: 28px 28px 26px; text-align: center; box-shadow: 0 24px 60px rgba(30,50,25,.25); }
+  .card h2 { margin: 0 0 6px; font-family: var(--title); font-weight: 400; font-size: 38px; line-height: 1.05; color: var(--green); }
+  .card p { margin: 0 0 20px; color: var(--soft); font-weight: 800; font-size: 16px; }
+  .card .col { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+  .card .row { display: flex; gap: 12px; justify-content: center; }
+  .card .row .btn { flex: 1; }
+  .key-badge { font-size: 54px; display: inline-block; animation: bob 1.6s ease-in-out infinite; margin-bottom: 2px; }
+  .bigstars { display: flex; justify-content: center; align-items: flex-end; gap: 8px; margin: 6px 0 14px; }
+  .bigstars svg { width: 54px; height: 54px; fill: #e8ece2; transform: scale(.55); transition: transform .45s cubic-bezier(.2,1.9,.4,1), fill .15s; }
+  .bigstars svg:nth-child(2) { width: 70px; height: 70px; margin-bottom: 10px; }
+  .bigstars svg.on { fill: var(--yellow); transform: scale(1) rotate(-10deg); filter: drop-shadow(0 4px 6px rgba(235,165,28,.45)); }
+  .bigstars svg:nth-child(2).on { transform: scale(1); }
+  .bigstars svg:nth-child(3).on { transform: scale(1) rotate(10deg); }
+  .unlock { margin: 0 0 18px; display: none; }
+  .unlock.on { display: block; animation: pulse 1.4s ease-in-out infinite; }
+  .unlock .pill { background: var(--green-light); color: var(--green-lip); box-shadow: none; }
+
+  /* pause: a cream card with a short list, the first one green */
+  .pausecard { width: min(340px, 90vw); border-radius: 30px; padding: 26px 22px 22px; text-align: center; background: #fffaf0; box-shadow: inset 0 -6px 0 #efe4d2, 0 24px 60px rgba(60,45,20,.28); }
+  .pausecard h2 { margin: 0; font-family: var(--title); font-weight: 400; font-size: 44px; color: #6cc36f; text-shadow: 0 4px 0 #4b9f55; }
+  .pausecard p { margin: 6px 0 18px; color: #b29a78; font-weight: 900; font-size: 13px; letter-spacing: .1em; text-transform: uppercase; }
+  .plist { display: flex; flex-direction: column; gap: 8px; }
+  .pitem { display: flex; align-items: center; gap: 12px; padding: 12px 18px 14px; border-radius: 16px; background: #fff; color: var(--ink); font-size: 18px; font-weight: 900; letter-spacing: .04em; text-transform: uppercase;
+    box-shadow: inset 0 -4px 0 #efe4d2, 0 4px 10px rgba(60,45,20,.06); transition: transform .12s; }
+  .pitem .ico { width: 22px; height: 22px; color: #e9a14a; }
+  .pitem:hover { transform: translateX(4px); }
+  .pitem:active { transform: translateY(2px); }
+  .pitem.main { background: var(--green); color: #fff; box-shadow: inset 0 -5px 0 var(--green-lip), 0 8px 18px rgba(62,164,87,.28); }
+  .pitem.main .ico { color: #fff; }
+
+  /* settings */
+  .setting { display: flex; align-items: center; gap: 14px; margin: 0 0 18px; text-align: left; padding: 12px 16px; border-radius: 18px; background: var(--tile); }
+  .setting label { flex: none; width: 82px; font-weight: 900; font-size: 16px; }
+  .setting input[type=range] { flex: 1; -webkit-appearance: none; appearance: none; height: 12px; border-radius: 999px; background: linear-gradient(90deg, var(--green) var(--v, 50%), #dfe5d8 var(--v, 50%)); outline: none; }
+  .setting input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.22); cursor: pointer; }
+  .setting input[type=range]::-moz-range-thumb { width: 26px; height: 26px; border: none; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.22); cursor: pointer; }
+  .toggle { position: relative; width: 58px; height: 34px; border-radius: 999px; background: #dfe5d8; transition: background .2s; flex: none; margin-left: auto; }
+  .toggle::after { content: ""; position: absolute; left: 4px; top: 4px; width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.2); transition: transform .25s cubic-bezier(.2,1.5,.4,1); }
+  .toggle.on { background: var(--green); }
+  .toggle.on::after { transform: translateX(24px); }
+
+  /* race setup */
+  .rc-row { display: flex; align-items: center; justify-content: space-between; margin: 0 0 12px; padding: 10px 14px; border-radius: 18px; background: var(--tile); font-weight: 900; font-size: 16px; }
+  .stepper { display: flex; align-items: center; gap: 12px; }
+  .stepper .round { width: 36px; height: 36px; border-radius: 12px; font-size: 22px; font-weight: 900; }
+  .stepper b { min-width: 22px; text-align: center; font-size: 21px; }
+  .seg { display: flex; gap: 4px; padding: 4px; border-radius: 14px; background: #fff; }
+  .seg button { padding: 6px 10px; border-radius: 10px; font-weight: 900; font-size: 13px; color: var(--soft); }
+  .seg button.on { background: var(--green); color: #fff; box-shadow: inset 0 -3px 0 var(--green-lip); }
+  .rc-preview { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 4px 0 18px; font-size: 14px; }
+  .rc-preview .side { display: flex; align-items: center; gap: 2px; }
+  .rc-preview .side b { margin-left: 8px; }
+  .rc-preview .side.mine { color: var(--green-lip); }
+  .rc-preview i { width: 22px; height: 22px; border-radius: 50%; background: var(--c); border: 3px solid #fff; margin-left: -6px; box-shadow: 0 2px 5px rgba(0,0,0,.15); }
+  .rc-preview .vs { font-family: var(--title); font-weight: 400; color: var(--coral); font-size: 18px; }
+  .rank { list-style: none; margin: 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .rank li { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-radius: 16px; background: var(--tile); font-weight: 900; font-size: 17px; text-align: left; }
+  .rank li.me { background: var(--green-light); }
+  .rank li b { width: 40px; color: var(--green-lip); }
+  .rank li i { width: 20px; height: 20px; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,.15); }
+
+  /* race overlay */
+  #busy { position: fixed; left: 0; right: 0; bottom: 30%; text-align: center; pointer-events: none; opacity: 0; transition: opacity .2s; z-index: 5; }
+  #busy.on { opacity: 1; }
+  #fader { position: fixed; inset: 0; background: #0d1120; opacity: 0; pointer-events: none; }
+  #raceUI { position: fixed; inset: 0; pointer-events: none; }
+  .rtag { position: absolute; left: 0; top: 0; padding: 4px 12px; border-radius: 999px; background: var(--c); color: #fff; font-weight: 900; font-size: 13px; box-shadow: 0 4px 10px rgba(0,0,0,.18); text-shadow: 0 1px 0 rgba(0,0,0,.2); white-space: nowrap; }
+  .rtag.team { background: #fff; color: var(--c); text-shadow: none; }
+  .rarrow { position: absolute; left: 0; top: 0; width: 34px; height: 34px; filter: drop-shadow(0 3px 5px rgba(0,0,0,.25)); }
+  .countdown { position: fixed; left: 0; right: 0; top: 30%; text-align: center; pointer-events: none; font-family: var(--title); font-size: 150px; line-height: 1;
+    color: #fff; text-shadow: 0 8px 0 rgba(58,110,48,.4), 0 20px 40px rgba(30,60,25,.3); opacity: 0; }
+  .countdown.pop { animation: countPop .8s cubic-bezier(.2,1.6,.4,1) both; }
+  @keyframes countPop { 0% { transform: scale(.2) rotate(-12deg); opacity: 0; } 30% { transform: scale(1.15) rotate(4deg); opacity: 1; } 55% { transform: scale(1) rotate(0); opacity: 1; } 100% { transform: scale(.9); opacity: 0; } }
+
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #e9f3dd; z-index: 10; }
+  #loading .pill { animation: bob 1s ease-in-out infinite; color: var(--green-lip); }
+
+  /* narrow windows: stack the title vertically */
+
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+} }
+</script>
+</head>
+<body data-state="loading">
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15.4 4.6a1.6 1.6 0 0 1 0 2.3L10.3 12l5.1 5.1a1.6 1.6 0 1 1-2.3 2.3l-6.2-6.3a1.6 1.6 0 0 1 0-2.2l6.2-6.3a1.6 1.6 0 0 1 2.3 0z"/></symbol>
+  <symbol id="i-zoom" viewBox="0 0 24 24"><path d="M4 3h5a1 1 0 0 1 .7 1.7L8.4 6l2.6 2.6-2.4 2.4L6 8.4 4.7 9.7A1 1 0 0 1 3 9V4a1 1 0 0 1 1-1zm16 18h-5a1 1 0 0 1-.7-1.7l1.3-1.3-2.6-2.6 2.4-2.4 2.6 2.6 1.3-1.3A1 1 0 0 1 21 15v5a1 1 0 0 1-1 1z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.6v14.8a1.5 1.5 0 0 0 2.3 1.3l11.5-7.4a1.5 1.5 0 0 0 0-2.6L9.3 3.3A1.5 1.5 0 0 0 7 4.6z"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 24 24"><path d="M12 4.5V2l4.5 3.5L12 9V6.5a5.5 5.5 0 1 0 5.5 5.5 1 1 0 0 1 2 0A7.5 7.5 0 1 1 12 4.5z"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M10.6 3.5a2 2 0 0 1 2.8 0l7 6.6A1 1 0 0 1 19.7 12H19v7a2 2 0 0 1-2 2h-3v-5h-4v5H7a2 2 0 0 1-2-2v-7h-.7a1 1 0 0 1-.7-1.9z"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 4 3.6 5.8A1 1 0 0 0 3 6.7v12.4a1 1 0 0 0 1.3.9L9 18.5l6 2 5.4-1.8a1 1 0 0 0 .6-.9V5.4a1 1 0 0 0-1.3-.9L15 6zm1 2.4 4 1.3v11.9l-4-1.3z"/></symbol>
+  <symbol id="i-shirt" viewBox="0 0 24 24"><path d="M8.5 3 3.4 5.6a1 1 0 0 0-.5 1.2l1.4 4a1 1 0 0 0 1.3.6L7 11v9a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-9l1.4.4a1 1 0 0 0 1.3-.6l1.4-4a1 1 0 0 0-.5-1.2L15.5 3a3.5 3.5 0 0 1-7 0z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><path d="M7 10V8a5 5 0 0 1 10 0v2a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2zm2.5 0h5V8a2.5 2.5 0 0 0-5 0z"/></symbol>
+  <symbol id="i-sound" viewBox="0 0 24 24"><path d="M4 9h3.5L12 5v14l-4.5-4H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1zm11.3-1.6a1 1 0 0 1 1.4 0 6.5 6.5 0 0 1 0 9.2 1 1 0 1 1-1.4-1.4 4.5 4.5 0 0 0 0-6.4 1 1 0 0 1 0-1.4z"/></symbol>
+  <symbol id="i-lens" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 0 1 6 12l4.2 4.2a1.4 1.4 0 0 1-2 2L14.5 17a7.5 7.5 0 1 1-4-14zm0 2.8a4.7 4.7 0 1 0 0 9.4 4.7 4.7 0 0 0 0-9.4z"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 2.5a1.2 1.2 0 0 1 1.2 1.2V4h11.3a1 1 0 0 1 .8 1.6L16 9l2.3 3.4a1 1 0 0 1-.8 1.6H6.2v6.8a1.2 1.2 0 1 1-2.4 0V3.7A1.2 1.2 0 0 1 5 2.5z"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M11.1 2.6a1 1 0 0 1 1.8 0l2.4 4.9 5.4.8a1 1 0 0 1 .6 1.7l-3.9 3.8.9 5.4a1 1 0 0 1-1.5 1L12 17.7l-4.8 2.5a1 1 0 0 1-1.5-1l.9-5.4-3.9-3.8a1 1 0 0 1 .6-1.7l5.4-.8z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M9.5 16.2 5.3 12a1.4 1.4 0 1 0-2 2l5.2 5.2a1.4 1.4 0 0 0 2 0L21.2 8.6a1.4 1.4 0 0 0-2-2z"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0 0 18c1.2 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.3 0-1.1.9-2 2-2h2.3A4.7 4.7 0 0 0 22 9.7C22 5.9 17.5 3 12 3zM6.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3-4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3 4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></symbol>
+</svg>
+
+<div class="grade tint"></div><div class="grade sun"></div><div class="grade vig"></div>
+
+<div class="hud">
+  <div class="left">
+    <button class="round" id="pauseBtn" aria-label="Pause"><svg class="ico"><use href="#i-pause"/></svg></button>
+    <div class="pill" id="level">1-1</div>
+  </div>
+  <div class="pill"><small>STEPS</small><span id="steps">0</span><small>TIME</small><span id="time">0:00</span></div>
+</div>
+<button class="round peek" id="peek" aria-label="Zoom out"><svg class="ico"><use href="#i-zoom"/></svg></button>
+<button class="round peek camzoom" id="camZoom" aria-label="Camera distance"><svg class="ico"><use href="#i-lens"/></svg><span id="camZoomLbl">1</span></button>
+<div id="raceUI"></div>
+<div id="fader"></div>
+<div id="busy"><span class="pill">Loading…</span></div>
+<div class="countdown" id="countdown"></div>
+<div class="hint" id="hint"><span class="pill">Move with <kbd>W A S D</kbd> or the arrow keys · hold to keep walking</span></div>
+
+<section class="screen warm" id="title">
+  <div class="faceSlot"><canvas id="faceCanvas"></canvas></div>
+  <div class="counters">
+    <span class="counter"><i class="cico star"><svg class="ico"><use href="#i-star"/></svg></i><b id="starCount">0</b></span>
+    <span class="counter"><i class="cico"><svg class="ico"><use href="#i-map"/></svg></i><b id="worldName">Mossy Woods</b></span>
+  </div>
+  <div class="logo"><span class="word" id="logoA">Buddy</span><div class="sub">Remember the way</div></div>
+  <nav class="side-menu" id="sideMenu">
+    <button class="mitem sel" id="playBtn"><svg class="ico"><use href="#i-play"/></svg>Adventure</button>
+    <button class="mitem" id="raceBtn"><svg class="ico"><use href="#i-play"/></svg>Race</button>
+    <button class="mitem" id="outfitBtn"><svg class="ico"><use href="#i-play"/></svg>Outfit</button>
+    <button class="mitem" id="settingsBtn"><svg class="ico"><use href="#i-play"/></svg>Sound</button>
+  </nav>
+  <div class="cont" id="contCard">
+    <div class="ribbon">Continue</div>
+    <div class="art" id="contArt"><span>🌿</span></div>
+    <h3 id="worldNameCard">Mossy Woods</h3>
+    <p id="playSub">Level 1-1</p>
+    <button class="btn green small" id="contBtn"><svg class="ico"><use href="#i-play"/></svg>Play</button>
+  </div>
+</section>
+
+<section class="screen warm" id="outfit">
+  <div class="faceSlot"></div>
+  <div class="panel">
+    <div class="panel-head"><h2>Outfit</h2></div>
+    <div class="tabs"><span class="on"><svg class="ico"><use href="#i-palette"/></svg>Colors</span></div>
+    <div class="skins" id="skins"></div>
+    <div class="row">
+      <button class="btn blue" data-go="title"><svg class="ico"><use href="#i-back"/></svg>Back</button>
+      <button class="btn yellow" data-go="title"><svg class="ico"><use href="#i-check"/></svg>Done</button>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="worlds">
+  <div class="map" id="map"></div>
+  <div class="maptop">
+    <button class="round" data-go="title" aria-label="Back"><svg class="ico"><use href="#i-back"/></svg></button>
+    <div class="pill" id="mapTitle">Map</div>
+  </div>
+</section>
+
+<section class="screen modal" id="pause">
+  <div class="pausecard pop">
+    <h2>Paused</h2>
+    <p id="pauseInfo"></p>
+    <nav class="plist">
+      <button class="pitem main" id="resumeBtn"><svg class="ico"><use href="#i-play"/></svg>Resume</button>
+      <button class="pitem" id="restartBtn"><svg class="ico"><use href="#i-redo"/></svg>Restart</button>
+      <button class="pitem" data-go="worlds"><svg class="ico"><use href="#i-map"/></svg>Map</button>
+      <button class="pitem" id="pauseSoundBtn"><svg class="ico"><use href="#i-sound"/></svg>Sound</button>
+      <button class="pitem" data-go="title"><svg class="ico"><use href="#i-home"/></svg>Main menu</button>
+    </nav>
+  </div>
+</section>
+
+<section class="screen modal" id="race">
+  <div class="card pop">
+    <h2>Race</h2>
+    <p>Everyone starts in a different corner.<br>First to the key wins!</p>
+    <div class="rc-row"><span>Buddies</span><div class="stepper"><button class="round" data-rc="racers:-1" aria-label="Fewer Buddies">−</button><b id="rcRacers">3</b><button class="round" data-rc="racers:1" aria-label="More Buddies">+</button></div></div>
+    <div class="rc-row"><span>Teammates</span><div class="stepper"><button class="round" data-rc="mates:-1" aria-label="Fewer teammates">−</button><b id="rcMates">0</b><button class="round" data-rc="mates:1" aria-label="More teammates">+</button></div></div>
+    <div class="rc-row"><span>Rivals</span><div class="seg" id="rcSpeed"><button data-rc="speed:0">Easy</button><button data-rc="speed:1">Normal</button><button data-rc="speed:2">Hard</button><button data-rc="speed:3">Pro</button></div></div>
+    <div class="rc-preview" id="rcPreview"></div>
+    <div class="row">
+      <button class="btn blue" data-go="title"><svg class="ico"><use href="#i-back"/></svg>Back</button>
+      <button class="btn green" id="raceGo"><svg class="ico"><use href="#i-flag"/></svg>Start</button>
+    </div>
+  </div>
+</section>
+
+<section class="screen modal" id="raceEnd">
+  <div class="card pop">
+    <div class="key-badge" id="raceBadge">🏆</div>
+    <h2 id="raceTitle">You win!</h2>
+    <p id="raceStats"></p>
+    <ol class="rank" id="raceRank"></ol>
+    <div class="row">
+      <button class="btn blue" data-go="title"><svg class="ico"><use href="#i-home"/></svg>Home</button>
+      <button class="btn green" id="raceAgain"><svg class="ico"><use href="#i-redo"/></svg>Again</button>
+    </div>
+  </div>
+</section>
+
+<section class="screen modal" id="settings">
+  <div class="card pop">
+    <h2>Sound</h2>
+    <p>Saved on this computer</p>
+    <div class="setting"><label for="musicVol">Music</label><input type="range" id="musicVol" min="0" max="100"></div>
+    <div class="setting"><label for="fxVol">Effects</label><input type="range" id="fxVol" min="0" max="100"></div>
+    <div class="setting"><label>Mute all</label><button class="toggle" id="muteBtn" aria-label="Mute all"></button></div>
+    <button class="btn yellow" id="settingsDone" style="width:100%"><svg class="ico"><use href="#i-check"/></svg>Done</button>
+  </div>
+</section>
+
+<section class="screen modal" id="win">
+  <div class="card pop">
+    <div class="key-badge">🔑</div>
+    <h2>Key found!</h2>
+    <div class="bigstars" id="winStars"><svg><use href="#i-star"/></svg><svg><use href="#i-star"/></svg><svg><use href="#i-star"/></svg></div>
+    <p id="winStats"></p>
+    <div class="unlock" id="unlockMsg"><span class="pill" id="unlockText"></span></div>
+    <div class="row">
+      <button class="btn blue" data-go="worlds"><svg class="ico"><use href="#i-map"/></svg>Map</button>
+      <button class="btn green" id="nextBtn">Next<svg class="ico"><use href="#i-play"/></svg></button>
+    </div>
+  </div>
+</section>
+
+<div id="loading"><span class="pill">Loading…</span></div>
+<script type="module" src="main.js"></script>
+</body>
+</html>

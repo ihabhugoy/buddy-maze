@@ -2855,6 +2855,8 @@ $('helpDone').addEventListener('click', () => show(helpBack));
 // fullscreen: the F key, or the toggle in settings
 const toggleFull = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {});
 $('fullBtn').addEventListener('click', toggleFull);
+$('hudFull').addEventListener('click', toggleFull);
+if (!document.documentElement.requestFullscreen) $('hudFull').style.display = 'none'; // iPhone: use Add to Home Screen instead
 document.addEventListener('fullscreenchange', () => $('fullBtn').classList.toggle('on', !!document.fullscreenElement));
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;

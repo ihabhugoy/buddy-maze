@@ -2571,9 +2571,11 @@ const net = (() => {
     get isHost() { return host; },
     again() { if (host) start(); else { send({ t: 'again' }); toast('Asked the host for a rematch'); } },
     copy() { // the share sheet where there is one (phones, Macs), else copy the link
-      const url = link();
-      if (navigator.share) navigator.share({ title: 'Buddy', text: 'Race me in Buddy!', url }).catch(() => {});
-      else navigator.clipboard.writeText(url).then(() => toast('Invite link copied! Paste it to your friends'), () => toast(url));
+      // inside a game page (itch.io) the link can't carry the code: send the page and the code instead
+      const framed = window.top !== window, page = framed ? (document.referrer || '') : '';
+      const url = framed ? page : link(), text = framed ? `Race me in Buddy! Open ${page} then Friends, Join with code ${code}` : 'Race me in Buddy!';
+      if (navigator.share) navigator.share(framed ? { title: 'Buddy', text } : { title: 'Buddy', text, url }).catch(() => {});
+      else navigator.clipboard.writeText(framed ? text : url).then(() => toast('Invite copied! Paste it to your friends'), () => toast(framed ? text : url));
     },
     leave: reset,
   };

@@ -73,7 +73,7 @@ const save = (() => {
     set(L, n) { data.stars[L] = Math.max(n, data.stars[L] || 0); try { localStorage.setItem('hidden-maze', JSON.stringify(data)); } catch {} },
   };
 })();
-const BETA_ALL_OPEN = true; // beta: every level is open while the game is being made
+const BETA_ALL_OPEN = ['localhost', '127.0.0.1', ''].includes(location.hostname); // every level is open only when you run it locally (editing); online, levels unlock in order
 const unlocked = L => BETA_ALL_OPEN || L === 0 || save.stars(L - 1) > 0;
 const nextLevel = () => { for (let L = 0; L < TOTAL_LEVELS; L++) if (!save.stars(L)) return L; return TOTAL_LEVELS - 1; };
 function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -2434,6 +2434,12 @@ const net = (() => {
     const sc = document.createElement('script'); sc.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc);
   });
   const idOf = c => 'buddy-maze-' + c.toLowerCase();
+  // direct connection first (STUN); if a network blocks that, the call goes through a free relay (TURN)
+  const PEER_OPTS = { config: { iceServers: [
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+    { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
+  ] } };
+  let waitTimer = 0;
   const newCode = () => Array.from({ length: 5 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
   const link = () => location.origin + location.pathname + '?join=' + code;
   function send(m) { if (conn && conn.open) conn.send(m); }
@@ -2466,9 +2472,10 @@ const net = (() => {
       reset(); host = true; code = newCode();
       $('friendCode').textContent = code; status('Getting a code…');
       try { await loadPeer(); } catch { return status('Could not reach the friend service. Check your connection.'); }
-      peer = new Peer(idOf(code));
+      peer = new Peer(idOf(code), PEER_OPTS);
       peer.on('open', () => status('Send the link to your friend, then wait here.'));
       peer.on('connection', c => { wire(c); status('Your friend is joining…'); });
+      peer.on('disconnected', () => { if (peer && !peer.destroyed) peer.reconnect(); }); // keep the code alive if the signal drops
       peer.on('error', e => status(e.type === 'unavailable-id' ? 'That code is taken, try again.' : 'Connection problem: ' + e.type));
     },
     async join(c) {
@@ -2476,11 +2483,13 @@ const net = (() => {
       if (code.length < 4) return status('Type the 5-letter code from your friend.');
       status('Looking for your friend…');
       try { await loadPeer(); } catch { return status('Could not reach the friend service. Check your connection.'); }
-      peer = new Peer();
+      peer = new Peer(PEER_OPTS);
       peer.on('open', () => {
         const cc = peer.connect(idOf(code), { reliable: true });
         wire(cc);
-        cc.on('open', () => { status('Connected! Starting…'); send({ t: 'hello', skin }); });
+        clearTimeout(waitTimer);
+        waitTimer = setTimeout(() => { if (!cc.open) status('Still connecting… make sure your friend keeps the game open on the friend screen.'); }, 12000);
+        cc.on('open', () => { clearTimeout(waitTimer); status('Connected! Starting…'); send({ t: 'hello', skin }); });
       });
       peer.on('error', e => status(e.type === 'peer-unavailable' ? 'No game with that code. Check it and try again.' : 'Connection problem: ' + e.type));
     },

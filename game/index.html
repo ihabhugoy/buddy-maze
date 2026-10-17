@@ -374,6 +374,19 @@
   .setting label small { color: var(--ink-soft); font-size: 12px; margin-left: 4px; }
 
   /* play with a friend */
+  #friend .card { width: min(460px, 94vw); }
+  #friend.guest .hostonly { display: none; }
+  .lobby { display: flex; justify-content: center; gap: 8px; margin: 2px 0 10px; }
+  .lp { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 13px; color: var(--ink); width: 62px; }
+  .lp i { width: 34px; height: 34px; border-radius: 50%; background: var(--c); border: 3px solid #fff; box-shadow: var(--shadow-s); animation: pop .4s var(--spring); }
+  .lp.empty { color: var(--mute); } .lp.empty i { background: var(--well); box-shadow: inset 0 0 0 2px var(--edge); border-style: dashed; border-color: var(--edge); animation: none; }
+  #friendStart:disabled { filter: grayscale(.6); opacity: .55; pointer-events: none; }
+  .codehint { margin: 10px 0 12px; color: var(--ink-soft); font-size: 15px; }
+  .codehint b { font-family: var(--title); font-weight: 400; font-size: 22px; letter-spacing: .14em; color: var(--ink); margin-left: 4px; }
+  .joinbox { margin: 0 0 12px; color: var(--ink-soft); font-size: 14px; cursor: pointer; }
+  .joinbox summary { list-style: none; } .joinbox summary::-webkit-details-marker { display: none; }
+  .joinbox .joinrow { margin-top: 8px; }
+  #friendMenuBtn { --c: var(--berry); }
   .friendbtn { width: 100%; margin-top: 10px; color: var(--berry); }
   .friendbtn .ico { color: var(--berry); }
   .codebox { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 0 0 12px; padding: 10px 10px 10px 18px; border-radius: 20px; background: var(--well); }
@@ -506,6 +519,7 @@
   <div class="logo"><span class="word" id="logoA">Buddy</span><br><div class="sub">Remember the way</div></div>
   <nav class="side-menu" id="sideMenu">
     <button class="mitem sel" id="playBtn"><i class="mi"><svg class="ico"><use href="#i-map"/></svg></i>Adventure<svg class="ico go"><use href="#i-next"/></svg></button>
+    <button class="mitem" id="friendMenuBtn"><i class="mi"><svg class="ico"><use href="#i-heart"/></svg></i>Play with friend<svg class="ico go"><use href="#i-next"/></svg></button>
     <button class="mitem" id="raceBtn"><i class="mi"><svg class="ico"><use href="#i-flag"/></svg></i>Race<svg class="ico go"><use href="#i-next"/></svg></button>
     <button class="mitem" id="outfitBtn"><i class="mi"><svg class="ico"><use href="#i-shirt"/></svg></i>Outfit<svg class="ico go"><use href="#i-next"/></svg></button>
     <button class="mitem" id="settingsBtn"><i class="mi"><svg class="ico"><use href="#i-sound"/></svg></i>Settings<svg class="ico go"><use href="#i-next"/></svg></button>
@@ -580,11 +594,18 @@
 <section class="screen modal" id="friend">
   <div class="card pop">
     <div class="medal" style="color:var(--berry)"><svg class="ico"><use href="#i-heart"/></svg></div>
-    <h2 class="sticker">With a friend</h2>
-    <p>Send your friend this code or the link.<br>You race in the same maze, from opposite corners.</p>
-    <div class="codebox"><span id="friendCode">·····</span><button class="btn small yellow" id="friendCopy"><svg class="ico"><use href="#i-link"/></svg>Copy link</button></div>
-    <div class="ribbon" id="friendStatus">Getting a code…</div>
-    <div class="joinrow"><input id="friendInput" maxlength="6" placeholder="Friend's code" autocomplete="off" spellcheck="false"><button class="btn small green" id="friendJoin">Join</button></div>
+    <h2 class="sticker" id="friendTitle">Play with a friend</h2>
+    <div class="hostonly">
+      <p>1. Pick a place &nbsp; 2. Invite up to 3 friends &nbsp; 3. Start!</p>
+      <div class="rc-row"><span>World</span><div class="seg" id="frBiome"><button data-rc="biome:woods">Woods</button><button data-rc="biome:desert">Dunes</button><button data-rc="biome:snow">Frost</button><button data-rc="biome:autumn">Autumn</button><button data-rc="biome:cave">Cave</button></div></div>
+      <div class="rc-row"><span>Maze</span><div class="seg" id="frShape"><button data-rc="shape:square">Square</button><button data-rc="shape:circle">Circle</button><button data-rc="shape:gem">Gem</button><button data-rc="shape:plus">Plus</button><button data-rc="shape:snowflake">Flake</button></div></div>
+      <button class="btn green" id="friendCopy" style="width:100%"><svg class="ico"><use href="#i-link"/></svg>Invite friend</button>
+      <div class="codehint">or tell them the code <b id="friendCode">·····</b></div>
+    </div>
+    <div class="lobby" id="lobby"></div>
+    <div class="ribbon" id="friendStatus">Getting ready…</div>
+    <button class="btn yellow" id="friendStart" style="width:100%;margin-bottom:10px"><svg class="ico"><use href="#i-flag"/></svg>Start</button>
+    <details class="joinbox hostonly"><summary>Have a code from a friend?</summary><div class="joinrow"><input id="friendInput" maxlength="6" placeholder="Friend's code" autocomplete="off" spellcheck="false"><button class="btn small green" id="friendJoin">Join</button></div></details>
     <button class="btn blue small" id="friendBack" style="width:100%"><svg class="ico"><use href="#i-back"/></svg>Back</button>
   </div>
 </section>

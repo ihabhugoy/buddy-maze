@@ -1635,8 +1635,8 @@ function buildLevel(level, race = null, opts = {}) {
       }
     }
   }
-  rivals = race ? race.entries.slice(1).map((e, i) => makeRival(e, race.online ? race.friendSkin : RIVAL_SKINS.filter(c => c !== skin)[i])) : [];
-  if (race && race.online) rivals[0].remote = true; // your friend, moved by the network
+  rivals = race ? race.entries.slice(1).map((e, i) => makeRival(e, race.online ? race.others[i].skin : RIVAL_SKINS.filter(c => c !== skin)[i])) : [];
+  if (race && race.online) rivals.forEach((r, i) => { r.remote = true; r.pid = race.others[i].pid; }); // your friends, moved by the network
   for (let k = 0; race && k < raceCfg.mates; k++) rivals[rivals.length - 1 - k].team = true; // your teammates (the far corners first)
   updateTargets(true);
   for (let i = 0; i < T; i++) heights[i] = targets[i];
@@ -2376,12 +2376,17 @@ function updateRaceUI() {
 }
 // a race: on your own against computer Buddies, or online against a friend (same seed, same maze, opposite corners)
 async function startRace(online = null) {
-  raceSize = online ? 2 : raceCfg.racers; raceTeam = !online && raceCfg.mates > 0;
+  raceSize = online ? online.players.length : raceCfg.racers; raceTeam = !online && raceCfg.mates > 0;
   const b = online ? online.biome : raceCfg.biome;
   if (!stoneSets[b]) { $('busy').classList.add('on'); await stoneSet(b); $('busy').classList.remove('on'); }
   const rm = online ? makeRaceMaze(mulberry32(online.seed), online.shape, online.cells) : makeRaceMaze();
   rm.biome = b;
-  if (online) { rm.online = true; rm.friendSkin = online.friendSkin === skin ? (skin + 1) % SKINS.length : online.friendSkin; if (online.guest) rm.entries = [rm.entries[1], rm.entries[0]]; }
+  if (online) { // my corner first; the others, in player order, are moved by the network
+    rm.online = true;
+    const order = online.players.map((_, i) => i).filter(i => i !== online.me);
+    rm.others = order.map(i => ({ pid: i, skin: online.players[i].skin === skin ? (online.players[i].skin + 1 + i) % SKINS.length : online.players[i].skin }));
+    rm.entries = [rm.entries[online.me], ...order.map(i => rm.entries[i])];
+  }
   warp.t = -1; $('fader').style.opacity = 0;
   buildLevel(-1, rm); setupRaceUI(); show('play'); intro.t = 0; intro.warm = 3; intro.wave = false; lastCount = -1;
 }
@@ -2428,8 +2433,12 @@ function confetti() {
 // The host picks the world and maze; both race the same maze from opposite corners. Moves and the win are sent as
 // small messages; your friend's Buddy walks where they walk.
 const net = (() => {
-  let peer = null, conn = null, host = false, code = '', friendSkin = 1, pending = [];
-  const status = t => { $('friendStatus').textContent = t; if (params.has('peerdebug')) console.log('[net]', t); };
+  // A small lobby: the host holds a code, up to 3 friends join it (a star: every message goes through the host), the
+  // host presses Start. Everyone gets the same maze and their own corner; moves and the win are relayed to all.
+  let peer = null, host = false, code = '', conns = [], hostConn = null, players = [], me = 0, waitTimer = 0, pending = [];
+  const MAX = 4;
+  const dbg = (...a) => { if (params.has('peerdebug')) console.log('[net]', ...a); };
+  const status = t => { $('friendStatus').textContent = t; dbg(t); };
   const loadPeer = () => window.Peer ? Promise.resolve() : new Promise((res, rej) => {
     const sc = document.createElement('script'); sc.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc);
   });
@@ -2439,48 +2448,75 @@ const net = (() => {
     { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
     { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
   ] } };
-  let waitTimer = 0;
   const newCode = () => Array.from({ length: 5 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
-  const link = () => location.origin + location.pathname + '?join=' + code;
-  function send(m) { if (conn && conn.open) conn.send(m); }
-  function round() { // the host starts a round with a fresh maze
-    const setup = { t: 'setup', seed: (Math.random() * 1e9) | 0, biome: raceCfg.biome, shape: raceCfg.shape, cells: 10, skin };
-    send(setup);
-    startRace({ ...setup, friendSkin, guest: false });
+  const link = () => location.origin + location.pathname.replace(/index\.html$/, '') + '?join=' + code;
+  const live = () => conns.filter(c => c.open);
+  function toAll(m, except) { for (const c of live()) if (c !== except) c.send(m); }
+  function send(m) { m.p = me; if (host) toAll(m); else if (hostConn && hostConn.open) hostConn.send(m); }
+  // the lobby list: who's in, and (for the host) the Start button
+  function lobby() {
+    const n = players.length;
+    $('lobby').innerHTML = players.map((p, i) => `<span class="lp"><i style="--c:${SKINS[p.skin]}"></i>${i === me ? 'You' : i === 0 ? 'Host' : 'Friend ' + i}</span>`).join('')
+      + Array.from({ length: MAX - n }, () => '<span class="lp empty"><i></i>…</span>').join('');
+    $('friendStart').disabled = !(host && n > 1);
+    $('friendStart').style.display = host ? '' : 'none';
+    if (host) status(n > 1 ? `${n - 1} friend${n > 2 ? 's' : ''} joined! Press Start when everyone is in.` : 'Press Invite friend and send the link.');
+    else status('Waiting for the host to start…');
   }
-  function onData(m) {
-    if (params.has('peerdebug')) console.log('[net] got', m.t);
-    if (m.t === 'hello') { friendSkin = m.skin; status('Your friend is here!'); setTimeout(round, 600); }
-    else if (m.t === 'setup') { friendSkin = m.skin; startRace({ ...m, friendSkin, guest: true }); }
-    else if (m.t === 'pos') {
-      const r = rivals.find(o => o.remote); if (!r) return;
-      r.fx = r.x; r.fz = r.z; r.x = m.x; r.z = m.z; r.t = 0; r.stepTime = CFG.stepTime;
-      r.facing = Math.atan2(-(r.z - r.fz), r.x - r.fx);
+  function syncLobby() { players = [{ skin }, ...live().map(c => ({ skin: c.skin ?? 1 }))]; lobby(); live().forEach((c, i) => c.send({ t: 'lobby', players, you: i + 1 })); }
+  function start() { // host: everyone gets the same maze; player i starts in corner i
+    if (players.length < 2) return;
+    const setup = { t: 'setup', seed: (Math.random() * 1e9) | 0, biome: raceCfg.biome, shape: raceCfg.shape, cells: 10, players };
+    live().forEach((c, i) => c.send({ ...setup, you: i + 1 }));
+    begin({ ...setup, you: 0 });
+  }
+  function begin(m) { me = m.you; players = m.players; startRace({ ...m, me }); }
+  function onData(c, m) {
+    dbg('got', m.t);
+    if (host) {
+      if (m.t === 'hello') { c.skin = m.skin; syncLobby(); }
+      else if (m.t === 'pos' || m.t === 'win') { toAll(m, c); remote(m); } // pass it on to the others too
+      else if (m.t === 'again') start();
+    } else {
+      if (m.t === 'lobby') { players = m.players; me = m.you; lobby(); }
+      else if (m.t === 'setup') begin(m);
+      else remote(m);
     }
-    else if (m.t === 'win') { const r = rivals.find(o => o.remote); if (r && !won) raceEnd(r); }
-    else if (m.t === 'again' && host) round();
+  }
+  function remote(m) { // someone else moved or won
+    const r = rivals.find(o => o.pid === m.p); if (!r) return;
+    if (m.t === 'pos') { r.fx = r.x; r.fz = r.z; r.x = m.x; r.z = m.z; r.t = 0; r.stepTime = CFG.stepTime; r.facing = Math.atan2(-(r.z - r.fz), r.x - r.fx); }
+    else if (m.t === 'win' && !won) raceEnd(r);
   }
   function wire(c) {
-    c.on('data', m => { conn = c; onData(m); }); // whichever connection talks to us is the live one
-    c.on('close', () => { if (conn !== c) return; const was = c.wasOpen; conn = null; if (was) { toast('Your friend left the game'); status('Your friend left.'); } });
+    c.on('data', m => onData(c, m));
     c.on('open', () => { c.wasOpen = true; });
+    c.on('close', () => {
+      conns = conns.filter(o => o !== c);
+      if (host && c.wasOpen) { if (state === 'friend') syncLobby(); else toast('A friend left the game'); }
+      if (!host && c === hostConn && c.wasOpen) { hostConn = null; toast('The host left the game'); status('The host left.'); }
+    });
   }
-  function reset() { clearTimeout(waitTimer); if (conn) conn.close(); if (peer) peer.destroy(); peer = conn = null; }
+  function reset() { clearTimeout(waitTimer); for (const c of conns) c.close(); if (peer) peer.destroy(); peer = hostConn = null; conns = []; players = []; me = 0; }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && peer && !peer.destroyed && peer.disconnected) peer.reconnect(); });
+  const softErr = e => ['network', 'server-error', 'socket-error', 'socket-closed', 'disconnected'].includes(e.type);
   return {
-    get online() { return !!(conn && conn.open); },
+    get online() { return host ? live().length > 0 : !!(hostConn && hostConn.open); },
     send,
     async host() {
-      reset(); host = true; code = newCode();
-      $('friendCode').textContent = code; status('Getting a code…');
+      reset(); host = true; code = newCode(); players = [{ skin }]; me = 0;
+      $('friendCode').textContent = code; lobby(); status('Getting ready…');
       try { await loadPeer(); } catch { return status('Could not reach the friend service. Check your connection.'); }
       peer = new Peer(idOf(code), PEER_OPTS);
-      peer.on('open', () => status('Send the link to your friend, then wait here.'));
-      peer.on('connection', c => { wire(c); status('Your friend is joining…'); });
-      peer.on('disconnected', () => { if (peer && !peer.destroyed) peer.reconnect(); }); // keep the code alive if the signal drops
+      peer.on('open', () => lobby());
+      peer.on('connection', c => {
+        if (live().length >= MAX - 1 || state !== 'friend') { c.on('open', () => c.close()); return; } // full, or already racing
+        conns.push(c); wire(c);
+      });
+      peer.on('disconnected', () => { if (peer && !peer.destroyed) peer.reconnect(); });
       peer.on('error', e => {
         if (e.type === 'unavailable-id') return status('That code is taken, try again.');
-        if (['network', 'server-error', 'socket-error', 'socket-closed', 'disconnected'].includes(e.type)) { status('Reconnecting…'); setTimeout(() => { if (peer && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); return; }
+        if (softErr(e)) { setTimeout(() => { if (peer && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); return; }
         status('Connection problem: ' + e.type);
       });
     },
@@ -2493,37 +2529,49 @@ const net = (() => {
       // keep trying for about a minute: the host may be away from the game for a moment (sending you the link)
       let tries = 0;
       const attempt = () => {
-        if (!peer || peer.destroyed) return;
-        if (conn && conn.open) return;
-        if (++tries > 12) return status('Could not reach your friend. Ask them to open the friend screen again and send a new code.');
+        if (!peer || peer.destroyed || (hostConn && hostConn.open)) return;
+        if (++tries > 12) return status('Could not reach your friend. Ask them for a new invite.');
         if (tries > 2) status('Still looking for your friend… keep the game open on both sides.');
         const cc = peer.connect(idOf(code), { reliable: true });
-        tries === 1 ? (pending = [cc]) : pending.push(cc);
+        if (tries === 1) pending = []; pending.push(cc); conns.push(cc);
         wire(cc);
         cc.on('open', () => {
-          clearTimeout(waitTimer); conn = cc;
-          for (const o of pending) if (o !== cc) o.close(); // drop the other attempts
-          status('Connected! Starting…'); cc.send({ t: 'hello', skin });
+          clearTimeout(waitTimer); hostConn = cc;
+          for (const o of pending) if (o !== cc) o.close();
+          cc.send({ t: 'hello', skin });
+          status('Joined! Waiting for the host to start…');
         });
         clearTimeout(waitTimer); waitTimer = setTimeout(attempt, 5000);
       };
       peer.on('open', attempt);
       peer.on('error', e => {
-        if (e.type === 'peer-unavailable') { clearTimeout(waitTimer); waitTimer = setTimeout(attempt, 4000); return; } // not there yet: try again shortly
-        if (['network', 'server-error', 'socket-error', 'socket-closed', 'disconnected'].includes(e.type)) { setTimeout(() => { if (peer && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); return; }
+        if (e.type === 'peer-unavailable') { clearTimeout(waitTimer); waitTimer = setTimeout(attempt, 4000); return; }
+        if (softErr(e)) { setTimeout(() => { if (peer && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); return; }
         status('Connection problem: ' + e.type);
       });
     },
-    again() { if (host) round(); else { send({ t: 'again' }); toast('Asked your friend for a rematch'); } },
-    copy() { navigator.clipboard.writeText(link()).then(() => toast('Link copied! Send it to your friend'), () => toast(link())); },
+    start,
+    again() { if (host) start(); else { send({ t: 'again' }); toast('Asked the host for a rematch'); } },
+    copy() { // the share sheet where there is one (phones, Macs), else copy the link
+      const url = link();
+      if (navigator.share) navigator.share({ title: 'Buddy', text: 'Race me in Buddy!', url }).catch(() => {});
+      else navigator.clipboard.writeText(url).then(() => toast('Invite link copied! Paste it to your friends'), () => toast(url));
+    },
     leave: reset,
   };
 })();
-$('friendBtn').addEventListener('click', () => { show('friend'); net.host(); });
+const openFriend = () => { $('friend').classList.remove('guest'); $('friendTitle').textContent = 'Play with a friend'; renderRaceSetup(); show('friend'); net.host(); };
+$('friendBtn').addEventListener('click', openFriend);
+$('friendMenuBtn').addEventListener('click', openFriend);
+$('friend').addEventListener('click', e => { // world and maze, shared with the race settings
+  const b = e.target.closest('[data-rc]'); if (!b) return;
+  const [k, v] = b.dataset.rc.split(':'); raceCfg[k] = v; renderRaceSetup();
+});
 $('friendCopy').addEventListener('click', () => net.copy());
+$('friendStart').addEventListener('click', () => net.start());
 $('friendJoin').addEventListener('click', () => net.join($('friendInput').value));
 $('friendInput').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') net.join($('friendInput').value); });
-$('friendBack').addEventListener('click', () => { net.leave(); show('race'); });
+$('friendBack').addEventListener('click', () => { net.leave(); show('title'); });
 
 // ---------- the continue card's picture: the world's doorway, rendered once into an image ----------
 const previews = {};
@@ -2774,7 +2822,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyF') toggleFull();
   // Esc steps back out of any menu
   if (e.code === 'Escape' && !['play', 'pause', 'title', 'loading'].includes(state)) {
-    const back = { settings: settingsBack, help: helpBack, worlds: 'title', outfit: 'title', race: 'title', friend: 'race', raceEnd: 'title', win: 'worlds' }[state];
+    const back = { settings: settingsBack, help: helpBack, worlds: 'title', outfit: 'title', race: 'title', friend: 'title', raceEnd: 'title', win: 'worlds' }[state];
     if (back) { if (state === 'friend') net.leave(); show(back); }
   }
 });
@@ -2791,8 +2839,8 @@ function renderRaceSetup() {
   $('rcRacers').textContent = raceCfg.racers;
   $('rcMates').textContent = raceCfg.mates;
   document.querySelectorAll('#rcSpeed button').forEach((b, i) => b.classList.toggle('on', i === raceCfg.speed));
-  document.querySelectorAll('#rcBiome button').forEach(b => b.classList.toggle('on', b.dataset.rc === 'biome:' + raceCfg.biome));
-  document.querySelectorAll('#rcShape button').forEach(b => b.classList.toggle('on', b.dataset.rc === 'shape:' + raceCfg.shape));
+  document.querySelectorAll('#rcBiome button, #frBiome button').forEach(b => b.classList.toggle('on', b.dataset.rc === 'biome:' + raceCfg.biome));
+  document.querySelectorAll('#rcShape button, #frShape button').forEach(b => b.classList.toggle('on', b.dataset.rc === 'shape:' + raceCfg.shape));
   const others = RIVAL_SKINS.filter(c => c !== skin);
   const dot = c => `<i style="--c:${SKINS[c]}"></i>`;
   const team = [skin, ...others.slice(raceCfg.racers - 1 - raceCfg.mates, raceCfg.racers - 1)];
@@ -3397,7 +3445,7 @@ setSkin(skin);
 await stoneSet(levelBiome(nextLevel()));
 buildLevel(nextLevel());
 show('title');
-{ const j = params.get('join'); if (j) { show('friend'); $('friendInput').value = j; net.join(j); } }
+{ const j = params.get('join'); if (j) { $('friend').classList.add('guest'); $('friendTitle').textContent = 'Joining your friend…'; show('friend'); net.join(j); } } // opened from an invite: straight in
 $('loading').style.opacity = 0; setTimeout(() => $('loading').remove(), 450);
 frame();
 window.__game = { st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };

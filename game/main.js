@@ -1956,6 +1956,22 @@ function loadChar(id) {
     return { id: C.id, scene: root, P: measureBody(pts) };
   });
 }
+// smooth shading for low-poly models: every vertex takes the average normal of all the corners at its position
+// (texture seams split vertices, so they are matched by position, not by index)
+function smoothNormals(geo) {
+  const g = geo.clone(), P = g.attributes.position, sum = new Map(), key = i => `${Math.round(P.getX(i) * 1e4)},${Math.round(P.getY(i) * 1e4)},${Math.round(P.getZ(i) * 1e4)}`;
+  const flat = g.index ? g.toNonIndexed() : g; // face normals from the triangles
+  const FP = flat.attributes.position, a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3();
+  for (let i = 0; i < FP.count; i += 3) {
+    a.fromBufferAttribute(FP, i); b.fromBufferAttribute(FP, i + 1); c.fromBufferAttribute(FP, i + 2);
+    n.subVectors(c, b).cross(a.clone().sub(b)); // area-weighted
+    for (const v of [a, b, c]) { const k = `${Math.round(v.x * 1e4)},${Math.round(v.y * 1e4)},${Math.round(v.z * 1e4)}`; const s = sum.get(k); if (s) s.add(n); else sum.set(k, n.clone()); }
+  }
+  const N = new Float32Array(P.count * 3);
+  for (let i = 0; i < P.count; i++) { const s = sum.get(key(i)); if (s) { s.clone().normalize().toArray(N, i * 3); } }
+  g.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+  return g;
+}
 // where a T-posed body's parts are: arms are the parts furthest out sideways, the torso just under them, and the hip
 // is where the legs meet (the lowest point on the middle line, front half, so a tail doesn't count)
 function measureBody(pts) {
@@ -2730,11 +2746,6 @@ $('chars').addEventListener('click', e => {
   if (!charUnlocked(c)) { toast(b.dataset.lock); return; }
   setChar(c.id);
 });
-$('outTabs').addEventListener('click', e => {
-  const t = e.target.closest('[data-otab]'); if (!t) return;
-  document.querySelectorAll('#outTabs span').forEach(o => o.classList.toggle('on', o === t));
-  $('outfit').classList.toggle('colors', t.dataset.otab === 'colors');
-});
 
 // ---------- the continue card's picture: the world's doorway, rendered once into an image ----------
 const previews = {};
@@ -3073,6 +3084,14 @@ const face = (() => {
   // one character for the menus: the chibi idle and head turn, with that body's own shoulders, hips and neck
   function makeModel(ch, Uo, Bo, T) {
     const P = ch.P, f = v => v.toFixed(3), model = ch.scene.clone(true);
+    if (ch.id !== 'buddy') { // the animals keep exactly their model's shape here (no bending), shaded smooth
+      model.traverse(o => { if (o.isMesh) { o.geometry = smoothNormals(o.geometry); o.material = o.material.clone(); o.material.metalness = 0; } });
+      const box = new THREE.Box3().setFromObject(model), s = 1 / (box.max.y - box.min.y);
+      model.scale.setScalar(s);
+      model.position.set(-(box.min.x + box.max.x) / 2 * s, -box.min.y * s, -(box.min.z + box.max.z) / 2 * s);
+      const g = new THREE.Group(); g.add(model); g.userData.animal = true;
+      return g;
+    }
     model.traverse(o => {
       if (!o.isMesh) return;
       o.material = o.material.clone();
@@ -3124,9 +3143,18 @@ const face = (() => {
     const g = new THREE.Group(); g.add(model);
     return g;
   }
-  let shadow = null;
+  let shadow = null, spin = 0, spinWant = 0;
+  // drag sideways on the menu (not on a panel) to spin the character around
+  let drag = null;
+  addEventListener('pointerdown', e => {
+    if (!['title', 'outfit', 'race', 'friend'].includes(state) || e.target.closest('button, .card, .cont, .side-menu, input, .panel, .pagehead')) return;
+    drag = { x: e.clientX, s: spinWant };
+  });
+  addEventListener('pointermove', e => { if (drag) spinWant = drag.s + (e.clientX - drag.x) * 0.012; });
+  addEventListener('pointerup', () => { drag = null; });
   function init(ch) {
     if (sway) sc.remove(sway);
+    spin = spinWant = 0;
     group = makeModel(ch, U, B, TINT);
     sway = new THREE.Group(); // rocks side to side from the feet
     sway.add(group);
@@ -3242,7 +3270,10 @@ const face = (() => {
     const k = Math.min(1, dt * 3);
     cur.yaw += (ty - cur.yaw) * k; cur.pitch += (tp - cur.pitch) * k; cur.roll += (tr - cur.roll) * k;
     U.uYaw.value = cur.yaw; U.uPitch.value = cur.pitch; U.uRoll.value = cur.roll;
-    group.rotation.y = -Math.PI / 2 + cur.yaw * 0.2; // the model faces +X; turn it to face the camera
+    const animal = group.userData.animal;
+    spin += (spinWant - spin) * Math.min(1, dt * 8);
+    group.rotation.y = -Math.PI / 2 + (animal ? 0 : cur.yaw * 0.2) + spin; // the model faces +X; turn it to face the camera (and however you spun it)
+    if (animal) { U.uYaw.value = U.uPitch.value = U.uRoll.value = 0; sway.rotation.z = still ? 0 : Math.sin(t * 1.4) * 0.025; } // a gentle sway from the feet instead of bending
     // cute waiting sway: rock from foot to foot with a tiny bounce on each side
     U.uIdle.value = t;
     // feet stay planted: the upper body sways from the hips, the arms follow a beat later, a slow breath, and every
@@ -3251,7 +3282,8 @@ const face = (() => {
     U.uLean.value = still ? 0 : Math.sin(t * 1.5) * 0.035;
     U.uArm.value = still ? 0 : Math.sin(t * 1.5 - 0.7) * 0.035;
     if (still) U.uIdle.value = 0;
-    sway.rotation.z = 0; group.position.y = 0;
+    if (!animal) sway.rotation.z = 0;
+    group.position.y = 0;
     const sqz = still ? 1 : 1 + Math.sin(t * 3) * 0.006;
     group.scale.set(1 / Math.sqrt(sqz), sqz, 1 / Math.sqrt(sqz));
     for (const m of crew) { // the friends behind sway on their own beat and glance around

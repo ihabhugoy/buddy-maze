@@ -189,7 +189,6 @@
   .cont .btn { width: 100%; }
 
   /* ---------- outfit ---------- */
-  #outfit { flex-direction: row; justify-content: flex-end; align-items: center; padding-right: 5vw; }
   .panel { position: relative; z-index: 2; width: clamp(300px, 33vw, 390px); }
   #outfit .panel { --tilt: rotateY(calc(-20deg + var(--mx, 0) * 5deg)) rotateX(calc(var(--my, 0) * -4deg)); transform-origin: 100% 50%; transform: var(--tilt); animation: slidein-o .65s .05s var(--spring) backwards; text-align: left; }
   @keyframes slidein-o { from { opacity: 0; transform: translateX(40px) var(--tilt); } }
@@ -387,8 +386,9 @@
   .charcard.on { background: var(--leaf-light); box-shadow: inset 0 0 0 3px var(--leaf); }
   .charcard.locked { filter: grayscale(.9); opacity: .6; }
   .charcard.locked::after { content: attr(data-lock); position: absolute; inset: auto 4px 4px; font-size: 10px; color: var(--ink-soft); }
-  #outfit .skins, #outfit .colornote { display: none; } #outfit.colors .skins { display: grid; } #outfit.colors .chars { display: none; }
-  #outfit.colors:not(.buddy) .colornote { display: block; } #outfit.colors:not(.buddy) .skins { opacity: .4; pointer-events: none; }
+  #outfit .colornote { display: none; } #outfit:not(.buddy) .colornote { display: block; } #outfit:not(.buddy) .skins { opacity: .4; pointer-events: none; }
+  .ribbon .rib { width: 15px; height: 15px; vertical-align: -2px; margin-right: 6px; }
+  #outfit .skins { grid-template-columns: repeat(3, 1fr); }
   .colornote { font-size: 13px; color: var(--ink-soft); margin: -8px 0 12px; }
 
   /* phones and narrow windows: the 3D scene on top, panels as a sheet underneath */
@@ -397,9 +397,6 @@
     .page { overflow-y: auto; padding-top: 46vh; justify-content: flex-start; }
     .page .faceSlot { position: fixed !important; height: 50vh; }
     .pagehead h2 { font-size: 34px; }
-    #outfit { padding-top: 48vh; align-items: stretch; overflow-y: auto; }
-    #outfit .panel { width: auto; margin: 0 12px 12px; transform: none; }
-    #outfit .faceSlot { position: fixed !important; height: 50vh; }
     /* title on a phone: logo on top, Buddy in the middle, menu as a row of big buttons at the bottom */
     .side-menu { top: auto; left: 8px; right: 8px; bottom: 10px; width: auto; align-content: center; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 10px; transform: none !important; border-radius: 26px; }
     .side-menu::before { inset: 6px; border-radius: 20px; }
@@ -590,19 +587,19 @@
   </div>
 </section>
 
-<section class="screen warm" id="outfit">
+<section class="screen warm page" id="outfit">
   <div class="motes"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
   <div class="faceSlot"></div>
-  <div class="panel card">
-    <div class="panel-head"><h2 class="sticker">Outfit</h2></div>
-    <div class="tabs" id="outTabs"><span class="on" data-otab="chars"><svg class="ico"><use href="#i-heart"/></svg>Characters</span><span data-otab="colors"><svg class="ico"><use href="#i-palette"/></svg>Colors</span></div>
+  <div class="pagehead"><button class="round" data-go="title" aria-label="Back"><svg class="ico"><use href="#i-back"/></svg></button><h2 class="sticker">Outfit</h2></div>
+  <div class="card pleft">
+    <div class="ribbon"><svg class="ico rib"><use href="#i-heart"/></svg>Characters</div>
     <div class="chars" id="chars"></div>
+  </div>
+  <div class="card pright">
+    <div class="ribbon"><svg class="ico rib"><use href="#i-palette"/></svg>Colors</div>
     <div class="skins" id="skins"></div>
     <p class="colornote" id="colorNote">Colors are for Buddy's hood and jacket.</p>
-    <div class="row">
-      <button class="btn blue" data-go="title"><svg class="ico"><use href="#i-back"/></svg>Back</button>
-      <button class="btn yellow" data-go="title"><svg class="ico"><use href="#i-check"/></svg>Done</button>
-    </div>
+    <button class="btn yellow" data-go="title" style="width:100%"><svg class="ico"><use href="#i-check"/></svg>Done</button>
   </div>
 </section>
 

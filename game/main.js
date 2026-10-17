@@ -333,7 +333,7 @@ const sfx = (() => {
     d2.delayTime.value = 0.3; f2.gain.value = 0; l2.type = 'lowpass'; l2.frequency.value = 1000;
     echo.send.connect(d2).connect(l2).connect(f2).connect(d2); l2.connect(soft);
     ambGain = ctx.createGain(); ambGain.gain.value = 0; ambGain.connect(ctx.destination);
-    for (const n of Object.keys(AMB_FILES)) fetch(`assets/ambience/${n}.m4a`).then(r => r.arrayBuffer()).then(b => ctx.decodeAudioData(b)).then(buf => { ambBuf[n] = buf; setAmbience(ambWant); }).catch(() => {});
+    // (no ambient sound: the wind loop was removed)
     // dry leaves underfoot (autumn): made here, not loaded: a soft rustle under an envelope with little crackles
     for (let k = 1; k <= 6; k++) {
       const sr = ctx.sampleRate, n = Math.floor(sr * 0.24), b = ctx.createBuffer(1, n, sr), d = b.getChannelData(0);
@@ -351,13 +351,24 @@ const sfx = (() => {
     loading = loadPools(['rise', 'land', 'bump', 'step', ...UI_KINDS, ...Object.values(MIX[mixBiome] || {}).flat().map(m => m[0])]);
     apply();
     wantMusic = true; // the music starts with the game (quietly under the menus), not only once you play
-    // (streamed from an <audio> element through the mixer, not decoded whole into memory)
-    try { music = new Audio('assets/music/cozy.mp3'); music.loop = true; music.preload = 'auto'; ctx.createMediaElementSource(music).connect(musicGain); startMusic(); } catch { music = null; }
+    // iPhones: decoded once and looped inside the mixer. Streamed from an <audio> element through the mixer, Safari
+    // reloaded the page right as the 60 s track looped (crashes at 1 and 2 minutes). Elsewhere it streams (less memory).
+    if (IOS) {
+      music = { buf: null, src: null };
+      fetch('assets/music/cozy.mp3').then(r => r.arrayBuffer()).then(a => ctx.decodeAudioData(a)).then(b => { music.buf = b; startMusic(); }).catch(() => { music = null; });
+    } else try { music = new Audio('assets/music/cozy.mp3'); music.loop = true; music.preload = 'auto'; ctx.createMediaElementSource(music).connect(musicGain); startMusic(); } catch { music = null; }
   }
   // background music: starts the first time you play, then loops (60 s track)
   let musicStarted = false, wantMusic = false;
   function startMusic() {
     if (!wantMusic || musicStarted || !music || !ctx) return;
+    if (!music.play) { // (iPhone: one looping player, made once)
+      if (!music.buf) return;
+      musicStarted = true;
+      music.src = ctx.createBufferSource(); music.src.buffer = music.buf; music.src.loop = true;
+      music.src.connect(musicGain); music.src.start();
+      return apply();
+    }
     musicStarted = true;
     music.play().catch(() => { musicStarted = false; }); // (tried again on the next tap if the browser said no)
     apply();
@@ -381,6 +392,7 @@ const sfx = (() => {
   };
   const ambBuf = {}; let ambWant = 'woods', ambNow = null, trickle = 0;
   function setAmbience(name) {
+    return; // (ambient sound removed)
     ambWant = name;
     const A = AMB[name] || AMB.woods;
     if (!ctx || !ambBuf[A[0]] || (ambNow && ambNow.name === name)) return;
@@ -590,7 +602,7 @@ function makeKey() {
   const t1 = new THREE.Mesh(new RoundedBoxGeometry(0.05, 0.05, 0.075, 2, 0.02), mat); t1.position.set(0.17, 0, 0.055);
   const t2 = new THREE.Mesh(new RoundedBoxGeometry(0.04, 0.05, 0.055, 2, 0.018), mat); t2.position.set(0.105, 0, 0.045);
   g.add(ring, shaft, t1, t2);
-  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  // (no real shadow: it has its own soft one under it, and a spinning caster would redraw the shadow map every frame)
   g.rotation.x = 0.35; // tipped a little toward the camera so it reads as a key from above
   const spin = new THREE.Group(); spin.add(g);
   const c = document.createElement('canvas'); c.width = c.height = 64;
@@ -1707,7 +1719,7 @@ function trimGPU() { // (every device: laptops held ~110 MB per world visited ot
   }
 }
 function buildLevel(level, race = null, opts = {}) {
-  L = level; mode = race ? 'race' : 'levels'; pillarsDirty = true;
+  L = level; mode = race ? 'race' : 'levels'; pillarsDirty = true; shadowKick = 3;
   stage = opts.stage || 'surface';
   const world = race ? (WORLDS.find(w => w.biome === race.biome) || { tint: [1, 1, 1], reveal: 2.1, icon: 'i-w-cave' }) : WORLDS[Math.floor(L / LEVELS_PER_WORLD)];
   const bName = race ? race.biome || 'woods' : stage === 'cave' ? 'cave' : world.biome;
@@ -3376,16 +3388,13 @@ function openSettings(from) {
   const sync = el => el.style.setProperty('--v', el.value + '%');
   $('musicVol').value = Math.round(sfx.prefs.music * 100); sync($('musicVol'));
   $('fxVol').value = Math.round(sfx.prefs.fx * 100); sync($('fxVol'));
-  $('ambVol').value = Math.round(sfx.prefs.amb * 100); sync($('ambVol'));
-  $('ambBtn').classList.toggle('on', sfx.prefs.ambOn);
   $('muteBtn').classList.toggle('on', sfx.prefs.mute);
   show('settings');
 }
-for (const [id, key] of [['musicVol', 'music'], ['fxVol', 'fx'], ['ambVol', 'amb']]) {
+for (const [id, key] of [['musicVol', 'music'], ['fxVol', 'fx']]) {
   $(id).addEventListener('input', e => { e.target.style.setProperty('--v', e.target.value + '%'); sfx.set(key, e.target.value / 100); });
 }
 $('fxVol').addEventListener('change', () => sfx.play('step', 0.62, 0, { maxDur: 0.26 })); // preview the effects level
-$('ambBtn').addEventListener('click', () => { sfx.set('ambOn', !sfx.prefs.ambOn); $('ambBtn').classList.toggle('on', sfx.prefs.ambOn); });
 // light mode: the lightest look for older or slower phones (applies on restart)
 $('liteBtn').classList.toggle('on', LITE);
 $('liteBtn').addEventListener('click', () => {
@@ -3771,7 +3780,7 @@ const face = (() => {
 const TRAIL_GLOW = 0; // stepped tiles fade all the way back to dark
 // The stones' positions go to the graphics chip only when something changed: re-sending every stone each frame (as
 // this did) is what iPhones (iOS 18) choke on after a minute of play. Standing still now sends nothing.
-let pillarsKey = '', pillarsDirty = true;
+let pillarsKey = '', pillarsDirty = true, pillarsActive = true;
 const _nw = [], _nc = [];
 function updatePillars(dt, time) {
   const T = heights.length, { N } = maze;
@@ -3803,6 +3812,7 @@ function updatePillars(dt, time) {
   // (the view position is rounded to a quarter tile, so a stone is near or far exactly when the key says so)
   const near = Math.round(THREE.MathUtils.clamp((camera.userData.W ?? viewW) * 0.4 + 1.5, 3.5, 6) * 4) / 4, ncx = Math.round(camTarget.x * 4) / 4, ncz = Math.round(camTarget.z * 4) / 4;
   const key = ncx + ',' + ncz + ',' + near;
+  pillarsActive = active || pillarsDirty;
   if (!active && !pillarsDirty && key === pillarsKey) return; // nothing moved: the graphics chip already has it all
   // the far flat stones only change when the view shifts (stones that rise are always near you, never far)
   const doFloor = pillarsDirty || key !== pillarsKey;
@@ -4160,13 +4170,16 @@ let lastDraw = -1e9, stillDrawn = false;
 function frame(now = performance.now()) {
   // 120 Hz screens (MacBook Pro, iPad Pro) would draw every frame twice as often for no visible gain: hold ~60 fps
   if (now - lastDraw < 1000 / 75) { requestAnimationFrame(frame); return; }
-  lastDraw = now;
+  // standing still in a level: only slow dust drifts, so 30 frames a second look the same and halve the work (and
+  // the heat); the moment anything moves it is back to 60
+  if (calm && now - lastDraw < 1000 / 40) { requestAnimationFrame(frame); return; }
+  const paced = calm; lastDraw = now;
   // paused: the maze behind the card is frozen, so draw it once and let the GPU rest (the canvas keeps the last frame)
   const still = !net.online && (state === 'pause' || (state === 'settings' && settingsBack === 'pause') || (state === 'help' && helpBack === 'pause'));
   if (still && stillDrawn) { clock.getDelta(); requestAnimationFrame(frame); return; }
   stillDrawn = still;
   const raw = clock.getDelta(), dt = Math.min(raw, 1 / 20), time = clock.elapsedTime;
-  adaptRes(raw);
+  if (!paced) adaptRes(raw); // (a slowed idle frame is not a slow phone)
   fitView();
   updatePlayer(dt, time);
   updateRivals(dt, time);
@@ -4201,11 +4214,18 @@ function frame(now = performance.now()) {
   if (state === 'title' || state === 'outfit' || state === 'race' || state === 'friend' || (state === 'settings' && settingsBack === 'title') || (state === 'help' && helpBack === 'title') || state === 'install') face.render(dt, time); // menus are opaque; skip the maze behind them
   else if (state === 'worlds') map3d && map3d.render(dt, time); // the map has its own little 3D board
   else {
-    renderer.shadowMap.needsUpdate = true;
+    // the sun's shadows are redrawn only when something that casts them moved (or the sun, which follows the view)
+    const sunMoved = _shadowSun.distanceToSquared(sun.position) > 4e-4;
+    if (sunMoved || pillarsActive || st.moving || st.bumpT >= 0 || warp.t >= 0 || won || intro.t >= 0 || mode === 'race' || shadowKick > 0) {
+      renderer.shadowMap.needsUpdate = true; _shadowSun.copy(sun.position); if (shadowKick > 0) shadowKick--;
+    }
     if (PHONE) renderer.render(scene, camera); else composer.render(); // phones: no post effects (memory)
   }
+  calm = state === 'play' && !st.moving && !pillarsActive && intro.t < 0 && warp.t < 0 && !won && st.bumpT < 0 && mode !== 'race' && !heldDir && !net.online;
   if (!manualStep) requestAnimationFrame(frame);
 }
+let calm = false, shadowKick = 3;
+const _shadowSun = new THREE.Vector3(1e9, 0, 0);
 // ?memdebug: __step(n) draws n frames on demand (measuring works even while the tab isn't on screen)
 let manualStep = false;
 if (params.has('memdebug')) window.__step = (n = 1) => { manualStep = true; for (let i = 0; i < n; i++) { lastDraw = -1e9; frame(); } manualStep = false; };
@@ -4243,6 +4263,32 @@ if (params.has('memdebug')) window.__step = (n = 1) => { manualStep = true; for 
     document.body.appendChild(card);
   }
 }
+// ?autoplay: the game plays itself, level after level (walks to the key, then the portal, taps Next), for long
+// unattended tests on phones and simulators
+if (params.has('autoplay')) (async () => {
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  while (!assets) await wait(200);
+  await wait(1500);
+  const path = (from, to) => {
+    const m = maze, N = m.N, prev = new Int32Array(N * N).fill(-2), q = [from[1] * N + from[0]]; prev[q[0]] = -1;
+    for (let h = 0; h < q.length; h++) { const i = q[h], x = i % N, z = (i / N) | 0; if (x === to[0] && z === to[1]) break;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Z = z + dz, j = Z * N + X; if (X < 0 || Z < 0 || X >= N || Z >= N || m.g[j] || prev[j] !== -2) continue; prev[j] = i; q.push(j); } }
+    const out = []; let i = to[1] * N + to[0]; if (prev[i] === -2) return [];
+    while (prev[i] !== -1) { const p = prev[i]; out.unshift([i % N - p % N, ((i / N) | 0) - ((p / N) | 0)]); i = p; }
+    return out;
+  };
+  const walk = async to => { for (const d of path([st.gx, st.gz], to)) { while (st.moving) await wait(20); tryMove(d[0], d[1]); await wait(40); while (st.moving) await wait(20); } };
+  let level = +(params.get('autoplay') || 0) || 0;
+  for (;;) {
+    if (isGateway(level)) { level++; continue; } // (door levels need the cave: skipped by the robot)
+    await play(level); await wait(8000);
+    if (keyAt) await walk(keyAt);
+    await wait(400); await walk(goal);
+    for (let t = 0; t < 80 && state !== 'win'; t++) await wait(100);
+    await wait(1500);
+    level = (level + 1) % 20;
+  }
+})();
 await load();
 { const ch = await loadChar(charId).catch(() => loadChar('buddy')); charId = ch.id; document.body.dataset.char = charId; setupPlayer(ch); face.init(ch); }
 loadScenery(); // in the background; pieces appear as they arrive

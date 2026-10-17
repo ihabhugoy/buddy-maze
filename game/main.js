@@ -96,13 +96,13 @@ function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = 
 // ---------- renderer / scene ----------
 // phones get a lighter setup: a lower resolution cap and smaller shadows (the composer does its own antialiasing)
 const PHONE = matchMedia('(pointer: coarse)').matches;
-const PR_MAX = Math.min(devicePixelRatio, PHONE ? 1.5 : 2);
+const PR_MAX = Math.min(devicePixelRatio, PHONE ? 1.75 : 2);
 if (PHONE) document.documentElement.classList.add('phone');
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.setPixelRatio(PR_MAX);
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = PHONE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.shadowMap.autoUpdate = false; // updated once per frame, not again for the reflection
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
@@ -128,12 +128,14 @@ composer.addPass(new RenderPass(scene, camera));
 // tilt-shift with a sharp band (not a single sharp line) centered on Buddy's height on screen each frame, so he is never
 // in the blur; the blur grows gently above and below the band. Two passes: across, then down.
 const tiltShader = dir => ({
-  uniforms: { tDiffuse: { value: null }, amt: { value: 0.004 }, r: { value: 0.45 }, band: { value: 0.16 } },
+  uniforms: { tDiffuse: { value: null }, amt: { value: 0.004 }, r: { value: 0.45 }, band: { value: 0.16 }, grade: { value: new THREE.Vector4(1, 1, 1, 0) } },
   vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-  fragmentShader: `uniform sampler2D tDiffuse; uniform float amt, r, band; varying vec2 vUv;
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float amt, r, band; uniform vec4 grade; varying vec2 vUv;
+    // (phones: the warm color grade and vignette are done here, rgb = tint, a = vignette strength)
+    vec4 graded(vec4 c) { if (grade.a <= 0.0) return c; c.rgb *= grade.rgb; float v = smoothstep(0.45, 1.0, length((vUv - vec2(0.5, 0.42)) * vec2(1.1, 1.0)) * 1.25); c.rgb *= 1.0 - v * grade.a; return c; }
     void main() {
       float d = smoothstep(0.0, 0.55, max(0.0, abs(vUv.y - r) - band));
-      if (d <= 0.0) { gl_FragColor = texture2D(tDiffuse, vUv); return; } // the sharp band: one read
+      if (d <= 0.0) { gl_FragColor = graded(texture2D(tDiffuse, vUv)); return; } // the sharp band: one read
       vec2 o = ${dir} * amt * d;
       ${PHONE ? `vec4 s = texture2D(tDiffuse, vUv) * 0.227;
       s += (texture2D(tDiffuse, vUv - o * 1.385) + texture2D(tDiffuse, vUv + o * 1.385)) * 0.3162;
@@ -142,7 +144,7 @@ const tiltShader = dir => ({
       s += (texture2D(tDiffuse, vUv - o * 2.0) + texture2D(tDiffuse, vUv + o * 2.0)) * 0.12245;
       s += (texture2D(tDiffuse, vUv - o * 3.0) + texture2D(tDiffuse, vUv + o * 3.0)) * 0.0918;
       s += (texture2D(tDiffuse, vUv - o * 4.0) + texture2D(tDiffuse, vUv + o * 4.0)) * 0.051;`}
-      gl_FragColor = s;
+      gl_FragColor = graded(s);
     }`,
 });
 const tiltH = new ShaderPass(tiltShader('vec2(1.0, 0.0)')), tiltV = new ShaderPass(tiltShader('vec2(0.0, 1.0)'));
@@ -1254,6 +1256,8 @@ function prepPillar(gltf) {
   raw.translate(-(x0 + x1) / 2, -top, -(z0 + z1) / 2);
   raw.scale(S, SY, S);
   if (!params.has("nosimp") && raw.index.count > 150000) simplifyGeo(raw); // (the shipped models are already simplified)
+  // phones: a stone is ~80 px tall on screen, so a fifth of the triangles looks the same (a level draws ~5x less)
+  if (PHONE && !params.has("nosimp")) simplifyGeo(raw, Math.min(1, 9000 / raw.index.count), 0.04);
   const mat = new THREE.MeshStandardMaterial({ map: canvasTexture(pm.material.map, 1024), roughness: 0.92, metalness: 0 });
   return { raw, mat };
 }
@@ -1296,6 +1300,7 @@ function prepDoor(gltf) {
     return cells.reduce((m, v) => m + v, 0) / cells.length;
   });
   const arch = reach.indexOf(Math.min(...reach)), [ax, az] = sides[arch];
+  if (PHONE && !params.has("nosimp")) simplifyGeo(raw, Math.min(1, 30000 / raw.index.count), 0.015); // (phones: ~10k triangles)
   const mat = new THREE.MeshStandardMaterial({ map: canvasTexture(pm.material.map, 2048), roughness: 0.92, metalness: 0 });
   return { raw, mat, reach, yaw: -Math.atan2(-az, ax) };
 }
@@ -1537,6 +1542,7 @@ function applyBiome(name) {
   scene.environmentIntensity = B.dark ? 0.12 : 0.35;
   sceneryGroup.visible = !B.dark;
   document.body.dataset.biome = name;
+  if (PHONE) tiltV.uniforms.grade.value.set(...({ desert: [1.07, 1.0, 0.91], snow: [0.96, 1.0, 1.06], cave: [1, 1, 1] }[name] || [1.05, 1.01, 0.95]), name === 'cave' ? 0.1 : 0.2);
   atmosphere.setDust(B.dust, B.dark);
   atmosphere.setWeather(name);
   // dust in this level's rock color, a little lighter (dust reads paler than the stone), in four shades
@@ -1672,7 +1678,7 @@ function buildLevel(level, race = null, opts = {}) {
   ui.steps.textContent = steps;
   $('worldBadgeIco').setAttribute('href', '#' + (stage === 'cave' || bName === 'cave' ? 'i-w-cave' : world.icon));
   coach.level(race ? -1 : L, stage, opts.keep);
-  for (const r of rivals) scene.remove(r.root);
+  for (const r of rivals) { scene.remove(r.root); r.root.traverse(o => { if (o.material) [].concat(o.material).forEach(m => m.dispose()); }); } // (their textures are shared)
   keyDist = null;
   if (race) { // walking distance from every tile to the key, for the live ranking
     keyDist = new Int32Array(N * N).fill(1e6);
@@ -1724,7 +1730,7 @@ function updateTargets(silent) {
 // only the big structures (castles, towers, arches, gate, shrine, ruined walls), each on a soft patch of grass
 const SCENERY = [[1, 'arch'], [2, 'arch'], [3, 'arch'], [4, 'arch'], [5, 'arch'], [7, 'arch'], [8, 'arch'], [15, 'arch'], [16, 'arch']];
 const KIND = {
-  arch: { size: [3.0, 4.4], sink: [0.1, 0.22], count: 6, gap: 6, inner: 3.4, outer: 11 },
+  arch: { size: [3.0, 4.4], sink: [0.1, 0.22], count: PHONE ? 3 : 6, gap: 6, inner: 3.4, outer: 11 }, // (phones: fewer, it's background)
 };
 const sceneryModels = { arch: [] };
 const sceneryGroup = new THREE.Group();
@@ -1756,6 +1762,7 @@ async function loadScenery() {
       const bb = geo.boundingBox;
       const s = 1 / Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z); // footprint 1 x 1, bottom at 0
       geo.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2).scale(s, s, s);
+      if (PHONE && geo.index) simplifyGeo(geo, Math.min(1, 9000 / geo.index.count), 0.03); // far and hazy: ~3k triangles is plenty
       const map = canvasTexture(pm.material.map, 512);
       const orig = document.createElement('canvas'); orig.width = map.image.width; orig.height = map.image.height;
       orig.getContext('2d').drawImage(map.image, 0, 0); // kept untouched: each biome recolors its own copy
@@ -3724,7 +3731,7 @@ const atmosphere = (() => {
   scene.add(group);
 
   // dust motes: soft glowing specks drifting slowly around the player
-  const MOTES = 220, R = 4.5;
+  const MOTES = PHONE ? 110 : 220, R = 4.5;
   const pos = new Float32Array(MOTES * 3), vel = [];
   for (let i = 0; i < MOTES; i++) {
     pos.set([rand(-R, R), rand(0.05, 2.2), rand(-R, R)], i * 3);
@@ -3898,8 +3905,7 @@ peekBtn.addEventListener('pointerleave', setPeek(false));
 
 let fitW = 0, fitH = 0;
 // the render resolution follows the frame rate: long frames lower it a step, a long smooth run raises it back
-let prNow = PHONE ? Math.min(PR_MAX, 1.25) : PR_MAX, slowT = 0, fastT = 0;
-if (prNow !== PR_MAX) renderer.setPixelRatio(prNow);
+let prNow = PR_MAX, slowT = 0, fastT = 0;
 function adaptRes(raw) {
   if (state !== 'play' || raw > 0.25) return; // (a hitch from loading or a hidden tab says nothing)
   if (raw > 1 / 42) { slowT += raw; fastT = 0; } else { fastT += raw; if (raw < 1 / 55) slowT = Math.max(0, slowT - raw); }
@@ -3976,4 +3982,4 @@ show('title');
 { const j = params.get('join'); if (j) { $('friend').classList.add('guest'); $('friendTitle').textContent = 'Joining your friend…'; show('friend'); net.join(j); } } // opened from an invite: straight in
 $('loading').style.opacity = 0; setTimeout(() => $('loading').remove(), 450);
 frame();
-window.__game = { intro, net, loadChar, st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };
+window.__game = { startRace, get rivals() { return rivals; }, intro, net, loadChar, st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };

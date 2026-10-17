@@ -116,7 +116,8 @@
   .screen.show .pop { animation: pop .6s var(--spring) both; }
 
   /* menus: a warm studio backdrop (paper grain + soft light) with Buddy standing in the middle */
-  .warm { background: radial-gradient(62% 72% at 50% 46%, #fffaf1 0%, #fbf0dd 55%, #f1dfc1 100%); overflow: hidden; }
+  .warm { background: radial-gradient(60% 55% at 50% 52%, rgba(255,250,241,.38), rgba(255,250,241,0) 70%), #f3e7d2 url(assets/menu_bg.webp) center 46% / cover no-repeat; overflow: hidden; }
+  .phone .warm { background-position: center, 50% 40%; } /* tall screens: the misty path between the ruins stays behind the character */
   .warm::before { content: ""; position: absolute; inset: 0; opacity: .5; pointer-events: none; z-index: 0;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .45 0 0 0 0 .32 0 0 0 0 .18 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
   .warm > * { position: relative; z-index: 1; }
@@ -177,7 +178,7 @@
   .mitem.sel { background: var(--card); color: var(--ink); transform: translateX(6px); box-shadow: inset 0 -4px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); }
   .mitem.sel .mi { background: var(--c, var(--leaf)); color: #fff; transform: rotate(-6deg) scale(1.06); box-shadow: inset 0 -3px 0 rgba(0,0,0,.14); }
   .mitem.sel .go { opacity: 1; animation: nudge .9s ease-in-out infinite; }
-  #playBtn { --c: var(--leaf); } #raceBtn { --c: var(--coral); } #outfitBtn { --c: var(--lilac); } #settingsBtn { --c: var(--sky); } #helpBtn { --c: var(--honey-lip); }
+  #playBtn { --c: var(--leaf); } #raceBtn { --c: var(--coral); } #wolfBtn { --c: #6f7f95; } #outfitBtn { --c: var(--lilac); } #settingsBtn { --c: var(--sky); } #helpBtn { --c: var(--honey-lip); }
   /* Adventure and Friends are the two big buttons; help and settings sit as round buttons in the top corner */
   .mitem span { display: flex; flex-direction: column; line-height: 1.05; text-align: left; }
   .mitem small { font-size: .52em; letter-spacing: .07em; opacity: .8; margin-top: 4px; }
@@ -426,13 +427,13 @@
     /* title on a phone: round buttons in the top corners, logo under them, the character in the middle, and the menu
        as chunky buttons at the bottom (Race and Outfit stacked beside a tall Friends, a wide Adventure underneath) */
     .side-menu { top: auto; left: 12px; right: 12px; bottom: calc(14px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); width: auto; padding: 0; gap: 10px; background: none; box-shadow: none; transform: none !important; border-radius: 0;
-      display: grid; grid-template-columns: 1fr 1fr; grid-template-areas: "race friends" "outfit friends" "play play"; animation: fadeup .55s .1s var(--spring) backwards; }
+      display: grid; grid-template-columns: 1fr 1fr; grid-template-areas: "race friends" "wolves friends" "outfit friends" "play play"; animation: fadeup .55s .1s var(--spring) backwards; }
     .side-menu::before { display: none; }
     .mitem { transform: none !important; margin: 0; min-width: 0; background: var(--card); color: var(--ink); font-size: 16px; padding: 9px 10px 12px 9px; gap: 10px; border-radius: 22px; box-shadow: inset 0 -5px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); }
     .mitem.sel:not(.big) { background: var(--card); box-shadow: inset 0 -5px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); }
     .mitem .mi, .mitem.sel .mi { width: 38px; height: 38px; background: var(--c); color: #fff; transform: none; }
     .mitem .go { display: none; }
-    #raceBtn { grid-area: race; } #outfitBtn { grid-area: outfit; } #friendMenuBtn { grid-area: friends; } #playBtn { grid-area: play; }
+    #raceBtn { grid-area: race; } #wolfBtn { grid-area: wolves; } #outfitBtn { grid-area: outfit; } #friendMenuBtn { grid-area: friends; } #playBtn { grid-area: play; }
     #friendMenuBtn { flex-direction: column; justify-content: center; gap: 8px; font-size: 21px; }
     #friendMenuBtn span { align-items: center; text-align: center; }
     #playBtn { justify-content: center; font-size: 24px; padding: 13px 16px 17px; }
@@ -441,7 +442,7 @@
     .topbtns { top: calc(12px + env(safe-area-inset-top)); right: 12px; gap: 8px; } .topbtns .round { width: 46px; height: 46px; border-radius: 16px; }
     #title .counters { left: 12px; top: calc(12px + env(safe-area-inset-top)); }
     #title .logo { top: calc(58px + env(safe-area-inset-top)); }
-    #title .faceSlot { top: calc(104px + 14vw + env(safe-area-inset-top)); bottom: calc(240px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); height: auto; }
+    #title .faceSlot { top: calc(104px + 14vw + env(safe-area-inset-top)); bottom: calc(296px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); height: auto; }
   }
   @media (max-height: 520px) and (min-aspect-ratio: 5/4) { /* phones held sideways */
     .logo .word { font-size: 58px; } .logo .sub { font-size: 11px; margin-top: 8px; padding: 4px 12px 6px; }
@@ -491,6 +492,8 @@
   #friend .tabs span { cursor: pointer; }
   #friend .rc-row .seg button { font-size: 12px; }
   .joinrow input { font-family: var(--title); font-size: 26px; text-align: center; }
+  .huntonly { display: none !important; } #friend.hunt .huntonly { display: block !important; } #friend.hunt .rc-row.huntonly { display: flex !important; } #friend.hunt .raceonly { display: none !important; }
+  .huntrules { font-size: 13px; color: var(--ink-soft); margin: 0 0 10px; line-height: 1.35; }
   .teamhint { display: none; font-size: 13px; color: var(--ink-soft); margin: -4px 0 8px; } #friend.teams .teamhint { display: block; }
   #friend.guest .teamhint { display: none !important; }
   .lp { cursor: default; } #friend.teams:not(.guest) .lp:not(.empty) { cursor: pointer; }
@@ -528,7 +531,7 @@
   @keyframes countPop { 0% { transform: scale(.2) rotate(-12deg); opacity: 0; } 30% { transform: scale(1.15) rotate(4deg); opacity: 1; } 55% { transform: scale(1) rotate(0); opacity: 1; } 100% { transform: scale(.9); opacity: 0; } }
 
   /* loading: the logo bouncing over three little stones rising and sinking, like the maze */
-  #loading { position: fixed; inset: 0; display: grid; place-items: center; z-index: 10; background: radial-gradient(62% 72% at 50% 46%, #fffaf1 0%, #fbf0dd 60%, #f1dfc1 100%); transition: opacity .4s; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; z-index: 10; background: radial-gradient(55% 45% at 50% 50%, rgba(255,250,241,.55), rgba(255,250,241,0) 75%), #f3e7d2 url(assets/menu_bg.webp) center 42% / cover no-repeat; transition: opacity .4s; }
   #loading .lword { font-size: 76px; line-height: 1; text-align: center; animation: bob 1.2s ease-in-out infinite; }
   #loading .stones { display: flex; gap: 10px; justify-content: center; margin-top: 18px; }
   #loading .stones i { width: 22px; height: 22px; border-radius: 7px; background: var(--card); box-shadow: inset 0 -4px 0 var(--lip), inset 0 0 0 2px var(--edge); animation: stone 1s ease-in-out infinite; }
@@ -552,6 +555,7 @@
   }
   @media (max-width: 640px) { .hud { padding: calc(12px + env(safe-area-inset-top)) 12px 0; } .hud .chip { height: 42px; font-size: 16px; } .hud .stats { gap: 8px; padding: 6px 12px; } }
 </style>
+<link rel="preload" href="assets/menu_bg.webp" as="image" type="image/webp">
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
@@ -577,6 +581,7 @@
   <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M11 2.5c.6 4 2.6 6 6.5 6.6-3.9.6-5.9 2.6-6.5 6.6-.6-4-2.6-6-6.5-6.6 3.9-.6 5.9-2.6 6.5-6.6zm7.5 11c.3 2 1.3 3 3.2 3.3-1.9.3-2.9 1.3-3.2 3.3-.3-2-1.3-3-3.2-3.3 1.9-.3 2.9-1.3 3.2-3.3z"/></symbol>
   <symbol id="i-wind" viewBox="0 0 24 24"><path d="M3 9h10.5A2.5 2.5 0 1 0 11 6.5a1 1 0 0 1-2 0A4.5 4.5 0 1 1 13.5 11H3a1 1 0 0 1 0-2zm0 4h14.5a3.5 3.5 0 1 1-3.5 3.5 1 1 0 0 1 2 0 1.5 1.5 0 1 0 1.5-1.5H3a1 1 0 0 1 0-2z"/></symbol>
   <symbol id="i-lens" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 0 1 6 12l4.2 4.2a1.4 1.4 0 0 1-2 2L14.5 17a7.5 7.5 0 1 1-4-14zm0 2.8a4.7 4.7 0 1 0 0 9.4 4.7 4.7 0 0 0 0-9.4z"/></symbol>
+  <symbol id="i-paw" viewBox="0 0 24 24"><ellipse cx="6" cy="9.5" rx="2.3" ry="2.9"/><ellipse cx="10" cy="5.6" rx="2.3" ry="3"/><ellipse cx="14.4" cy="5.6" rx="2.3" ry="3"/><ellipse cx="18.3" cy="9.6" rx="2.3" ry="2.9"/><path d="M12.2 11c2.6 0 5.6 3.4 5.6 6.2 0 2.2-1.6 3.3-3.4 3.3-1.1 0-1.4-.5-2.2-.5s-1.2.5-2.3.5c-1.8 0-3.3-1.1-3.3-3.3 0-2.8 3-6.2 5.6-6.2z"/></symbol>
   <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 2.5a1.2 1.2 0 0 1 1.2 1.2V4h11.3a1 1 0 0 1 .8 1.6L16 9l2.3 3.4a1 1 0 0 1-.8 1.6H6.2v6.8a1.2 1.2 0 1 1-2.4 0V3.7A1.2 1.2 0 0 1 5 2.5z"/></symbol>
   <symbol id="i-star" viewBox="0 0 24 24"><path d="M11.1 2.6a1 1 0 0 1 1.8 0l2.4 4.9 5.4.8a1 1 0 0 1 .6 1.7l-3.9 3.8.9 5.4a1 1 0 0 1-1.5 1L12 17.7l-4.8 2.5a1 1 0 0 1-1.5-1l.9-5.4-3.9-3.8a1 1 0 0 1 .6-1.7l5.4-.8z"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M9.5 16.2 5.3 12a1.4 1.4 0 1 0-2 2l5.2 5.2a1.4 1.4 0 0 0 2 0L21.2 8.6a1.4 1.4 0 0 0-2-2z"/></symbol>
@@ -640,6 +645,7 @@
     <button class="mitem big sel" id="playBtn"><i class="mi"><svg class="ico"><use href="#i-map"/></svg></i><span>Adventure<small id="playSub2">Level 1-1</small></span><svg class="ico go"><use href="#i-next"/></svg></button>
     <button class="mitem big" id="friendMenuBtn"><i class="mi"><svg class="ico"><use href="#i-heart"/></svg></i><span>Friends<small>Play together</small></span><svg class="ico go"><use href="#i-next"/></svg></button>
     <button class="mitem" id="raceBtn"><i class="mi"><svg class="ico"><use href="#i-flag"/></svg></i><span>Race</span><svg class="ico go"><use href="#i-next"/></svg></button>
+    <button class="mitem" id="wolfBtn"><i class="mi"><svg class="ico"><use href="#i-paw"/></svg></i><span>Wolves</span><svg class="ico go"><use href="#i-next"/></svg></button>
     <button class="mitem" id="outfitBtn"><i class="mi"><svg class="ico"><use href="#i-shirt"/></svg></i><span>Outfit</span><svg class="ico go"><use href="#i-next"/></svg></button>
   </nav>
   <div class="cont" id="contCard">
@@ -700,7 +706,8 @@
     <div class="rc-row"><span>Buddies</span><div class="stepper"><button class="round" data-rc="racers:-1" aria-label="Fewer Buddies">−</button><b id="rcRacers">3</b><button class="round" data-rc="racers:1" aria-label="More Buddies">+</button></div></div>
     <div class="rc-row"><span>Teammates</span><div class="stepper"><button class="round" data-rc="mates:-1" aria-label="Fewer teammates">−</button><b id="rcMates">0</b><button class="round" data-rc="mates:1" aria-label="More teammates">+</button></div></div>
     <div class="rc-row col"><span>World</span><div class="seg" id="rcBiome"><button data-rc="biome:woods">Woods</button><button data-rc="biome:desert">Dunes</button><button data-rc="biome:snow">Frost</button><button data-rc="biome:autumn">Autumn</button><button data-rc="biome:cave">Cave</button></div></div>
-    <div class="rc-row col"><span>Maze</span><div class="seg" id="rcShape"><button data-rc="shape:square">Square</button><button data-rc="shape:circle">Circle</button><button data-rc="shape:gem">Gem</button><button data-rc="shape:plus">Plus</button><button data-rc="shape:snowflake">Flake</button></div></div>
+    <div class="rc-row col"><span>Maze</span><div class="seg" id="rcShape"><button data-rc="shape:random">Random</button><button data-rc="shape:square">Square</button><button data-rc="shape:circle">Circle</button><button data-rc="shape:gem">Gem</button><button data-rc="shape:plus">Plus</button><button data-rc="shape:snowflake">Flake</button><button data-rc="shape:clover">Clover</button><button data-rc="shape:octagon">Octagon</button><button data-rc="shape:star4">Star</button></div></div>
+    <div class="rc-row col"><span>Map size</span><div class="seg" id="rcMap"><button data-rc="map:0">Small</button><button data-rc="map:1">Medium</button><button data-rc="map:2">Big</button></div></div>
     <div class="rc-row col"><span>Rivals</span><div class="seg" id="rcSpeed"><button data-rc="speed:0">Easy</button><button data-rc="speed:1">Normal</button><button data-rc="speed:2">Hard</button><button data-rc="speed:3">Pro</button></div></div>
   </div>
   <div class="card pright">
@@ -718,23 +725,27 @@
   <div class="card pleft">
     <div class="tabs hostonly" id="frTabs"><span class="on" data-tab="host"><svg class="ico"><use href="#i-link"/></svg>Invite</span><span data-tab="join"><svg class="ico"><use href="#i-key"/></svg>Join with code</span></div>
     <div class="pane-host hostonly">
+      <div class="rc-row col"><span>Game</span><div class="seg" id="frGame"><button data-fr="game:race">Race</button><button data-fr="game:hunt">Wolves vs Animals</button></div></div>
       <div class="rc-row"><span>Players</span><div class="stepper"><button class="round" data-fr="size:-1" aria-label="Fewer players">−</button><b id="frSize">2</b><button class="round" data-fr="size:1" aria-label="More players">+</button></div></div>
-      <div class="rc-row col"><span>Mode</span><div class="seg" id="frMode"><button data-fr="mode:ffa">Everyone for themselves</button><button data-fr="mode:teams">Teams</button></div></div>
-      <div class="rc-row"><span>Computer Buddies fill empty spots</span><button class="toggle" id="frBots" data-fr="bots:1" aria-label="Fill empty spots with computer Buddies"></button></div>
+      <div class="rc-row col raceonly"><span>Mode</span><div class="seg" id="frMode"><button data-fr="mode:ffa">Everyone for themselves</button><button data-fr="mode:teams">Teams</button></div></div>
+      <div class="rc-row raceonly"><span>Computer Buddies fill empty spots</span><button class="toggle" id="frBots" data-fr="bots:1" aria-label="Fill empty spots with computer Buddies"></button></div>
       <div class="rc-row col"><span>World</span><div class="seg" id="frBiome"><button data-rc="biome:woods">Woods</button><button data-rc="biome:desert">Dunes</button><button data-rc="biome:snow">Frost</button><button data-rc="biome:autumn">Autumn</button><button data-rc="biome:cave">Cave</button></div></div>
-      <div class="rc-row col"><span>Maze</span><div class="seg" id="frShape"><button data-rc="shape:square">Square</button><button data-rc="shape:circle">Circle</button><button data-rc="shape:gem">Gem</button><button data-rc="shape:plus">Plus</button><button data-rc="shape:snowflake">Flake</button></div></div>
+      <div class="rc-row col"><span>Map size</span><div class="seg" id="frMap"><button data-rc="map:0">Small</button><button data-rc="map:1">Medium</button><button data-rc="map:2">Big</button></div></div>
+      <div class="rc-row col"><span>Maze</span><div class="seg" id="frShape"><button data-rc="shape:random">Random</button><button data-rc="shape:square">Square</button><button data-rc="shape:circle">Circle</button><button data-rc="shape:gem">Gem</button><button data-rc="shape:plus">Plus</button><button data-rc="shape:snowflake">Flake</button><button data-rc="shape:clover">Clover</button><button data-rc="shape:octagon">Octagon</button><button data-rc="shape:star4">Star</button></div></div>
     </div>
     <div class="pane-join">
       <p class="hostonly">Type the code your friend sent you.</p>
       <div class="joinrow hostonly"><input id="friendInput" maxlength="6" placeholder="ABCDE" autocomplete="off" spellcheck="false"><button class="btn green" id="friendJoin">Join</button></div>
     </div>
-    <p class="guestonly">You're in! The host picks the world and starts the race.</p>
+    <p class="guestonly">You're in! The host picks the world and starts the game.</p>
   </div>
   <div class="card pright">
     <div class="pane-host hostonly">
       <button class="btn green" id="friendCopy" style="width:100%"><svg class="ico"><use href="#i-link"/></svg>Invite friends</button>
       <div class="codehint">or tell them the code <b id="friendCode">·····</b></div>
     </div>
+    <p class="huntonly huntrules">Animals find the 4 keys, then escape through the portal. Wolves catch them before the clock runs out!</p>
+    <div class="rc-row col huntonly"><span>You are</span><div class="seg" id="frRole"><button data-fr="role:animal">An animal</button><button data-fr="role:wolf">A wolf</button></div></div>
     <div class="lobby" id="lobby"></div>
     <div class="teamhint" id="teamHint">Tap a player to switch their team</div>
     <div class="ribbon" id="friendStatus">Getting ready…</div>

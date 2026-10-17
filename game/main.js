@@ -834,6 +834,9 @@ Object.assign(SHAPES, {
   star: shape2((X, Y) => { const r = Math.hypot(X, Y), a = Math.atan2(Y, X) - Math.PI / 2; return r <= 0.42 + 0.56 * Math.pow(0.5 + 0.5 * Math.cos(5 * a), 1.6); }),
   mushroom: shape2((X, Y) => (Y >= -0.05 && disc(X, Y, 0, -0.05, 0.98)) || (Math.abs(X) < 0.3 && Y < 0 && Y > -0.95)),
   snake: shape2((X, Y) => Math.abs(X) < 0.98 && Math.abs(Y - 0.5 * Math.sin(X * 2.8)) < 0.4),
+  clover: shape2((X, Y) => disc(X, Y, 0, 0, 0.42) || [[0.5, 0.5], [-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5]].some(([x, y]) => disc(X, Y, x, y, 0.44))),
+  octagon: shape2((X, Y) => Math.abs(X) <= 0.9 && Math.abs(Y) <= 0.9 && Math.abs(X) + Math.abs(Y) <= 1.25),
+  star4: shape2((X, Y) => { const r = Math.hypot(X, Y), a = Math.atan2(Y, X); return r <= 0.5 + 0.5 * Math.pow(Math.abs(Math.cos(2 * a)), 2.2); }),
   leaf: shape2((X, Y) => { const a = (X + Y) / Math.SQRT2, b = (Y - X) / Math.SQRT2; return disc(a, b, 0, 0.42, 0.97) && disc(a, b, 0, -0.42, 0.97); }), // pointed both ends, tilted
 });
 // ---------- level plan ----------
@@ -856,9 +859,12 @@ const levelPlan = (() => {
     if (w === 0 && c === 0) cells = [3, 4, 4, 5, 5][p]; // the very first levels are tiny
     if (k === LEVELS_PER_WORLD - 1) cells += 1;          // the world's finale
     let shape = null, gateway = false;
-    if (p === 3 && (w > 0 || c > 0)) gateway = true;
-    else if (p === 2 || p === 4) shape = shapes[c];
-    else if (p === 1 && (c > 0 || w > 0)) { const known = w > 0 ? shapes.slice(0, c + 1).concat(WORLD_SHAPES[WORLDS[w - 1].biome]) : shapes.slice(0, c); shape = known.length ? known[Math.floor(rnd() * known.length)] : null; }
+    if (p === 3 && (w > 0 || c > 0)) gateway = true; // (door levels are shaped too: two shaped halves)
+    // every level has a shape (only the first two of the game are plain squares): the chapter's new shape on its
+    // 3rd and 5th levels, otherwise one of the shapes already met
+    const met = shapes.slice(0, c + (p > 2 ? 1 : 0)).concat(w > 0 ? WORLD_SHAPES[WORLDS[w - 1].biome] : []);
+    if (p === 2 || p === 4) shape = shapes[c];
+    else if (met.length) shape = met[Math.floor(rnd() * met.length)];
     if (shape && cells < 5) cells = 5;                    // shapes need room to read
     const reveal = Math.max(1.4, world.reveal - 0.08 * c - (p === 4 ? 0.12 : 0) + (p === 0 ? 0.15 : 0));
     const detour = p === 0 ? 0.15 : Math.min(0.85, 0.2 + 0.1 * c + 0.06 * w + (p === 4 ? 0.1 : 0));
@@ -938,7 +944,7 @@ function genShapedMaze(cells, rnd, shape) {
 // race maze: one quarter is generated, then mirrored both ways, so every corner entry is exactly as far from the key
 // race maze: one quarter is generated, then mirrored both ways, so every corner entry is exactly as far from the key.
 // A shape (one that looks the same from all four corners) can trim it: the quarter is grown inside the shape.
-const RACE_SHAPES = ['square', 'circle', 'gem', 'plus', 'snowflake'];
+const RACE_SHAPES = ['square', 'circle', 'gem', 'plus', 'snowflake', 'clover', 'octagon', 'star4'];
 function genFairRaceMaze(cells, rnd = Math.random, shape = 'square') {
   const N = cells * 2 + 1, H = (N - 1) / 2, Cq = Math.ceil(cells / 2);
   let q;
@@ -1130,7 +1136,7 @@ function addStepGlow(mat, glowTex) {
     sh.uniforms.uGlowMap = { value: glowTex };
     sh.uniforms.uGlowTime = GLOW_TIME;
     sh.vertexShader = 'attribute float aGlow;\nvarying float vGlow;\nvarying vec3 vGlowW;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;')
-      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGlowW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;');
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n#ifdef USE_INSTANCING\nvGlowW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\nvGlowW = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
     sh.fragmentShader = 'uniform sampler2D uGlowMap;\nuniform float uGlowTime;\nvarying float vGlow;\nvarying vec3 vGlowW;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>',
       `#include <emissivemap_fragment>
       { // dark until stepped on; then the specks light up and pulse, each part a little out of step with the others
@@ -1562,14 +1568,16 @@ async function load() {
 
 let mode = 'levels', start = [0, 0], goal = [1, 1], rivals = [], raceSize = 3, raceTeam = false, keyDist = null;
 // race setup, saved on this device: how many Buddies (2-4, one per corner), how many are your teammates, rival speed
-const raceCfg = { racers: 3, mates: 0, speed: 1, biome: 'woods', shape: 'square', size: 2, mode: 'ffa', bots: false };
+const raceCfg = { racers: 3, mates: 0, speed: 1, biome: 'woods', shape: 'square', size: 2, mode: 'ffa', bots: false, game: 'race', map: 1 };
 try { Object.assign(raceCfg, JSON.parse(localStorage.getItem('hidden-maze-race') || '{}')); } catch {}
 const RIVAL_PACE = [{ step: 2.2, detour: 0.42 }, { step: 1.8, detour: 0.3 }, { step: 1.45, detour: 0.18 }, { step: 1.2, detour: 0.07 }]; // easy, normal, hard, pro
 // every two race wins the race maze grows (10 -> 16 cells)
 let raceWins = 0;
 try { raceWins = +localStorage.getItem('hidden-maze-race-wins') || 0; } catch {}
 // race: a big maze with an entry near each corner and one key in the middle
-function makeRaceMaze(rnd = Math.random, shape = raceCfg.shape, cells = 10 + 2 * Math.min(3, Math.floor(raceWins / 2))) {
+const RACE_CELLS = [10, 13, 16]; // small, medium, big
+function makeRaceMaze(rnd = Math.random, shape = raceCfg.shape, cells = Math.max(RACE_CELLS[raceCfg.map ?? 1], 10 + 2 * Math.min(3, Math.floor(raceWins / 2)))) {
+  if (shape === 'random') shape = RACE_SHAPES[Math.floor(rnd() * RACE_SHAPES.length)];
   let m, N, d, ends;
   // mirrored maze: all four entries are the same distance from the key (retry if the middle isn't reachable)
   for (let tries = 0; tries < 30; tries++) {
@@ -1599,12 +1607,40 @@ const isGateway = L => L >= 0 && levelPlan(L).gateway;
 const keyDetour = L => levelPlan(L).detour;
 const levelBiome = L => WORLDS[Math.floor(L / LEVELS_PER_WORLD)].biome;
 // two separate mazes, one above and one below a solid middle row; door A below it, door B above it
-function genSplitMaze(C, rnd) {
-  const N = C * 2 + 1, h = Math.floor(C / 2), zDiv = 2 * h, g = new Uint8Array(N * N).fill(1);
-  for (const inHalf of [cz => cz < h, cz => cz >= h]) {
+// (with a shape, each half is that shape squeezed into its half; door A opens onto the lower half's first row, door B
+// onto the upper half's last row, a corridor is cut to them if the shape is narrow there)
+function genSplitMaze(C, rnd, shape) {
+  const N = C * 2 + 1, h = Math.floor(C / 2), zDiv = 2 * h, g = new Uint8Array(N * N).fill(1), S = shape && SHAPES[shape];
+  const doorCol = [];
+  for (const [r0, r1] of [[0, h], [h, C]]) {
+    const H = r1 - r0, inHalf = cz => cz >= r0 && cz < r1;
+    const shaped = (cx, cz) => !S || S.inside(cx, Math.min(C - 1, Math.floor((cz - r0 + 0.5) * C / H)), C);
+    const ok0 = (cx, cz) => cx >= 0 && cx < C && inHalf(cz) && shaped(cx, cz);
+    // keep the half's biggest connected part
+    const comp = new Int32Array(C * C).fill(-1); let best = -1, bestN = 0;
+    for (let cz = r0; cz < r1; cz++) for (let cx = 0; cx < C; cx++) {
+      if (!ok0(cx, cz) || comp[cz * C + cx] >= 0) continue;
+      const id = cz * C + cx, q = [[cx, cz]]; comp[id] = id;
+      for (let k = 0; k < q.length; k++) for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const x = q[k][0] + dx, z = q[k][1] + dz; if (ok0(x, z) && comp[z * C + x] < 0) { comp[z * C + x] = id; q.push([x, z]); } }
+      if (q.length > bestN) { bestN = q.length; best = id; }
+    }
+    const inMain = new Uint8Array(C * C);
+    for (let i = 0; i < C * C; i++) if (best >= 0 && comp[i] === best) inMain[i] = 1;
+    if (best < 0) for (let cz = r0; cz < r1; cz++) for (let cx = 0; cx < C; cx++) inMain[cz * C + cx] = 1; // (nothing fits: the whole half)
+    // the row next to the middle must be reachable: if the shape is narrow there, a corridor runs to it
+    const edge = r0 === 0 ? r1 - 1 : r0, dir = r0 === 0 ? -1 : 1, want = r0 === 0 ? 0 : C - 1; // door B left, door A right
+    let col = -1;
+    for (let cx = 0; cx < C; cx++) if (inMain[edge * C + cx] && (col < 0 || Math.abs(cx - want) < Math.abs(col - want))) col = cx;
+    if (col < 0) {
+      let bx = 0, bz = r0, bd = 1e9;
+      for (let cz = r0; cz < r1; cz++) for (let cx = 0; cx < C; cx++) if (inMain[cz * C + cx]) { const d = Math.abs(cz - edge) * 4 + Math.abs(cx - want); if (d < bd) { bd = d; bx = cx; bz = cz; } }
+      for (let cz = bz; cz !== edge - dir; cz -= dir) inMain[cz * C + bx] = 1;
+      col = bx;
+    }
+    doorCol.push(col);
+    const ok = (cx, cz) => cx >= 0 && cx < C && inHalf(cz) && inMain[cz * C + cx];
     const cells = [];
-    for (let cz = 0; cz < C; cz++) for (let cx = 0; cx < C; cx++) if (inHalf(cz)) cells.push([cx, cz]);
-    const ok = (cx, cz) => cx >= 0 && cx < C && cz >= 0 && cz < C && inHalf(cz);
+    for (let cz = r0; cz < r1; cz++) for (let cx = 0; cx < C; cx++) if (ok(cx, cz)) cells.push([cx, cz]);
     const [sx, sz] = cells[Math.floor(rnd() * cells.length)], stack = [[sx, sz]];
     g[(2 * sz + 1) * N + 2 * sx + 1] = 0;
     while (stack.length) {
@@ -1617,7 +1653,7 @@ function genSplitMaze(C, rnd) {
       stack.push([cx + dx, cz + dz]);
     }
   }
-  const xA = N - 2 - 2 * Math.floor(rnd() * 2), xB = 1 + 2 * Math.floor(rnd() * 2);
+  const xA = S ? 2 * doorCol[1] + 1 : N - 2 - 2 * Math.floor(rnd() * 2), xB = S ? 2 * doorCol[0] + 1 : 1 + 2 * Math.floor(rnd() * 2);
   // pull the two halves apart: an open gap of GAP empty rows between them, so you can see they are not connected
   // (the grid stays square, so the extra width is split as empty columns on both sides)
   const GAP = 3, M = N + GAP + 1, ox = Math.floor((GAP + 1) / 2), dz = GAP + 1;
@@ -1625,13 +1661,38 @@ function genSplitMaze(C, rnd) {
   const put = (x, z, x2, z2) => { g2[z2 * M + x2] = g[z * N + x]; empty[z2 * M + x2] = 0; };
   for (let z = 0; z <= zDiv; z++) for (let x = 0; x < N; x++) put(x, z, x + ox, z);
   for (let z = zDiv; z < N; z++) for (let x = 0; x < N; x++) put(x, z, x + ox, z + dz);
-  return { N: M, g: g2, empty, start: [N - 2 + ox, N - 2 + dz], goal: [1 + ox, 1],
+  let start = [N - 2 + ox, N - 2 + dz], goal = [1 + ox, 1];
+  if (S) { // shaped: tiles away from any path stay empty floor; start nearest the camera below, portal furthest away above
+    const open = i => !g2[i];
+    for (let z = 0; z < M; z++) for (let x = 0; x < M; x++) {
+      let near = false;
+      for (let a = -1; a <= 1 && !near; a++) for (let b = -1; b <= 1; b++) { const X = x + b, Z = z + a; if (X >= 0 && Z >= 0 && X < M && Z < M && open(Z * M + X)) { near = true; break; } }
+      if (!near) empty[z * M + x] = 1;
+    }
+    start = null; goal = null;
+    for (let z = 0; z < M; z++) for (let x = 0; x < M; x++) if (open(z * M + x)) {
+      if (z > zDiv + dz && (!start || x + z > start[0] + start[1])) start = [x, z];
+      if (z < zDiv && (!goal || x + z < goal[0] + goal[1])) goal = [x, z];
+    }
+  }
+  return { N: M, g: g2, empty, start, goal,
     doors: [{ id: 'A', x: xA + ox, z: zDiv + dz, out: [xA + ox, zDiv + dz + 1] }, { id: 'B', x: xB + ox, z: zDiv, out: [xB + ox, zDiv - 1] }] };
 }
 // the cave under a door level: door A near the bottom corner, door B at the far corner
+// (the cave has a shape of its own too; door A stands just past its nearest path, door B past its furthest)
+const CAVE_SHAPES = ['circle', 'star', 'islands', 'mushroom', 'flower', 'gem', 'crescent', 'leaf', 'plus', 'ring', 'heart', 'snake'];
 function genCaveMaze(L) {
-  const m = genMaze(4 + Math.min(4, Math.floor(L / 10)), mulberry32(L * 7919 + 3)), N = m.N;
-  m.doors = [{ id: 'A', x: N - 2, z: N - 1, out: [N - 2, N - 2] }, { id: 'B', x: 1, z: 0, out: [1, 1] }];
+  const rnd = mulberry32(L * 7919 + 3), m = genShapedMaze(5 + Math.min(4, Math.floor(L / 10)), rnd, CAVE_SHAPES[(L * 5 + 2) % CAVE_SHAPES.length]), N = m.N;
+  const wallBy = ([x, z], dirs) => { for (const [dx, dz] of dirs) { const X = x + dx, Z = z + dz; if (X >= 0 && Z >= 0 && X < N && Z < N && m.g[Z * N + X]) return [X, Z]; } return null; };
+  // the open tile nearest (or furthest) along the camera diagonal that has a wall beside it for the door
+  const pick = (near, dirs) => {
+    const open = []; for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) if (!m.g[z * N + x]) open.push([x, z]);
+    open.sort((a, b) => near ? b[0] + b[1] - a[0] - a[1] : a[0] + a[1] - b[0] - b[1]);
+    for (const t of open) { const w = wallBy(t, dirs); if (w) return { out: t, x: w[0], z: w[1] }; }
+  };
+  const a = pick(true, [[0, 1], [1, 0], [-1, 0], [0, -1]]), b = pick(false, [[0, -1], [-1, 0], [1, 0], [0, 1]]);
+  for (const d of [a, b]) m.empty[d.z * N + d.x] = 0; // (the door block always stands)
+  m.doors = [{ id: 'A', x: a.x, z: a.z, out: a.out }, { id: 'B', x: b.x, z: b.z, out: b.out }];
   return m;
 }
 let biome = 'woods', curSet = null, stage = 'surface', doorMeshes = new Map();
@@ -1725,7 +1786,8 @@ function trimGPU() { // (every device: laptops held ~110 MB per world visited ot
   }
 }
 function buildLevel(level, race = null, opts = {}) {
-  L = level; mode = race ? 'race' : 'levels'; pillarsDirty = true; shadowKick = 3;
+  L = level; mode = race ? race.kind || 'race' : 'levels'; pillarsDirty = true; shadowKick = 3;
+  clearWolves(); hunt.clear();
   stage = opts.stage || 'surface';
   const world = race ? (WORLDS.find(w => w.biome === race.biome) || { tint: [1, 1, 1], reveal: 2.1, icon: 'i-w-cave' }) : WORLDS[Math.floor(L / LEVELS_PER_WORLD)];
   const bName = race ? race.biome || 'woods' : stage === 'cave' ? 'cave' : world.biome;
@@ -1737,7 +1799,7 @@ function buildLevel(level, race = null, opts = {}) {
   doorMeshes.clear();
   const shape = race || isGateway(L) ? null : levelPlan(L).shape;
   const rnd = mulberry32(L * 9973 + 17);
-  maze = race ? race.maze : stage === 'cave' ? genCaveMaze(L) : isGateway(L) ? genSplitMaze(levelCells(L), rnd) : shape ? genShapedMaze(levelCells(L), rnd, shape) : genMaze(levelCells(L), rnd);
+  maze = race ? race.maze : stage === 'cave' ? genCaveMaze(L) : isGateway(L) ? genSplitMaze(levelCells(L), rnd, levelPlan(L).shape) : shape ? genShapedMaze(levelCells(L), rnd, shape) : genMaze(levelCells(L), rnd);
   // within a world you see less of the maze around you as the levels go on
   CFG.revealR = parseFloat(params.get('r') || (race ? world.reveal : levelPlan(L).reveal));
   const { N } = maze, T = N * N;
@@ -1780,21 +1842,21 @@ function buildLevel(level, race = null, opts = {}) {
   goal = race ? race.goal : stage === 'cave' ? [-9, -9] : maze.goal || [1, 1]; // the portal (none in the cave)
   if (!opts.keep) hasKey = false;
   // the key: in a race it's the prize in the middle; on a door level it waits in the cave; elsewhere down a side path
-  keyAt = race ? goal : isGateway(L) ? (stage === 'cave' ? keyTile(maze, maze.doors[0].out, maze.doors[1].out, keyDetour(L)) : null) : keyTile(maze, start, goal, keyDetour(L));
+  keyAt = race ? (race.keyAt !== undefined ? race.keyAt : goal) : isGateway(L) ? (stage === 'cave' ? keyTile(maze, maze.doors[0].out, maze.doors[1].out, keyDetour(L)) : null) : keyTile(maze, start, goal, keyDetour(L));
   key.visible = !!keyAt && !hasKey;
   key.userData.grab = -1;
   if (keyAt) key.position.set(keyAt[0] - origin, 0.55, keyAt[1] - origin);
   scene.add(key);
   if (portal) scene.remove(portal);
   portal = curSet.portal ||= makePortal(curSet, bName); // built once per world from its stones, then reused
-  portal.visible = !race && stage !== 'cave';
+  portal.visible = (!race || !!race.portal) && stage !== 'cave';
   portal.position.set(goal[0] - origin, 0, goal[1] - origin);
   portal.rotation.y = portalYaw(goal);
   portal.userData.on = hasKey ? 1 : 0;
   scene.add(portal);
   trimGPU();
   if (renderer.compileAsync) renderer.compileAsync(scene, camera).catch(() => {}); // (shaders ready before you start walking)
-  $('keyHud').style.display = race ? 'none' : '';
+  $('keyHud').style.display = race && !race.portal ? 'none' : '';
   $('keyHud').classList.toggle('got', hasKey);
 
   st.gx = st.tx = st.fx = start[0]; st.gz = st.tz = st.fz = start[1];
@@ -1810,7 +1872,7 @@ function buildLevel(level, race = null, opts = {}) {
   ui.steps.textContent = steps;
   $('worldBadgeIco').setAttribute('href', '#' + (stage === 'cave' || bName === 'cave' ? 'i-w-cave' : world.icon));
   coach.level(race ? -1 : L, stage, opts.keep);
-  for (const r of rivals) { scene.remove(r.root); r.root.traverse(o => { if (o.material) [].concat(o.material).forEach(m => m.dispose()); }); } // (their textures are shared)
+  for (const r of rivals) { scene.remove(r.root); setTimeout(() => r.root.traverse(o => { if (o.material) [].concat(o.material).forEach(m => m.dispose()); }), 3000); } // (their textures are shared)
   keyDist = null;
   if (race) { // walking distance from every tile to the key, for the live ranking
     keyDist = new Int32Array(N * N).fill(1e6);
@@ -2132,6 +2194,9 @@ const CHARS = [
   { id: 'fennec', name: 'Fennec', file: 'assets/chars/fennec.glb', world: 1 },
   { id: 'bear', name: 'Polar Bear', file: 'assets/chars/bear.glb', world: 2 },
   { id: 'cat', name: 'Cat', file: 'assets/chars/cat.glb', world: 3 },
+  // (not outfits: the wolves of Wolf Chase, and of Wolves vs Animals online)
+  { id: 'wolf', name: 'Wolf', file: 'assets/chars/wolf.glb', world: -1, npc: true },
+  { id: 'wolf_fungi', name: 'Fungus Wolf', file: 'assets/chars/wolf_fungi.glb', world: -1, npc: true },
 ];
 const CHARS_ALL_OPEN = true; // for now every character is unlocked
 const charUnlocked = c => CHARS_ALL_OPEN || c.world < 0 || unlocked(c.world * LEVELS_PER_WORLD);
@@ -2352,7 +2417,7 @@ function updateDizzy(dt) {
 }
 function setupPlayer(ch) {
   const old = player;
-  player = new THREE.Group();
+  player = new THREE.Group(); player.userData.cid = ch.id;
   const inner = ch.scene.clone(true), P = ch.P, buddy = ch.id === 'buddy';
   const box = new THREE.Box3().setFromObject(inner);
   const s = CFG.charH / (box.max.y - box.min.y);
@@ -2430,7 +2495,7 @@ function collectKey() {
   coach.keyGot();
 }
 function tryMove(dx, dz) {
-  if (won || state !== 'play' || warp.t >= 0) return false; // also stops the race once someone has the key
+  if (won || wolfOver || state !== 'play' || warp.t >= 0 || (mode === 'hunt' && !hunt.canMove())) return false; // also stops the race once someone has the key
   if (intro.t >= 0) { skipIntro(); return false; }
   if (st.moving) { queued = [dx, dz]; return false; }
   const nx = st.gx + dx, nz = st.gz + dz;
@@ -2443,7 +2508,7 @@ function tryMove(dx, dz) {
   }
   st.fx = st.gx; st.fz = st.gz; st.tx = nx; st.tz = nz; st.t = 0; st.moving = true;
   steps++; ui.steps.textContent = steps;
-  if (mode === 'race') net.send({ t: 'pos', x: nx, z: nz });
+  if (mode === 'race' || mode === 'hunt') net.send({ t: 'pos', x: nx, z: nz });
   updateTargets(false);
   const p = worldPos(st.gx, st.gz);
   footPuffs(p.x, p.z, dx, dz);
@@ -2518,7 +2583,7 @@ function updatePlayer(dt, time) {
   }
   let x, z, y = 0, sq = 1;
   if (st.moving) {
-    st.t = Math.min(1, st.t + dt / CFG.stepTime);
+    st.t = Math.min(1, st.t + dt / (mode === 'hunt' && hunt.amWolf() ? WOLF.human : CFG.stepTime)); // (online wolves are a little quicker)
     const e = st.t;
     x = st.fx + (st.tx - st.fx) * e; z = st.fz + (st.tz - st.fz) * e;
     // springy steps: a hop each step, stretched at the top and squashed on landing
@@ -2531,8 +2596,9 @@ function updatePlayer(dt, time) {
       sfx.play('step', 0.62, 0, { maxDur: 0.26 });
       const p = worldPos(st.gx, st.gz);
       footPuffs(p.x, p.z, st.tx - st.fx, st.tz - st.fz, 0.7);
-      if (mode !== 'race' && keyAt && !hasKey && st.gx === keyAt[0] && st.gz === keyAt[1]) collectKey();
-      if (st.gx === goal[0] && st.gz === goal[1]) {
+      if (mode === 'hunt') hunt.onStep(st.gx, st.gz);
+      else if (mode !== 'race' && keyAt && !hasKey && st.gx === keyAt[0] && st.gz === keyAt[1]) collectKey();
+      if (mode !== 'hunt' && st.gx === goal[0] && st.gz === goal[1]) {
         if (mode === 'race') return raceEnd(null);
         if (hasKey) return win();
         toast('The portal is asleep. Find the key!'); sfx.ui('nope', 0.3);
@@ -2710,6 +2776,7 @@ function raceEnd(winner) {
   const teamWin = raceTeam && winner && winner.team;
   if (place === 0 || teamWin) { raceWins++; try { localStorage.setItem('hidden-maze-race-wins', raceWins); } catch {} }
   $('raceTitle').textContent = place === 0 ? (raceTeam ? 'Your team wins!' : 'You win!') : teamWin ? 'Your team wins!' : 'So close!';
+  $('raceAgain').innerHTML = '<svg class="ico"><use href="#i-redo"/></svg>Again';
   $('raceStats').innerHTML = chip('i-clock', fmt(Math.round(elapsed))) + chip('i-steps', `${steps} steps`);
   $('raceBadge').classList.toggle('gold', place === 0 || !!teamWin);
   $('raceBadge').innerHTML = `<svg class="ico"><use href="#${place === 0 || teamWin ? 'i-trophy' : 'i-flag'}"/></svg>`;
@@ -2754,8 +2821,406 @@ function updateRaceUI() {
     arrow.style.transform = `translate(${cx + dx * k}px, ${cy + dy * k}px) translate(-50%, -50%) rotate(${Math.atan2(dy, dx)}rad)`;
   });
 }
+// ---------- wolves ----------
+// Wolf Chase (on your own): find the key and reach the portal while wolves roam the maze. A wolf that gets close
+// spots you ("!") and gives chase for a while; get far enough away and it loses you ("?") and goes back to roaming.
+// Caught = game over. Each map cleared is bigger with one more wolf; the underworld's wolves are the glowing fungus ones.
+// The same wolves are the computer wolves of the online Wolves vs Animals game (run by the host).
+const WOLF = { roam: 0.34, chase: 0.19, human: 0.155, see: 5, lose: 9, chaseMax: 7, rest: 3, size: 1.12, catchR: 0.5 };
+const WOLF_WORLDS = ['woods', 'desert', 'snow', 'autumn', 'cave'];
+const WOLF_SHAPES = () => Object.keys(SHAPES).filter(k => !k.startsWith('__') && k !== 'twin');
+const wolfCount = run => Math.min(7, 2 + run);
+const wolfCells = run => Math.min(14, 8 + run);
+// "!" when a wolf spots you, "?" when it loses you
+const wolfMark = (() => {
+  const tex = ch => {
+    const c = document.createElement('canvas'); c.width = c.height = 64;
+    const x = c.getContext('2d');
+    x.font = '900 50px Nunito, system-ui, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.lineJoin = 'round';
+    x.lineWidth = 11; x.strokeStyle = '#ffffff'; x.strokeText(ch, 32, 35); x.fillStyle = ch === '!' ? '#ff5a4e' : '#7a6a5a'; x.fillText(ch, 32, 35);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  };
+  return { '!': new THREE.SpriteMaterial({ map: tex('!'), depthTest: false, transparent: true }), '?': new THREE.SpriteMaterial({ map: tex('?'), depthTest: false, transparent: true }) };
+})();
+const wolfHaloMat = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(110,230,255,.32)'); g.addColorStop(0.5, 'rgba(150,120,255,.1)'); g.addColorStop(1, 'rgba(150,120,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  return new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
+})();
+// the fungus wolf's eyes and mushrooms glow: the bright blue-to-violet parts of its own picture shine, pulsing slowly
+const glowU = { uGlowT: { value: 0 } };
+function addGlow(mat) {
+  const prev = mat.onBeforeCompile, key = mat.customProgramCacheKey();
+  mat.onBeforeCompile = (sh, r) => {
+    prev.call(mat, sh, r);
+    sh.uniforms.uGlowT = glowU.uGlowT;
+    sh.fragmentShader = 'uniform float uGlowT;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      {
+        vec3 c = diffuseColor.rgb;
+        float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
+        float k = smoothstep(0.3, 0.55, (mx - mn) / max(mx, 0.001)) * smoothstep(0.06, 0.22, mx) * step(c.r, c.b * 1.15);
+        totalEmissiveRadiance += c * k * (1.5 + 0.7 * sin(uGlowT));
+      }`);
+  };
+  mat.customProgramCacheKey = () => key + 'glow';
+}
+// a walking character that isn't you: the wolves (and online players), with the same walk as everyone
+function makeActor(ch, tile, { glow = false, scale = 1, skinIdx = -1 } = {}) {
+  const U = newWalkU(), inner = ch.scene.clone(true), P = ch.P, buddy = ch.id === 'buddy';
+  const T = { uTint: { value: new THREE.Color(skinIdx >= 0 ? SKINS[skinIdx] : '#ffffff') }, uTintOn: { value: buddy && skinIdx >= 0 ? 1 : 0 } };
+  const box = new THREE.Box3().setFromObject(inner), s = CFG.charH * scale / (box.max.y - box.min.y);
+  inner.scale.setScalar(s);
+  inner.position.set(-(box.min.x + box.max.x) / 2 * s, -box.min.y * s, -(box.min.z + box.max.z) / 2 * s);
+  inner.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.metalness = 0; o.castShadow = true; addWalk(o.material, { outfit: buddy, U, T, P, key: ch.id }); if (glow) addGlow(o.material); } });
+  const outline = inner.clone(true), outMat = new THREE.MeshBasicMaterial({ color: '#161414', side: THREE.BackSide });
+  addWalk(outMat, { outline: 0.016, U, P, key: ch.id });
+  outline.traverse(o => { if (o.isMesh) { o.material = outMat; o.castShadow = false; } });
+  const body = new THREE.Group(); body.add(inner, outline);
+  const root = new THREE.Group(); root.add(body);
+  if (glow) { const halo = new THREE.Sprite(wolfHaloMat); halo.position.y = CFG.charH * scale * 0.86; halo.scale.setScalar(0.62); root.add(halo); } // (a faint haze round the glowing head)
+  const mark = new THREE.Sprite(wolfMark['!']); mark.visible = false; mark.renderOrder = 31; mark.position.y = CFG.charH * scale + 0.32; root.add(mark);
+  root.position.set(tile[0] - origin, 0, tile[1] - origin);
+  scene.add(root);
+  return { root, body, U, mark, markT: 0, x: tile[0], z: tile[1], fx: tile[0], fz: tile[1], t: 1, wait: 0, facing: -Math.PI / 4, stepTime: WOLF.roam, scale };
+}
+function dropActor(a) {
+  scene.remove(a.root);
+  setTimeout(() => a.root.traverse(o => { if (o.material && !o.isSprite) [].concat(o.material).forEach(m => m.dispose()); }), 3000); // (textures are shared; freed a moment later so a shader still being prepared isn't pulled away)
+}
+let wolves = [], wolfRun = 0, wolfOver = false, wolfMoving = false, wolfBest = 0;
+try { wolfBest = +localStorage.getItem('buddy-wolf-best') || 0; } catch {}
+function clearWolves() { wolves.forEach(dropActor); wolves = []; }
+// walking distance from the given tiles to every tile (-1: can't get there)
+function distFrom(tiles, mz = maze) {
+  const { N, g } = mz, d = new Int16Array(N * N).fill(-1), q = [];
+  for (const [x, z] of tiles) { const i = z * N + x; if (i >= 0 && i < N * N && d[i] < 0 && !g[i]) { d[i] = 0; q.push(i); } }
+  for (let h = 0; h < q.length; h++) {
+    const i = q[h], x = i % N, z = (i / N) | 0;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Z = z + dz, j = Z * N + X; if (X >= 0 && Z >= 0 && X < N && Z < N && !g[j] && d[j] < 0) { d[j] = d[i] + 1; q.push(j); } }
+  }
+  return d;
+}
+// wolves spread out over the tiles far from where you start (each one as far as it can be from the others)
+function spawnWolves(ch, n, { glow = false, from = [start], minD = 7 } = {}) {
+  const { N } = maze, dStart = distFrom(from), far = [];
+  for (let i = 0; i < N * N; i++) if (dStart[i] >= Math.min(minD, (N - 1) / 2) && !(i % N === goal[0] && ((i / N) | 0) === goal[1])) far.push(i);
+  if (!far.length) for (let i = 0; i < N * N; i++) if (dStart[i] > 2) far.push(i);
+  const picked = [];
+  for (let k = 0; k < n && far.length; k++) {
+    let best = far[Math.floor(Math.random() * far.length)], bd = -1;
+    if (picked.length) for (const i of far) { const d = Math.min(...picked.map(j => Math.abs(i % N - j % N) + Math.abs(((i / N) | 0) - ((j / N) | 0)))); if (d > bd) { bd = d; best = i; } }
+    picked.push(best);
+  }
+  return picked.map(i => {
+    const w = makeActor(ch, [i % N, (i / N) | 0], { glow, scale: WOLF.size });
+    return Object.assign(w, { wolf: true, state: 'roam', chaseT: 0, rest: 1 + Math.random() * 2, home: distFrom([[w.x, w.z]]), wait: Math.random() * 1.5 });
+  });
+}
+function flashMark(a, ch) { a.mark.material = wolfMark[ch]; a.markT = 1.3; }
+// a wolf's next tile: down the scent toward its prey while chasing; otherwise it roams, not turning back unless it has
+// to, and drifts home when it has wandered off
+function wolfStep(w, d) {
+  const { N, g } = maze, here = w.z * N + w.x, dh = d ? d[here] : -1;
+  const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => [w.x + dx, w.z + dz]).filter(([x, z]) => x >= 0 && z >= 0 && x < N && z < N && !g[z * N + x]);
+  if (w.state === 'roam' && dh >= 0 && dh <= WOLF.see && w.rest <= 0) { w.state = 'chase'; w.chaseT = 0; flashMark(w, '!'); sfx.ui('nope', 0.35); }
+  if (w.state === 'chase') {
+    if (dh < 0 || dh > WOLF.lose || w.chaseT > WOLF.chaseMax) { w.state = 'roam'; w.rest = WOLF.rest; w.wait = 1.1; flashMark(w, '?'); return null; }
+    let best = null, bv = 1e9;
+    for (const t of nb) { const v = d[t[1] * N + t[0]]; if (v >= 0 && v < bv) { bv = v; best = t; } }
+    return best;
+  }
+  let opts = nb.filter(([x, z]) => !(x === w.fx && z === w.fz));
+  if (!opts.length) opts = nb;
+  if (!opts.length) return null;
+  if (w.home[here] > 6 && Math.random() < 0.6) { const back = opts.filter(([x, z]) => w.home[z * N + x] < w.home[here]); if (back.length) opts = back; }
+  return opts[Math.floor(Math.random() * opts.length)];
+}
+// prey: you on your own; online, every animal that's in play (the host moves the computer wolves for everyone)
+let preyKey = '', preyDist = null;
+function wolfPrey() {
+  if (mode === 'hunt') return hunt.preyTiles();
+  return wolfOver || won ? [] : [[st.moving ? st.tx : st.gx, st.moving ? st.tz : st.gz]];
+}
+function updateWolves(dt, time) {
+  wolfMoving = false;
+  if (!wolves.length) return;
+  glowU.uGlowT.value = time * 2.6;
+  const live = state === 'play' && intro.t < 0 && (mode === 'hunt' ? hunt.live() : !won && !wolfOver);
+  if (live) {
+    const prey = wolfPrey(), k = prey.map(p => p.join(',')).join(';');
+    if (k !== preyKey) { preyKey = k; preyDist = prey.length ? distFrom(prey) : null; }
+  }
+  for (const w of wolves) {
+    let hop = 0;
+    if (w.rest > 0) w.rest -= dt;
+    if (live) {
+      if (w.state === 'chase') w.chaseT += dt;
+      if (w.wait > 0) w.wait -= dt;
+      else if (w.t >= 1) {
+        const nx = wolfStep(w, preyDist);
+        if (nx) {
+          w.fx = w.x; w.fz = w.z; [w.x, w.z] = nx; w.t = 0;
+          w.stepTime = w.state === 'chase' ? WOLF.chase : WOLF.roam;
+          w.facing = Math.atan2(-(w.z - w.fz), w.x - w.fx);
+          if (w.pid !== undefined) net.send({ t: 'pos', x: w.x, z: w.z, p: w.pid, s: w.stepTime });
+        } else if (w.wait <= 0) w.wait = 0.25 + Math.random() * 0.6; // stops and sniffs
+      }
+      if (w.t < 1) { w.t = Math.min(1, w.t + dt / w.stepTime); hop = Math.abs(Math.sin(w.U.uPhase.value)) * (w.state === 'chase' ? 0.07 : 0.035); wolfMoving = true; }
+    }
+    animateActor(w, dt, time, hop, live && w.t < 1, w.state === 'chase');
+    if (live && mode === 'wolf' && Math.hypot(w.root.position.x - player.position.x, w.root.position.z - player.position.z) < WOLF.catchR) wolfCaught(w);
+  }
+}
+// moves an actor between its tiles and drives its walk (a run while chasing: leaning in, bigger hops)
+function animateActor(a, dt, time, hop, walking, running) {
+  const e = Math.min(1, a.t);
+  a.root.position.set(a.fx + (a.x - a.fx) * e - origin, hop + (a.pounce || 0), a.fz + (a.z - a.fz) * e - origin);
+  a.U.uAmp.value += ((walking ? 1 : 0) - a.U.uAmp.value) * Math.min(1, dt * 12);
+  if (a.U.uAmp.value > 0.01) a.U.uPhase.value += dt * Math.PI / a.stepTime; else a.U.uPhase.value = 0;
+  const amp = a.U.uAmp.value;
+  a.body.rotation.z = -(running ? 0.24 : 0.12) * amp + (1 - amp) * Math.sin(time * 1.6 + a.x) * 0.03;
+  a.body.rotation.x = Math.sin(a.U.uPhase.value) * 0.07 * amp + (a.wait > 0 && !walking ? Math.sin(time * 9) * 0.05 : 0); // sniffing
+  let d = a.facing - a.root.rotation.y;
+  d = Math.atan2(Math.sin(d), Math.cos(d));
+  a.root.rotation.y += d * Math.min(1, dt * 14);
+  if (a.markT > 0) {
+    a.markT -= dt;
+    const k = 1.3 - a.markT, pop = k < 0.2 ? easeOutBack(k / 0.2) : a.markT < 0.25 ? a.markT / 0.25 : 1;
+    a.mark.visible = a.markT > 0; a.mark.scale.setScalar(0.34 * Math.max(0.001, pop));
+  }
+}
+function wolfCaught(w) {
+  if (wolfOver || won) return;
+  wolfOver = true; heldDir = queued = null;
+  w.facing = Math.atan2(-(player.position.z - w.root.position.z), player.position.x - w.root.position.x);
+  st.bdx = Math.sign(w.root.position.x - player.position.x); st.bdz = st.bdx ? 0 : Math.sign(w.root.position.z - player.position.z); st.bumpT = 0; // knocked over
+  flashMark(w, '!');
+  let k = 0; const leap = setInterval(() => { k += 0.05; w.pounce = Math.sin(Math.min(1, k / 0.4) * Math.PI) * 0.35; if (k >= 0.4) { clearInterval(leap); w.pounce = 0; } }, 16);
+  for (let i = 0; i < 14; i++) { const a = i / 14 * Math.PI * 2; spawnPuff(player.position.x, 0.4, player.position.z, Math.cos(a) * 1.3, rand(0.4, 1), Math.sin(a) * 1.3, rand(0.07, 0.11), STONE_DUST[i % STONE_DUST.length], 0.6); }
+  sfx.play('bump', 0.8);
+  setTimeout(() => wolfEnd(false), 1200);
+}
+function wolfEnd(cleared) {
+  const n = wolfRun + (cleared ? 1 : 0);
+  if (n > wolfBest) { wolfBest = n; try { localStorage.setItem('buddy-wolf-best', n); } catch {} }
+  $('raceTitle').textContent = cleared ? `Map ${wolfRun + 1} cleared!` : 'Caught by a wolf!';
+  $('raceStats').innerHTML = chip('i-flag', `${n} map${n === 1 ? '' : 's'} cleared`) + chip('i-trophy', `best ${wolfBest}`);
+  $('raceBadge').classList.toggle('gold', cleared);
+  $('raceBadge').innerHTML = `<svg class="ico"><use href="#${cleared ? 'i-portal' : 'i-paw'}"/></svg>`;
+  const nb = WOLF_WORLDS[(wolfRun + 1) % WOLF_WORLDS.length];
+  $('raceRank').innerHTML = cleared ? `<li class="me"><b>Next</b>${wolfCount(wolfRun + 1)} wolves · a bigger maze${nb === 'cave' ? ' · the underworld' : ''}</li>` : '';
+  $('raceAgain').innerHTML = `<svg class="ico"><use href="#${cleared ? 'i-next' : 'i-redo'}"/></svg>${cleared ? 'Next map' : 'Try again'}`;
+  show('raceEnd');
+}
+// one map of Wolf Chase
+async function startWolf(run = 0) {
+  await myChar();
+  wolfRun = run; wolfOver = false;
+  const b = WOLF_WORLDS[run % WOLF_WORLDS.length], fungi = b === 'cave';
+  $('busy').classList.add('on');
+  if (!stoneSets[b]) await stoneSet(b);
+  const ch = await loadChar(fungi ? 'wolf_fungi' : 'wolf');
+  $('busy').classList.remove('on');
+  const rnd = mulberry32((Math.random() * 1e9) | 0), shapes = WOLF_SHAPES(), m = genShapedMaze(wolfCells(run), rnd, shapes[Math.floor(rnd() * shapes.length)]);
+  warp.t = -1; $('fader').style.opacity = 0;
+  buildLevel(-1, { maze: m, entries: [m.start], goal: m.goal, keyAt: keyTile(m, m.start, m.goal, 0.6), biome: b, kind: 'wolf', portal: true });
+  wolves = spawnWolves(ch, wolfCount(run), { glow: fungi });
+  ui.level.textContent = `MAP ${run + 1}`;
+  show('play'); intro.t = 0; intro.warm = 3; intro.wave = false; intro.online = intro.hold = false;
+  toast(run === 0 ? 'Find the key and reach the portal. Don’t let the wolves catch you!' : fungi ? 'The underworld: fungus wolves see in the dark' : `${wolfCount(run)} wolves this time`);
+}
+
+// ---------- Wolves vs Animals (online) ----------
+// Everyone picks a side in the lobby. The animals start in the corners: they must find the 4 keys hidden around the
+// maze (one deep in each quarter), then escape through the portal in the middle. The wolves start around the portal
+// and win if the clock runs out first. A caught animal is out for 5 seconds, then comes back at its corner (safe for
+// 2 more). The host keeps the score: it decides catches, keys and the end, and runs the computer wolves (they join if
+// nobody picked the wolves).
+const HUNT = { dur: 180, out: 5, safe: 2, keys: 4 };
+const HUNT_CELLS = [12, 15, 18];
+let myRole = 'animal';
+try { myRole = localStorage.getItem('buddy-role') === 'wolf' ? 'wolf' : 'animal'; } catch {}
+const hunt = (() => {
+  let S = null;
+  const now = () => performance.now();
+  const isOut = pid => S && S.out.has(pid) && now() < S.out.get(pid);
+  const isSafe = pid => S && S.out.has(pid) && now() < S.out.get(pid) + HUNT.safe * 1000;
+  const name = i => i === S.me ? 'You' : S.players[i].bot ? 'Computer wolf' : i === 0 ? 'Host' : 'Friend';
+  // where each animal or wolf is right now (world position) and on which tile
+  function posOf(i) {
+    if (i === S.me) return player.position;
+    const a = S.actors.get(i) || wolves.find(w => w.pid === i); return a && a.root.position;
+  }
+  function tileOf(i) {
+    if (i === S.me) return [st.moving ? st.tx : st.gx, st.moving ? st.tz : st.gz];
+    const a = S.actors.get(i) || wolves.find(w => w.pid === i); return a ? [a.x, a.z] : null;
+  }
+  // the keys: in each quarter, the dead end furthest from both the middle and the corner (the same on every phone)
+  function keyTiles(m, mid) {
+    const { N, g } = m, H = (N - 1) / 2, dMid = distFrom([mid]), out = [];
+    for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+      let best = null, bs = -1;
+      for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) {
+        if (g[z * N + x] || Math.sign(x - H) !== sx || Math.sign(z - H) !== sz) continue;
+        const open = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dz]) => { const X = x + dx, Z = z + dz; return X >= 0 && Z >= 0 && X < N && Z < N && !g[Z * N + X]; }).length;
+        const corner = Math.abs(x - H) + Math.abs(z - H), sc = dMid[z * N + x] * (open === 1 ? 1.5 : 1) - Math.max(0, corner - H * 1.4) * 2;
+        if (sc > bs) { bs = sc; best = [x, z]; }
+      }
+      out.push(best || [H + sx, H + sz]);
+    }
+    return out;
+  }
+  function clear() {
+    if (S) { S.actors.forEach(dropActor); S.keyMeshes.forEach(k => { scene.remove(k); freeTree(k); }); }
+    S = null;
+  }
+  async function start(o) {
+    const b = o.biome, fungi = b === 'cave';
+    $('busy').classList.add('on');
+    if (!stoneSets[b]) await stoneSet(b);
+    const chs = await Promise.all(o.players.map(p => loadChar(p.role === 'wolf' ? (fungi ? 'wolf_fungi' : 'wolf') : p.char || 'buddy')));
+    $('busy').classList.remove('on');
+    raceSize = 4;
+    const rm = makeRaceMaze(mulberry32(o.seed), o.shape, o.cells), m = rm.maze, N = m.N, mid = rm.goal;
+    // the animals take the corners in player order; the wolves stand on the tiles nearest the portal
+    const dMid = distFrom([mid], m), around = [];
+    for (let i = 0; i < N * N; i++) if (dMid[i] > 0 && dMid[i] <= 4) around.push(i);
+    around.sort((a, c) => dMid[a] - dMid[c] || a - c);
+    let ai = 0, wi = 0;
+    const tiles = o.players.map(p => p.role === 'wolf' ? (j => [j % N, (j / N) | 0])(around[wi++ % Math.max(1, around.length)]) : rm.entries[ai++ % rm.entries.length]);
+    warp.t = -1; $('fader').style.opacity = 0;
+    buildLevel(-1, { maze: m, entries: [tiles[o.me]], goal: mid, keyAt: null, biome: b, kind: 'hunt', portal: true });
+    S = { o, me: o.me, host: o.me === 0, players: o.players, tiles, actors: new Map(), taken: Array(HUNT.keys).fill(-1), out: new Map(), endAt: 0, over: false, catches: 0, keyMeshes: [] };
+    S.keysAt = keyTiles(m, mid);
+    S.keyMeshes = S.keysAt.map(([x, z]) => { const k = makeKey(); k.position.set(x - origin, 0.55, z - origin); scene.add(k); return k; });
+    if (player.userData.cid !== chs[o.me].id) setupPlayer(chs[o.me]);
+    o.players.forEach((p, i) => {
+      if (i === o.me) return;
+      const wolfy = p.role === 'wolf';
+      if (p.bot && S.host) { // the host's computer wolves think for themselves (and tell everyone where they go)
+        const [w] = spawnWolves(chs[i], 1, { glow: fungi, from: [tiles[i]], minD: 0 });
+        Object.assign(w, { pid: i, x: tiles[i][0], z: tiles[i][1], fx: tiles[i][0], fz: tiles[i][1], home: distFrom([tiles[i]]), wait: 1.5 });
+        wolves.push(w);
+      } else {
+        const a = makeActor(chs[i], tiles[i], { glow: fungi && wolfy, scale: wolfy ? WOLF.size : 1, skinIdx: wolfy ? -1 : p.skin });
+        a.pid = i; a.role = p.role; a.stepTime = wolfy ? WOLF.human : CFG.stepTime; S.actors.set(i, a);
+      }
+    });
+    hasKey = false; ui.level.textContent = `0/${HUNT.keys}`; // (keys found; the key chip sits beside it)
+    show('play'); intro.t = 0; intro.warm = 3; intro.wave = false; lastCount = -1; intro.online = true; intro.hold = !intro.goAt;
+    net.ready();
+    toast(o.players[o.me].role === 'wolf' ? 'You are a wolf: catch the animals before they escape!' : `Find the ${HUNT.keys} keys, then escape through the portal!`);
+  }
+  // the host: a wolf touching an animal (that isn't out or just back) catches it
+  function referee() {
+    const wolfIds = [], prey = [];
+    S.players.forEach((p, i) => { if (p.role === 'wolf') wolfIds.push(i); else if (!isSafe(i)) prey.push(i); });
+    for (const v of prey) {
+      const pv = posOf(v); if (!pv) continue;
+      for (const w of wolfIds) { const pw = posOf(w); if (pw && Math.hypot(pw.x - pv.x, pw.z - pv.z) < WOLF.catchR) { caught(v, w); break; } }
+    }
+    if (S.endAt && now() >= S.endAt) end('wolves');
+  }
+  function caught(v, by) {
+    if (S.host) { S.catches++; net.send({ t: 'caught', v, by }); }
+    S.out.set(v, now() + HUNT.out * 1000);
+    const p = posOf(v);
+    if (p) for (let i = 0; i < 14; i++) { const a = i / 14 * Math.PI * 2; spawnPuff(p.x, 0.4, p.z, Math.cos(a) * 1.3, rand(0.4, 1), Math.sin(a) * 1.3, rand(0.07, 0.11), STONE_DUST[i % STONE_DUST.length], 0.6); }
+    const w = S.actors.get(by) || wolves.find(o => o.pid === by); if (w) flashMark(w, '!');
+    sfx.play('bump', v === S.me ? 0.8 : 0.4);
+    if (v === S.me) {
+      player.visible = false; heldDir = queued = null; st.moving = false;
+      toast(`Caught! Back in ${HUNT.out} seconds…`);
+      setTimeout(() => { // back at my corner
+        if (!S || S.over) return;
+        const [x, z] = S.tiles[S.me];
+        st.gx = st.tx = st.fx = x; st.gz = st.tz = st.fz = z; st.t = 1; st.moving = false;
+        player.position.set(x - origin, 0, z - origin); player.visible = true;
+        net.send({ t: 'pos', x, z, sp: 1 });
+      }, HUNT.out * 1000);
+    } else { const a = S.actors.get(v); if (a) a.root.visible = false; }
+  }
+  function take(k, pid) {
+    if (S.taken[k] >= 0) return;
+    S.taken[k] = pid;
+    if (S.host) net.send({ t: 'keys', k: S.taken, by: pid });
+    applyKeys(pid);
+  }
+  function applyKeys(by) {
+    const n = S.taken.filter(t => t >= 0).length;
+    S.keyMeshes.forEach((km, k) => { km.visible = S.taken[k] < 0; });
+    ui.level.textContent = `${n}/${HUNT.keys}`;
+    if (by !== undefined) {
+      sfx.ui('chime', 0.4);
+      toast(n >= HUNT.keys ? 'All keys found! The portal is open: escape!' : `${by === S.me ? 'You' : name(by)} found a key! (${n}/${HUNT.keys})`);
+    }
+    hasKey = n >= HUNT.keys; $('keyHud').classList.toggle('got', hasKey);
+  }
+  function end(w, by) {
+    if (S.over) return;
+    S.over = true;
+    if (S.host) net.send({ t: 'end', w, by, c: S.catches });
+    heldDir = queued = null;
+    const mine = S.players[S.me].role === 'wolf' ? 'wolves' : 'animals', iWon = mine === w;
+    if (w === 'animals' && by !== undefined) { const p = posOf(by); if (p) for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; spawnPuff(p.x, 0.3, p.z, Math.cos(a) * 1.6, rand(0.5, 1.4), Math.sin(a) * 1.6, rand(0.06, 0.1), i % 2 ? '#f2c14e' : '#ffffff', 0.6); } }
+    if (iWon) confetti();
+    $('raceTitle').textContent = `${w === 'animals' ? 'Animals' : 'Wolves'} win!`;
+    $('raceStats').innerHTML = chip('i-key', `${S.taken.filter(t => t >= 0).length}/${HUNT.keys} keys`) + chip('i-paw', `${S.catches} caught`);
+    $('raceBadge').classList.toggle('gold', iWon);
+    $('raceBadge').innerHTML = `<svg class="ico"><use href="#${w === 'animals' ? 'i-portal' : 'i-paw'}"/></svg>`;
+    $('raceRank').innerHTML = S.players.map((p, i) => `<li class="${i === S.me ? 'me' : ''}"><b>${p.role === 'wolf' ? 'Wolf' : 'Animal'}</b><i style="background:${p.role === 'wolf' ? '#6f7f95' : SKINS[p.skin]}"></i>${name(i)}${S.taken.includes(i) ? ' · found a key' : ''}</li>`).join('');
+    $('raceAgain').innerHTML = '<svg class="ico"><use href="#i-redo"/></svg>Again';
+    setTimeout(() => show('raceEnd'), 900);
+  }
+  return {
+    start, clear,
+    get on() { return !!S; },
+    get keysAt() { return S && S.keysAt; },
+    amWolf: () => !!S && S.players[S.me].role === 'wolf',
+    live: () => !!S && !S.over && state === 'play' && intro.t < 0,
+    canMove: () => !S || (!S.over && !isOut(S.me)),
+    preyTiles: () => S ? S.players.map((p, i) => p.role !== 'wolf' && !isSafe(i) ? tileOf(i) : null).filter(Boolean) : [],
+    // my step ended: as an animal, a key under my feet is mine; with every key found, the portal is the way out
+    onStep(x, z) {
+      if (!S || S.over || S.players[S.me].role === 'wolf' || isOut(S.me)) return;
+      const k = S.keysAt.findIndex(([kx, kz], i) => kx === x && kz === z && S.taken[i] < 0);
+      if (k >= 0) { if (S.host) take(k, S.me); else net.send({ t: 'grab', k }); }
+      if (x === goal[0] && z === goal[1]) { if (hasKey) { if (S.host) end('animals', S.me); else net.send({ t: 'esc' }); } else toast(`The portal opens once all ${HUNT.keys} keys are found`); }
+    },
+    onMsg(m) {
+      if (!S) return;
+      if (m.t === 'pos') {
+        const a = S.actors.get(m.p); if (!a) return;
+        if (m.sp) { a.x = a.fx = m.x; a.z = a.fz = m.z; a.t = 1; a.root.visible = true; return; }
+        a.fx = a.x; a.fz = a.z; a.x = m.x; a.z = m.z; a.t = 0; if (m.s) a.stepTime = m.s;
+        a.facing = Math.atan2(-(a.z - a.fz), a.x - a.fx);
+      }
+      else if (m.t === 'caught') caught(m.v, m.by);
+      else if (m.t === 'keys') { const before = S.taken.filter(t => t >= 0).length; S.taken = m.k; if (S.taken.filter(t => t >= 0).length !== before) applyKeys(m.by); }
+      else if (m.t === 'end') { S.catches = m.c ?? S.catches; end(m.w, m.by); }
+      else if (S.host && m.t === 'grab' && !isOut(m.p)) take(m.k, m.p);
+      else if (S.host && m.t === 'esc' && hasKey && !isOut(m.p)) end('animals', m.p);
+    },
+    update(dt, time) {
+      if (!S) return;
+      if (!S.endAt && intro.t < 0 && state === 'play') S.endAt = now() + HUNT.dur * 1000; // (every phone's countdown ends together)
+      if (S.endAt) ui.time.textContent = fmt(Math.max(0, Math.ceil((S.endAt - now()) / 1000)));
+      const live = this.live();
+      for (const a of S.actors.values()) {
+        let hop = 0;
+        if (a.t < 1) { a.t = Math.min(1, a.t + dt / a.stepTime); hop = Math.abs(Math.sin(a.U.uPhase.value)) * (a.role === 'wolf' ? 0.06 : 0.05); wolfMoving = true; }
+        animateActor(a, dt, time, hop, a.t < 1, a.role === 'wolf');
+      }
+      S.keyMeshes.forEach((k, i) => { k.userData.spin.rotation.y = time * 1.6 + i; k.position.y = 0.55 + Math.sin(time * 2.2 + i) * 0.04; });
+      if (live && S.host) referee();
+    },
+  };
+})();
 // a race: on your own against computer Buddies, or online against a friend (same seed, same maze, opposite corners)
 async function startRace(online = null) {
+  await myChar();
   raceSize = online ? online.players.length : raceCfg.racers; raceTeam = online ? online.mode === 'teams' : raceCfg.mates > 0;
   const b = online ? online.biome : raceCfg.biome;
   if (!stoneSets[b]) { $('busy').classList.add('on'); await stoneSet(b); $('busy').classList.remove('on'); }
@@ -2777,6 +3242,7 @@ async function startRace(online = null) {
 }
 
 function win() {
+  if (mode === 'wolf') { won = true; enterT = 0; sfx.ui('whoosh', 0.45); heldDir = queued = null; confetti(); return setTimeout(() => wolfEnd(true), 900); }
   won = true; enterT = 0;
   sfx.ui('whoosh', 0.45);
   heldDir = queued = null;
@@ -2868,7 +3334,7 @@ function relayConn(out) {
 const net = (() => {
   // A small lobby: the host holds a code, up to 3 friends join it (a star: every message goes through the host), the
   // host presses Start. Everyone gets the same maze and their own corner; moves and the win are relayed to all.
-  let peer = null, host = false, code = '', conns = [], hostConn = null, players = [], me = 0, waitTimer = 0, pending = [], mode = 'ffa';
+  let peer = null, host = false, code = '', conns = [], hostConn = null, players = [], me = 0, waitTimer = 0, pending = [], mode = 'ffa', game = 'race';
   let relay = null, relayTimer = 0, knockTimer = 0;
   const gid = Math.random().toString(36).slice(2, 9), topic = () => 'buddymaze/v1/' + code.toLowerCase() + '/';
   const MAX = 4, TEAM = ['#5bb2f2', '#ff8c6b'], TEAM_NAME = ['Blue', 'Orange'];
@@ -2891,26 +3357,30 @@ const net = (() => {
   // the lobby list: who's in, and (for the host) the Start button
   function lobby() {
     const size = host ? raceCfg.size : Math.max(players.length, 2), humans = players.filter(p => !p.bot).length;
-    $('friend').classList.toggle('teams', mode === 'teams');
+    $('friend').classList.toggle('teams', mode === 'teams' && game !== 'hunt');
+    $('friend').classList.toggle('hunt', game === 'hunt');
+    document.querySelectorAll('#frRole button').forEach(b => b.classList.toggle('on', b.dataset.fr === 'role:' + ((players[me] && players[me].role) || myRole)));
     const others = players.filter((_, i) => i !== me);
-    Promise.all(others.map(p => loadChar(p.char || 'buddy'))).then(chs => { if (state === 'friend') face.setCrew(chs.map((ch, k) => ({ ch, skin: others[k].skin }))); });
-    $('lobby').innerHTML = players.map((p, i) => `<span class="lp" data-pi="${i}"><i style="--c:${SKINS[p.skin]}"></i>${i === me ? 'You' : p.bot ? 'Computer' : i === 0 ? 'Host' : 'Friend'}${mode === 'teams' ? `<em style="--t:${TEAM[p.team]}">${TEAM_NAME[p.team]}</em>` : ''}</span>`).join('')
+    Promise.all(others.map(p => loadChar(game === 'hunt' && p.role === 'wolf' ? 'wolf' : p.char || 'buddy'))).then(chs => { if (state === 'friend') face.setCrew(chs.map((ch, k) => ({ ch, skin: others[k].skin }))); });
+    $('lobby').innerHTML = players.map((p, i) => `<span class="lp" data-pi="${i}"><i style="--c:${SKINS[p.skin]}"></i>${i === me ? 'You' : p.bot ? 'Computer' : i === 0 ? 'Host' : 'Friend'}${game === 'hunt' ? `<em style="--t:${p.role === 'wolf' ? '#6f7f95' : '#7cc26b'}">${p.role === 'wolf' ? 'Wolf' : 'Animal'}</em>` : mode === 'teams' ? `<em style="--t:${TEAM[p.team]}">${TEAM_NAME[p.team]}</em>` : ''}</span>`).join('')
       + Array.from({ length: Math.max(0, size - players.length) }, () => '<span class="lp empty"><i></i>…</span>').join('');
-    $('friendStart').disabled = !(host && players.length > 1);
+    $('friendStart').disabled = !(host && (game === 'hunt' ? players.some(p => p.role !== 'wolf') : players.length > 1));
     $('friendStart').style.display = host ? '' : 'none';
-    if (host) status(humans > 1 ? `${humans - 1} friend${humans > 2 ? 's' : ''} joined! Press Start when everyone is in.` : players.length > 1 ? 'Invite friends, or press Start to play with computer Buddies.' : 'Press Invite friends and send the link.');
+    if (host && game === 'hunt') status(!players.some(p => p.role !== 'wolf') ? 'Someone has to be an animal!' : !players.some(p => p.role === 'wolf') ? 'Nobody is a wolf: computer wolves will hunt you. Press Start!' : 'Press Start when everyone has picked a side.');
+    else if (host) status(humans > 1 ? `${humans - 1} friend${humans > 2 ? 's' : ''} joined! Press Start when everyone is in.` : players.length > 1 ? 'Invite friends, or press Start to play with computer Buddies.' : 'Press Invite friends and send the link.');
     else status('Waiting for the host to start…');
   }
   // the host's lobby: you, the friends who joined, then computer Buddies for the empty spots (if wanted); teams alternate
   function syncLobby() {
     if (!host) return;
     const keep = players.map(p => p.team);
-    const humans = [{ skin, char: charId }, ...live().map(c => ({ skin: c.skin ?? 1, char: c.char || 'buddy' }))].slice(0, raceCfg.size);
-    const bots = raceCfg.bots ? Array.from({ length: raceCfg.size - humans.length }, (_, k) => ({ skin: RIVAL_SKINS[k % RIVAL_SKINS.length], bot: true, char: 'buddy' })) : [];
+    game = raceCfg.game;
+    const humans = [{ skin, char: charId, role: myRole }, ...live().map(c => ({ skin: c.skin ?? 1, char: c.char || 'buddy', role: c.role || 'animal' }))].slice(0, raceCfg.size);
+    const bots = raceCfg.bots && game !== 'hunt' ? Array.from({ length: raceCfg.size - humans.length }, (_, k) => ({ skin: RIVAL_SKINS[k % RIVAL_SKINS.length], bot: true, char: 'buddy' })) : [];
     mode = raceCfg.mode;
     players = [...humans, ...bots].map((p, i) => ({ ...p, team: keep[i] ?? i % 2 }));
     lobby();
-    live().forEach((c, i) => c.send({ t: 'lobby', players, you: i + 1, mode }));
+    live().forEach((c, i) => c.send({ t: 'lobby', players, you: i + 1, mode, game }));
   }
   function toggleTeam(i) { if (!host || mode !== 'teams' || !players[i]) return; players[i].team ^= 1; lobby(); live().forEach((c, k) => c.send({ t: 'lobby', players, you: k + 1, mode })); }
   // the host measures each friend's round trip all along, so the start can make up for it
@@ -2930,18 +3400,33 @@ const net = (() => {
     raceGo(T);
   }
   function start() { // host: everyone gets the same maze; player i starts in corner i
+    if (raceCfg.game === 'hunt') return startHunt();
     if (players.length < 2) return;
     readyAt = new Set(); clearTimeout(goTimer); goTimer = setTimeout(go, 20000); // (nobody waits forever for a stuck phone)
-    const setup = { t: 'setup', seed: (Math.random() * 1e9) | 0, biome: raceCfg.biome, shape: raceCfg.shape, cells: 10, players, mode };
+    const shape = raceCfg.shape === 'random' ? RACE_SHAPES[Math.floor(Math.random() * RACE_SHAPES.length)] : raceCfg.shape;
+    const setup = { t: 'setup', seed: (Math.random() * 1e9) | 0, biome: raceCfg.biome, shape, cells: RACE_CELLS[raceCfg.map ?? 1], players, mode };
     live().forEach((c, i) => c.send({ ...setup, you: i + 1 }));
     begin({ ...setup, you: 0 });
   }
-  function begin(m) { me = m.you; players = m.players; intro.goAt = 0; startRace({ ...m, me }); }
+  // Wolves vs Animals: the sides from the lobby, computer wolves if nobody picked the wolves, a big maze
+  function startHunt() {
+    syncLobby();
+    if (!players.some(p => p.role !== 'wolf')) return status('Someone has to be an animal!');
+    const all = players.some(p => p.role === 'wolf') ? players : [...players, ...Array.from({ length: players.length > 2 ? 2 : 1 }, () => ({ skin: 0, char: 'wolf', role: 'wolf', bot: true }))];
+    readyAt = new Set(); clearTimeout(goTimer); goTimer = setTimeout(go, 20000);
+    const shape = raceCfg.shape === 'random' ? RACE_SHAPES[Math.floor(Math.random() * RACE_SHAPES.length)] : raceCfg.shape;
+    const setup = { t: 'setup', game: 'hunt', seed: (Math.random() * 1e9) | 0, biome: raceCfg.biome, shape, cells: HUNT_CELLS[raceCfg.map ?? 2], players: all };
+    live().forEach((c, i) => c.send({ ...setup, you: i + 1 }));
+    begin({ ...setup, you: 0 });
+  }
+  function begin(m) { me = m.you; players = m.players; intro.goAt = 0; if (m.game === 'hunt') hunt.start({ ...m, me }); else startRace({ ...m, me }); }
   function onData(c, m) {
     dbg('got', m.t);
     if (host) {
-      if (m.t === 'hello') { if (live().length > raceCfg.size - 1) { c.send({ t: 'full' }); return; } c.skin = m.skin; c.char = m.char; syncLobby(); for (let k = 1; k <= 5; k++) setTimeout(() => c.open && c.send({ t: 'ping', s: performance.now() }), k * 300); }
+      if (m.t === 'hello') { if (live().length > raceCfg.size - 1) { c.send({ t: 'full' }); return; } c.skin = m.skin; c.char = m.char; c.role = m.role; syncLobby(); for (let k = 1; k <= 5; k++) setTimeout(() => c.open && c.send({ t: 'ping', s: performance.now() }), k * 300); }
       else if (m.t === 'pos' || m.t === 'win') { toAll(m, c); remote(m); } // pass it on to the others too
+      else if (m.t === 'role') { c.role = m.r === 'wolf' ? 'wolf' : 'animal'; syncLobby(); }
+      else if (m.t === 'grab' || m.t === 'esc') remote(m); // (Wolves vs Animals: the host decides)
       else if (m.t === 'pong') {
         const r = performance.now() - m.s; c.rtt = c.rtt ? c.rtt * 0.7 + r * 0.3 : r;
         if (!(c.best <= r * 1.2)) { c.best = r; c.off = m.g - (m.s + r / 2); } // their clock minus mine
@@ -2949,7 +3434,7 @@ const net = (() => {
       else if (m.t === 'ready') { readyAt.add(live().indexOf(c) + 1); checkGo(); }
       else if (m.t === 'again') start();
     } else {
-      if (m.t === 'lobby') { players = m.players; me = m.you; mode = m.mode; lobby(); }
+      if (m.t === 'lobby') { players = m.players; me = m.you; mode = m.mode; game = m.game || 'race'; lobby(); }
       else if (m.t === 'setup') begin(m);
       else if (m.t === 'ping') c.send({ t: 'pong', s: m.s, g: performance.now() });
       else if (m.t === 'go') raceGo(m.at != null && m.at > performance.now() - 2000 ? m.at : performance.now() + Math.max(0, m.wait));
@@ -2958,6 +3443,7 @@ const net = (() => {
     }
   }
   function remote(m) { // someone else moved or won
+    if (game === 'hunt' || hunt.on) return hunt.onMsg(m);
     const r = rivals.find(o => o.pid === m.p); if (!r) return;
     if (m.t === 'pos') { r.fx = r.x; r.fz = r.z; r.x = m.x; r.z = m.z; r.t = 0; r.stepTime = CFG.stepTime; r.facing = Math.atan2(-(r.z - r.fz), r.x - r.fx); }
     else if (m.t === 'win' && !won) raceEnd(r);
@@ -3008,7 +3494,7 @@ const net = (() => {
     clearTimeout(waitTimer); clearTimeout(relayTimer); hostConn = cc;
     for (const o of pending) if (o !== cc) o.close();
     if (!cc.relay && relay) { clearInterval(knockTimer); setTimeout(relay.end, 300); relay = null; }
-    cc.send({ t: 'hello', skin, char: charId });
+    cc.send({ t: 'hello', skin, char: charId, role: myRole });
     status('Joined! Waiting for the host to start…');
   }
   addEventListener('pagehide', () => { if (peer || relay) reset(); });
@@ -3064,6 +3550,7 @@ const net = (() => {
     },
     ready() { if (host) { readyAt.add(0); checkGo(); } else send({ t: 'ready' }); },
     start, syncLobby, toggleTeam,
+    setRole(r) { myRole = r; try { localStorage.setItem('buddy-role', r); } catch {} if (host) syncLobby(); else { send({ t: 'role', r }); if (players[me]) players[me].role = r; lobby(); } },
     get isHost() { return host; },
     again() { if (host) start(); else { send({ t: 'again' }); toast('Asked the host for a rematch'); } },
     copy() { // the share sheet where there is one (phones, Macs), else copy the link
@@ -3091,12 +3578,14 @@ $('friend').addEventListener('click', e => {
   }
   const lp = e.target.closest('.lp[data-pi]'); if (lp) return net.toggleTeam(+lp.dataset.pi);
   const b = e.target.closest('[data-rc], [data-fr]'); if (!b) return;
-  if (b.dataset.rc) { const [k, v] = b.dataset.rc.split(':'); raceCfg[k] = v; }
+  if (b.dataset.rc) { const [k, v] = b.dataset.rc.split(':'); raceCfg[k] = k === 'map' ? +v : v; }
   else {
     const [k, v] = b.dataset.fr.split(':');
     if (k === 'size') raceCfg.size = Math.max(2, Math.min(4, raceCfg.size + +v));
     else if (k === 'mode') raceCfg.mode = v;
     else if (k === 'bots') raceCfg.bots = !raceCfg.bots;
+    else if (k === 'game') raceCfg.game = v;
+    else if (k === 'role') { net.setRole(v); return; }
   }
   renderRaceSetup(); net.syncLobby();
 });
@@ -3146,11 +3635,11 @@ function charPreview(id) {
 }
 function renderChars() {
   $('outfit').classList.toggle('buddy', charId === 'buddy');
-  $('chars').innerHTML = CHARS.map(c => {
+  $('chars').innerHTML = CHARS.filter(c => !c.npc).map(c => {
     const open = charUnlocked(c), lock = c.world >= 0 ? 'Unlock in ' + WORLDS[c.world].name : '';
     return `<button class="charcard ${c.id === charId ? 'on' : ''} ${open ? '' : 'locked'}" data-char="${c.id}" data-lock="${lock}"><img alt="" data-pic="${c.id}">${c.name}</button>`;
   }).join('');
-  for (const c of CHARS) charPreview(c.id).then(u => { const im = document.querySelector(`[data-pic="${c.id}"]`); if (im) im.src = u; });
+  for (const c of CHARS.filter(c => !c.npc)) charPreview(c.id).then(u => { const im = document.querySelector(`[data-pic="${c.id}"]`); if (im) im.src = u; });
 }
 $('chars').addEventListener('click', e => {
   const b = e.target.closest('[data-char]'); if (!b) return;
@@ -3254,11 +3743,14 @@ function show(name) {
   if (name === 'outfit') renderChars();
   if ((name === 'settings' || name === 'help') && (name === 'settings' ? settingsBack : helpBack) === 'title') $('title').classList.add('show'); // these panels sit over the title
   if (name === 'race') renderRaceSetup();
-  if (name === 'pause') $('pauseInfo').textContent = mode === 'race' ? (raceTeam ? `Team race · ${raceCfg.mates + 1} vs ${raceSize - raceCfg.mates - 1}` : `Race · ${raceSize} Buddies`) : `${WORLDS[Math.floor(L / LEVELS_PER_WORLD)].name} · level ${L % LEVELS_PER_WORLD + 1}`;
+  if (name === 'pause') $('pauseInfo').textContent = mode === 'wolf' ? `Wolf Chase · map ${wolfRun + 1} · ${wolves.length} wolves` : mode === 'hunt' ? 'Wolves vs Animals' : mode === 'race' ? (raceTeam ? `Team race · ${raceCfg.mates + 1} vs ${raceSize - raceCfg.mates - 1}` : `Race · ${raceSize} Buddies`) : `${WORLDS[Math.floor(L / LEVELS_PER_WORLD)].name} · level ${L % LEVELS_PER_WORLD + 1}`;
   if (name !== 'play') heldDir = queued = null;
   sfx.setScene(name === 'play' || name === 'pause' || name === 'win' || name === 'raceEnd');
 }
+// (after playing a wolf online, you are yourself again)
+const myChar = async () => { if (player.userData.cid !== charId) setupPlayer(await loadChar(charId)); };
 async function play(level) {
+  await myChar();
   const b = levelBiome(level);
   if (!stoneSets[b]) { $('busy').classList.add('on'); await stoneSet(b); $('busy').classList.remove('on'); } // first visit to a biome
   warp.t = -1; $('fader').style.opacity = 0;
@@ -3488,6 +3980,7 @@ $('pauseSoundBtn').addEventListener('click', () => openSettings('pause'));
 $('settingsDone').addEventListener('click', () => show(settingsBack));
 $('outfitBtn').addEventListener('click', () => show('outfit'));
 $('raceBtn').addEventListener('click', () => show('race'));
+$('wolfBtn').addEventListener('click', () => startWolf(0));
 // race setup screen: steppers for Buddies and teammates, a choice of rival speed, and a preview of the teams
 function renderRaceSetup() {
   raceCfg.racers = Math.max(2, Math.min(4, raceCfg.racers));
@@ -3501,6 +3994,9 @@ function renderRaceSetup() {
   $('frBots').classList.toggle('on', !!raceCfg.bots);
   document.querySelectorAll('#rcBiome button, #frBiome button').forEach(b => b.classList.toggle('on', b.dataset.rc === 'biome:' + raceCfg.biome));
   document.querySelectorAll('#rcShape button, #frShape button').forEach(b => b.classList.toggle('on', b.dataset.rc === 'shape:' + raceCfg.shape));
+  document.querySelectorAll('#rcMap button, #frMap button').forEach(b => b.classList.toggle('on', b.dataset.rc === 'map:' + (raceCfg.map ?? 1)));
+  document.querySelectorAll('#frGame button').forEach(b => b.classList.toggle('on', b.dataset.fr === 'game:' + raceCfg.game));
+  $('friend').classList.toggle('hunt', raceCfg.game === 'hunt');
   const others = RIVAL_SKINS.filter(c => c !== skin);
   const dot = c => `<i style="--c:${SKINS[c]}"></i>`;
   const team = [skin, ...others.slice(raceCfg.racers - 1 - raceCfg.mates, raceCfg.racers - 1)];
@@ -3511,14 +4007,14 @@ function renderRaceSetup() {
 $('race').addEventListener('click', e => {
   const b = e.target.closest('[data-rc]'); if (!b) return;
   const [key, d] = b.dataset.rc.split(':');
-  if (key === 'speed') raceCfg.speed = +d; else if (key === 'biome' || key === 'shape') raceCfg[key] = d; else raceCfg[key] += +d;
+  if (key === 'speed' || key === 'map') raceCfg[key] = +d; else if (key === 'biome' || key === 'shape') raceCfg[key] = d; else raceCfg[key] += +d;
   renderRaceSetup();
 });
 $('raceGo').addEventListener('click', () => startRace());
-$('raceAgain').addEventListener('click', () => net.online ? net.again() : startRace());
+$('raceAgain').addEventListener('click', () => mode === 'wolf' ? startWolf(wolfOver ? 0 : wolfRun + 1) : net.online ? net.again() : startRace());
 $('pauseBtn').addEventListener('click', () => show('pause'));
 $('resumeBtn').addEventListener('click', () => show('play'));
-$('restartBtn').addEventListener('click', () => mode === 'race' ? startRace() : play(L));
+$('restartBtn').addEventListener('click', () => mode === 'hunt' ? net.again() : mode === 'wolf' ? startWolf(wolfRun) : mode === 'race' ? startRace() : play(L));
 $('nextBtn').addEventListener('click', () => {
   if (L + 1 >= TOTAL_LEVELS) return show('worlds');
   play(L + 1);
@@ -3914,6 +4410,7 @@ function introShot(dt) {
 const RACE_HOLD = 1.0, RACE_MOVE = 1.2, RACE_SEG = 1.9, COUNT = ['3', '2', '1', 'GO!'], COUNT_T = 0.8;
 let lastCount = -1;
 function raceShots() {
+  if (mode === 'hunt') return [portal.position.clone().setY(0), player.position.clone().setY(0).add(AHEAD)]; // (the portal, then you)
   return [new THREE.Vector3(key.position.x, 0, key.position.z), ...rivals.map(r => r.root.position.clone().setY(0)), player.position.clone().setY(0).add(AHEAD)];
 }
 function raceShot(dt) {
@@ -3944,7 +4441,7 @@ function showCount(text) {
   if (text) sfx.play(text === 'GO!' ? 'land' : 'step', text === 'GO!' ? 0.7 : 0.5);
 }
 function updateCamera(dt) {
-  if (intro.t >= 0 && state === 'play' && mode === 'race') raceShot(dt);
+  if (intro.t >= 0 && state === 'play' && (mode === 'race' || mode === 'hunt')) raceShot(dt);
   else if (intro.t >= 0 && state === 'play') introShot(dt);
   else if (intro.t < 0) {
     const want = player.position.clone().setY(0).add(AHEAD);
@@ -4193,6 +4690,8 @@ function frame(now = performance.now()) {
   fitView();
   updatePlayer(dt, time);
   updateRivals(dt, time);
+  updateWolves(dt, time);
+  if (mode === 'hunt') hunt.update(dt, time);
   updateWarp(dt);
   updatePillars(dt, time);
   doorSpores(dt);
@@ -4217,7 +4716,7 @@ function frame(now = performance.now()) {
     key.userData.shadow.position.y = 0.02 - key.position.y; key.userData.shadow.visible = true;
   }
   updatePortal(dt, time);
-  if (state === 'play' && !won && intro.t < 0) { elapsed += dt; ui.time.textContent = fmt(Math.floor(elapsed)); }
+  if (state === 'play' && !won && intro.t < 0) { elapsed += dt; if (mode !== 'hunt') ui.time.textContent = fmt(Math.floor(elapsed)); }
   updateCamera(dt);
   updateFocus();
   updateRaceUI();
@@ -4226,12 +4725,12 @@ function frame(now = performance.now()) {
   else {
     // the sun's shadows are redrawn only when something that casts them moved (or the sun, which follows the view)
     const sunMoved = _shadowSun.distanceToSquared(sun.position) > 4e-4;
-    if (sunMoved || pillarsActive || st.moving || st.bumpT >= 0 || warp.t >= 0 || won || intro.t >= 0 || mode === 'race' || shadowKick > 0) {
+    if (sunMoved || pillarsActive || st.moving || st.bumpT >= 0 || warp.t >= 0 || won || intro.t >= 0 || mode === 'race' || wolfMoving || shadowKick > 0) {
       renderer.shadowMap.needsUpdate = true; _shadowSun.copy(sun.position); if (shadowKick > 0) shadowKick--;
     }
     if (PHONE) renderer.render(scene, camera); else composer.render(); // phones: no post effects (memory)
   }
-  calm = state === 'play' && !st.moving && !pillarsActive && intro.t < 0 && warp.t < 0 && !won && st.bumpT < 0 && mode !== 'race' && !heldDir && !net.online;
+  calm = state === 'play' && !st.moving && !pillarsActive && intro.t < 0 && warp.t < 0 && !won && st.bumpT < 0 && mode !== 'race' && !heldDir && !net.online && !wolves.length;
   if (!manualStep) requestAnimationFrame(frame);
 }
 let calm = false, shadowKick = 3;
@@ -4334,4 +4833,4 @@ show('title');
 { const j = params.get('join'); if (j) { $('friend').classList.add('guest'); $('friendTitle').textContent = 'Joining your friend…'; show('friend'); net.join(j); } } // opened from an invite: straight in
 $('loading').style.opacity = 0; setTimeout(() => $('loading').remove(), 450);
 frame();
-window.__game = { groundTexture, decorMat, get sceneryModels() { return sceneryModels; }, startRace, get rivals() { return rivals; }, intro, net, loadChar, st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };
+window.__game = { hunt, get raceCfg() { return raceCfg; }, startWolf, get wolves() { return wolves; }, get wolfOver() { return wolfOver; }, get state() { return state; }, get mode() { return mode; }, groundTexture, decorMat, get sceneryModels() { return sceneryModels; }, startRace, get rivals() { return rivals; }, intro, net, loadChar, st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };

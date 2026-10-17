@@ -374,8 +374,18 @@
   .setting label small { color: var(--ink-soft); font-size: 12px; margin-left: 4px; }
 
   /* play with a friend */
-  #friend .card { width: min(460px, 94vw); }
+  #friend .card { width: min(460px, 94vw); max-height: 94vh; overflow-y: auto; scrollbar-width: none; }
+  #friend .card .medal { margin-top: 0; }
   #friend.guest .hostonly { display: none; }
+  #friend .pane-join { display: none; } #friend.joining .pane-join { display: block; } #friend.joining .pane-host, #friend.joining #friendStart, #friend.joining .teamhint { display: none; }
+  #friend.guest .pane-join { display: none; }
+  #friend .tabs span { cursor: pointer; }
+  #friend .rc-row .seg button { font-size: 12px; }
+  .joinrow input { font-family: var(--title); font-size: 26px; text-align: center; }
+  .teamhint { display: none; font-size: 13px; color: var(--ink-soft); margin: -4px 0 8px; } #friend.teams .teamhint { display: block; }
+  #friend.guest .teamhint { display: none !important; }
+  .lp { cursor: default; } #friend.teams:not(.guest) .lp:not(.empty) { cursor: pointer; }
+  .lp em { font-style: normal; font-size: 11px; padding: 1px 7px; border-radius: 99px; color: #fff; background: var(--t, var(--sky)); }
   .lobby { display: flex; justify-content: center; gap: 8px; margin: 2px 0 10px; }
   .lp { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 13px; color: var(--ink); width: 62px; }
   .lp i { width: 34px; height: 34px; border-radius: 50%; background: var(--c); border: 3px solid #fff; box-shadow: var(--shadow-s); animation: pop .4s var(--spring); }
@@ -519,7 +529,7 @@
   <div class="logo"><span class="word" id="logoA">Buddy</span><br><div class="sub">Remember the way</div></div>
   <nav class="side-menu" id="sideMenu">
     <button class="mitem sel" id="playBtn"><i class="mi"><svg class="ico"><use href="#i-map"/></svg></i>Adventure<svg class="ico go"><use href="#i-next"/></svg></button>
-    <button class="mitem" id="friendMenuBtn"><i class="mi"><svg class="ico"><use href="#i-heart"/></svg></i>Play with friend<svg class="ico go"><use href="#i-next"/></svg></button>
+    <button class="mitem" id="friendMenuBtn"><i class="mi"><svg class="ico"><use href="#i-heart"/></svg></i>Friends<svg class="ico go"><use href="#i-next"/></svg></button>
     <button class="mitem" id="raceBtn"><i class="mi"><svg class="ico"><use href="#i-flag"/></svg></i>Race<svg class="ico go"><use href="#i-next"/></svg></button>
     <button class="mitem" id="outfitBtn"><i class="mi"><svg class="ico"><use href="#i-shirt"/></svg></i>Outfit<svg class="ico go"><use href="#i-next"/></svg></button>
     <button class="mitem" id="settingsBtn"><i class="mi"><svg class="ico"><use href="#i-sound"/></svg></i>Settings<svg class="ico go"><use href="#i-next"/></svg></button>
@@ -594,18 +604,25 @@
 <section class="screen modal" id="friend">
   <div class="card pop">
     <div class="medal" style="color:var(--berry)"><svg class="ico"><use href="#i-heart"/></svg></div>
-    <h2 class="sticker" id="friendTitle">Play with a friend</h2>
-    <div class="hostonly">
-      <p>1. Pick a place &nbsp; 2. Invite up to 3 friends &nbsp; 3. Start!</p>
+    <h2 class="sticker" id="friendTitle">Play with friends</h2>
+    <div class="tabs hostonly" id="frTabs"><span class="on" data-tab="host"><svg class="ico"><use href="#i-link"/></svg>Invite</span><span data-tab="join"><svg class="ico"><use href="#i-key"/></svg>Join with code</span></div>
+    <div class="pane-host hostonly">
+      <div class="rc-row"><span>Players</span><div class="stepper"><button class="round" data-fr="size:-1" aria-label="Fewer players">−</button><b id="frSize">2</b><button class="round" data-fr="size:1" aria-label="More players">+</button></div></div>
+      <div class="rc-row"><span>Mode</span><div class="seg" id="frMode"><button data-fr="mode:ffa">Everyone for themselves</button><button data-fr="mode:teams">Teams</button></div></div>
+      <div class="rc-row"><span>Fill with computer Buddies</span><button class="toggle" id="frBots" data-fr="bots:1" aria-label="Fill empty spots with computer Buddies"></button></div>
       <div class="rc-row"><span>World</span><div class="seg" id="frBiome"><button data-rc="biome:woods">Woods</button><button data-rc="biome:desert">Dunes</button><button data-rc="biome:snow">Frost</button><button data-rc="biome:autumn">Autumn</button><button data-rc="biome:cave">Cave</button></div></div>
       <div class="rc-row"><span>Maze</span><div class="seg" id="frShape"><button data-rc="shape:square">Square</button><button data-rc="shape:circle">Circle</button><button data-rc="shape:gem">Gem</button><button data-rc="shape:plus">Plus</button><button data-rc="shape:snowflake">Flake</button></div></div>
-      <button class="btn green" id="friendCopy" style="width:100%"><svg class="ico"><use href="#i-link"/></svg>Invite friend</button>
+      <button class="btn green" id="friendCopy" style="width:100%"><svg class="ico"><use href="#i-link"/></svg>Invite friends</button>
       <div class="codehint">or tell them the code <b id="friendCode">·····</b></div>
     </div>
+    <div class="pane-join">
+      <p class="hostonly">Type the code your friend sent you.</p>
+      <div class="joinrow hostonly"><input id="friendInput" maxlength="6" placeholder="ABCDE" autocomplete="off" spellcheck="false"><button class="btn green" id="friendJoin">Join</button></div>
+    </div>
     <div class="lobby" id="lobby"></div>
+    <div class="teamhint" id="teamHint">Tap a player to switch their team</div>
     <div class="ribbon" id="friendStatus">Getting ready…</div>
     <button class="btn yellow" id="friendStart" style="width:100%;margin-bottom:10px"><svg class="ico"><use href="#i-flag"/></svg>Start</button>
-    <details class="joinbox hostonly"><summary>Have a code from a friend?</summary><div class="joinrow"><input id="friendInput" maxlength="6" placeholder="Friend's code" autocomplete="off" spellcheck="false"><button class="btn small green" id="friendJoin">Join</button></div></details>
     <button class="btn blue small" id="friendBack" style="width:100%"><svg class="ico"><use href="#i-back"/></svg>Back</button>
   </div>
 </section>

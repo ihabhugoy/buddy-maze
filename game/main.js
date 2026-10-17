@@ -1420,7 +1420,7 @@ async function load() {
 
 let mode = 'levels', start = [0, 0], goal = [1, 1], rivals = [], raceSize = 3, raceTeam = false, keyDist = null;
 // race setup, saved on this device: how many Buddies (2-4, one per corner), how many are your teammates, rival speed
-const raceCfg = { racers: 3, mates: 0, speed: 1, biome: 'woods', shape: 'square' };
+const raceCfg = { racers: 3, mates: 0, speed: 1, biome: 'woods', shape: 'square', size: 2, mode: 'ffa', bots: false };
 try { Object.assign(raceCfg, JSON.parse(localStorage.getItem('hidden-maze-race') || '{}')); } catch {}
 const RIVAL_PACE = [{ step: 2.2, detour: 0.42 }, { step: 1.8, detour: 0.3 }, { step: 1.45, detour: 0.18 }, { step: 1.2, detour: 0.07 }]; // easy, normal, hard, pro
 // every two race wins the race maze grows (10 -> 16 cells)
@@ -1636,8 +1636,9 @@ function buildLevel(level, race = null, opts = {}) {
     }
   }
   rivals = race ? race.entries.slice(1).map((e, i) => makeRival(e, race.online ? race.others[i].skin : RIVAL_SKINS.filter(c => c !== skin)[i])) : [];
-  if (race && race.online) rivals.forEach((r, i) => { r.remote = true; r.pid = race.others[i].pid; }); // your friends, moved by the network
-  for (let k = 0; race && k < raceCfg.mates; k++) rivals[rivals.length - 1 - k].team = true; // your teammates (the far corners first)
+  // your friends are moved by the network; computer Buddies are run by the host (and sent to everyone)
+  if (race && race.online) rivals.forEach((r, i) => { const o = race.others[i]; r.pid = o.pid; r.team = o.team; r.bot = o.bot; r.remote = !(o.bot && race.host); });
+  for (let k = 0; race && !race.online && k < raceCfg.mates; k++) rivals[rivals.length - 1 - k].team = true; // your teammates (the far corners first)
   updateTargets(true);
   for (let i = 0; i < T; i++) heights[i] = targets[i];
   camTarget.copy(worldPos(st.gx, st.gz));
@@ -2291,6 +2292,7 @@ function updateRivals(dt, time) {
       else if (r.t >= 1 && r.i < r.route.length) { // start the next step
         r.fx = r.x; r.fz = r.z;
         [r.x, r.z] = r.route[r.i++];
+        if (r.bot) net.send({ t: 'pos', x: r.x, z: r.z, p: r.pid });
         r.facing = Math.atan2(-(r.z - r.fz), r.x - r.fx);
         r.t = 0;
       }
@@ -2319,7 +2321,7 @@ const COLOR_NAMES = ['Green', 'Blue', 'Red', 'Orange', 'Pink', 'Purple', 'Yellow
 function raceEnd(winner) {
   if (won) return;
   won = true;
-  if (!winner) net.send({ t: 'win' });
+  if (!winner) net.send({ t: 'win' }); else if (winner.bot && !winner.remote) net.send({ t: 'win', p: winner.pid });
   heldDir = queued = null;
   const p = key.position;
   for (let i = 0; i < 18; i++) {
@@ -2376,7 +2378,7 @@ function updateRaceUI() {
 }
 // a race: on your own against computer Buddies, or online against a friend (same seed, same maze, opposite corners)
 async function startRace(online = null) {
-  raceSize = online ? online.players.length : raceCfg.racers; raceTeam = !online && raceCfg.mates > 0;
+  raceSize = online ? online.players.length : raceCfg.racers; raceTeam = online ? online.mode === 'teams' : raceCfg.mates > 0;
   const b = online ? online.biome : raceCfg.biome;
   if (!stoneSets[b]) { $('busy').classList.add('on'); await stoneSet(b); $('busy').classList.remove('on'); }
   const rm = online ? makeRaceMaze(mulberry32(online.seed), online.shape, online.cells) : makeRaceMaze();
@@ -2384,7 +2386,9 @@ async function startRace(online = null) {
   if (online) { // my corner first; the others, in player order, are moved by the network
     rm.online = true;
     const order = online.players.map((_, i) => i).filter(i => i !== online.me);
-    rm.others = order.map(i => ({ pid: i, skin: online.players[i].skin === skin ? (online.players[i].skin + 1 + i) % SKINS.length : online.players[i].skin }));
+    rm.others = order.map(i => ({ pid: i, bot: !!online.players[i].bot, team: online.mode === 'teams' && online.players[i].team === online.players[online.me].team,
+      skin: online.players[i].skin === skin ? (online.players[i].skin + 1 + i) % SKINS.length : online.players[i].skin }));
+    rm.host = online.me === 0;
     rm.entries = [rm.entries[online.me], ...order.map(i => rm.entries[i])];
   }
   warp.t = -1; $('fader').style.opacity = 0;
@@ -2435,8 +2439,8 @@ function confetti() {
 const net = (() => {
   // A small lobby: the host holds a code, up to 3 friends join it (a star: every message goes through the host), the
   // host presses Start. Everyone gets the same maze and their own corner; moves and the win are relayed to all.
-  let peer = null, host = false, code = '', conns = [], hostConn = null, players = [], me = 0, waitTimer = 0, pending = [];
-  const MAX = 4;
+  let peer = null, host = false, code = '', conns = [], hostConn = null, players = [], me = 0, waitTimer = 0, pending = [], mode = 'ffa';
+  const MAX = 4, TEAM = ['#5bb2f2', '#ff8c6b'], TEAM_NAME = ['Blue', 'Orange'];
   const dbg = (...a) => { if (params.has('peerdebug')) console.log('[net]', ...a); };
   const status = t => { $('friendStatus').textContent = t; dbg(t); };
   const loadPeer = () => window.Peer ? Promise.resolve() : new Promise((res, rej) => {
@@ -2452,21 +2456,33 @@ const net = (() => {
   const link = () => location.origin + location.pathname.replace(/index\.html$/, '') + '?join=' + code;
   const live = () => conns.filter(c => c.open);
   function toAll(m, except) { for (const c of live()) if (c !== except) c.send(m); }
-  function send(m) { m.p = me; if (host) toAll(m); else if (hostConn && hostConn.open) hostConn.send(m); }
+  function send(m) { if (m.p === undefined) m.p = me; if (host) toAll(m); else if (hostConn && hostConn.open) hostConn.send(m); }
   // the lobby list: who's in, and (for the host) the Start button
   function lobby() {
-    const n = players.length;
-    $('lobby').innerHTML = players.map((p, i) => `<span class="lp"><i style="--c:${SKINS[p.skin]}"></i>${i === me ? 'You' : i === 0 ? 'Host' : 'Friend ' + i}</span>`).join('')
-      + Array.from({ length: MAX - n }, () => '<span class="lp empty"><i></i>…</span>').join('');
-    $('friendStart').disabled = !(host && n > 1);
+    const size = host ? raceCfg.size : Math.max(players.length, 2), humans = players.filter(p => !p.bot).length;
+    $('friend').classList.toggle('teams', mode === 'teams');
+    $('lobby').innerHTML = players.map((p, i) => `<span class="lp" data-pi="${i}"><i style="--c:${SKINS[p.skin]}"></i>${i === me ? 'You' : p.bot ? 'Computer' : i === 0 ? 'Host' : 'Friend'}${mode === 'teams' ? `<em style="--t:${TEAM[p.team]}">${TEAM_NAME[p.team]}</em>` : ''}</span>`).join('')
+      + Array.from({ length: Math.max(0, size - players.length) }, () => '<span class="lp empty"><i></i>…</span>').join('');
+    $('friendStart').disabled = !(host && players.length > 1);
     $('friendStart').style.display = host ? '' : 'none';
-    if (host) status(n > 1 ? `${n - 1} friend${n > 2 ? 's' : ''} joined! Press Start when everyone is in.` : 'Press Invite friend and send the link.');
+    if (host) status(humans > 1 ? `${humans - 1} friend${humans > 2 ? 's' : ''} joined! Press Start when everyone is in.` : players.length > 1 ? 'Invite friends, or press Start to play with computer Buddies.' : 'Press Invite friends and send the link.');
     else status('Waiting for the host to start…');
   }
-  function syncLobby() { players = [{ skin }, ...live().map(c => ({ skin: c.skin ?? 1 }))]; lobby(); live().forEach((c, i) => c.send({ t: 'lobby', players, you: i + 1 })); }
+  // the host's lobby: you, the friends who joined, then computer Buddies for the empty spots (if wanted); teams alternate
+  function syncLobby() {
+    if (!host) return;
+    const keep = players.map(p => p.team);
+    const humans = [{ skin }, ...live().map(c => ({ skin: c.skin ?? 1 }))].slice(0, raceCfg.size);
+    const bots = raceCfg.bots ? Array.from({ length: raceCfg.size - humans.length }, (_, k) => ({ skin: RIVAL_SKINS[k % RIVAL_SKINS.length], bot: true })) : [];
+    mode = raceCfg.mode;
+    players = [...humans, ...bots].map((p, i) => ({ ...p, team: keep[i] ?? i % 2 }));
+    lobby();
+    live().forEach((c, i) => c.send({ t: 'lobby', players, you: i + 1, mode }));
+  }
+  function toggleTeam(i) { if (!host || mode !== 'teams' || !players[i]) return; players[i].team ^= 1; lobby(); live().forEach((c, k) => c.send({ t: 'lobby', players, you: k + 1, mode })); }
   function start() { // host: everyone gets the same maze; player i starts in corner i
     if (players.length < 2) return;
-    const setup = { t: 'setup', seed: (Math.random() * 1e9) | 0, biome: raceCfg.biome, shape: raceCfg.shape, cells: 10, players };
+    const setup = { t: 'setup', seed: (Math.random() * 1e9) | 0, biome: raceCfg.biome, shape: raceCfg.shape, cells: 10, players, mode };
     live().forEach((c, i) => c.send({ ...setup, you: i + 1 }));
     begin({ ...setup, you: 0 });
   }
@@ -2474,12 +2490,13 @@ const net = (() => {
   function onData(c, m) {
     dbg('got', m.t);
     if (host) {
-      if (m.t === 'hello') { c.skin = m.skin; syncLobby(); }
+      if (m.t === 'hello') { if (live().length > raceCfg.size - 1) { c.send({ t: 'full' }); return; } c.skin = m.skin; syncLobby(); }
       else if (m.t === 'pos' || m.t === 'win') { toAll(m, c); remote(m); } // pass it on to the others too
       else if (m.t === 'again') start();
     } else {
-      if (m.t === 'lobby') { players = m.players; me = m.you; lobby(); }
+      if (m.t === 'lobby') { players = m.players; me = m.you; mode = m.mode; lobby(); }
       else if (m.t === 'setup') begin(m);
+      else if (m.t === 'full') status('That game is full.');
       else remote(m);
     }
   }
@@ -2504,13 +2521,13 @@ const net = (() => {
     get online() { return host ? live().length > 0 : !!(hostConn && hostConn.open); },
     send,
     async host() {
-      reset(); host = true; code = newCode(); players = [{ skin }]; me = 0;
-      $('friendCode').textContent = code; lobby(); status('Getting ready…');
+      reset(); host = true; code = newCode(); me = 0; players = [];
+      $('friendCode').textContent = code; syncLobby(); status('Getting ready…');
       try { await loadPeer(); } catch { return status('Could not reach the friend service. Check your connection.'); }
       peer = new Peer(idOf(code), PEER_OPTS);
       peer.on('open', () => lobby());
       peer.on('connection', c => {
-        if (live().length >= MAX - 1 || state !== 'friend') { c.on('open', () => c.close()); return; } // full, or already racing
+        if (live().length >= raceCfg.size - 1 || state !== 'friend') { c.on('open', () => { c.send({ t: 'full' }); setTimeout(() => c.close(), 300); }); return; } // full, or already racing
         conns.push(c); wire(c);
       });
       peer.on('disconnected', () => { if (peer && !peer.destroyed) peer.reconnect(); });
@@ -2550,7 +2567,8 @@ const net = (() => {
         status('Connection problem: ' + e.type);
       });
     },
-    start,
+    start, syncLobby, toggleTeam,
+    get isHost() { return host; },
     again() { if (host) start(); else { send({ t: 'again' }); toast('Asked the host for a rematch'); } },
     copy() { // the share sheet where there is one (phones, Macs), else copy the link
       const url = link();
@@ -2560,17 +2578,36 @@ const net = (() => {
     leave: reset,
   };
 })();
-const openFriend = () => { $('friend').classList.remove('guest'); $('friendTitle').textContent = 'Play with a friend'; renderRaceSetup(); show('friend'); net.host(); };
+const openFriend = () => { $('friend').classList.remove('guest', 'joining'); document.querySelectorAll('#frTabs span').forEach((t, i) => t.classList.toggle('on', i === 0)); $('friendTitle').textContent = 'Play with friends'; renderRaceSetup(); show('friend'); net.host(); };
 $('friendBtn').addEventListener('click', openFriend);
 $('friendMenuBtn').addEventListener('click', openFriend);
-$('friend').addEventListener('click', e => { // world and maze, shared with the race settings
-  const b = e.target.closest('[data-rc]'); if (!b) return;
-  const [k, v] = b.dataset.rc.split(':'); raceCfg[k] = v; renderRaceSetup();
+$('friend').addEventListener('click', e => {
+  const tab = e.target.closest('[data-tab]');
+  if (tab) { // Invite (host) or Join with code
+    const join = tab.dataset.tab === 'join';
+    document.querySelectorAll('#frTabs span').forEach(t => t.classList.toggle('on', t === tab));
+    $('friend').classList.toggle('joining', join);
+    if (join) { net.leave(); status2('Type your friend\'s code, then press Join.'); $('lobby').innerHTML = ''; setTimeout(() => $('friendInput').focus(), 50); }
+    else net.host();
+    return;
+  }
+  const lp = e.target.closest('.lp[data-pi]'); if (lp) return net.toggleTeam(+lp.dataset.pi);
+  const b = e.target.closest('[data-rc], [data-fr]'); if (!b) return;
+  if (b.dataset.rc) { const [k, v] = b.dataset.rc.split(':'); raceCfg[k] = v; }
+  else {
+    const [k, v] = b.dataset.fr.split(':');
+    if (k === 'size') raceCfg.size = Math.max(2, Math.min(4, raceCfg.size + +v));
+    else if (k === 'mode') raceCfg.mode = v;
+    else if (k === 'bots') raceCfg.bots = !raceCfg.bots;
+  }
+  renderRaceSetup(); net.syncLobby();
 });
+const status2 = t => { $('friendStatus').textContent = t; };
 $('friendCopy').addEventListener('click', () => net.copy());
 $('friendStart').addEventListener('click', () => net.start());
-$('friendJoin').addEventListener('click', () => net.join($('friendInput').value));
-$('friendInput').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') net.join($('friendInput').value); });
+const joinTyped = () => { const v = $('friendInput').value.trim(); if (v.length < 4) return status2('Type the 5-letter code from your friend.'); $('friend').classList.add('guest'); $('friend').classList.remove('joining'); $('friendTitle').textContent = 'Joining your friend…'; net.join(v); };
+$('friendJoin').addEventListener('click', joinTyped);
+$('friendInput').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') joinTyped(); });
 $('friendBack').addEventListener('click', () => { net.leave(); show('title'); });
 
 // ---------- the continue card's picture: the world's doorway, rendered once into an image ----------
@@ -2839,6 +2876,9 @@ function renderRaceSetup() {
   $('rcRacers').textContent = raceCfg.racers;
   $('rcMates').textContent = raceCfg.mates;
   document.querySelectorAll('#rcSpeed button').forEach((b, i) => b.classList.toggle('on', i === raceCfg.speed));
+  $('frSize').textContent = raceCfg.size;
+  document.querySelectorAll('#frMode button').forEach(b => b.classList.toggle('on', b.dataset.fr === 'mode:' + raceCfg.mode));
+  $('frBots').classList.toggle('on', !!raceCfg.bots);
   document.querySelectorAll('#rcBiome button, #frBiome button').forEach(b => b.classList.toggle('on', b.dataset.rc === 'biome:' + raceCfg.biome));
   document.querySelectorAll('#rcShape button, #frShape button').forEach(b => b.classList.toggle('on', b.dataset.rc === 'shape:' + raceCfg.shape));
   const others = RIVAL_SKINS.filter(c => c !== skin);

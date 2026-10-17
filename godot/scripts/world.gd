@@ -24,7 +24,11 @@ const BIOMES := {
 	"desert": { "bg": "#f7efe3", "floor": "#f6ecdc", "hemi": ["#fff4e0", "#e6c79c", 0.8], "fill": ["#ffc58a", 1.2], "sun": ["#ffd59a", 3.0], "dust": ["#e3c79a", "#d4b07c", "#efd9b4"] },
 	"snow": { "bg": "#eef3f8", "floor": "#f2f6fb", "hemi": ["#f4f8ff", "#c9d6e6", 0.85], "fill": ["#cfe3ff", 1.0], "sun": ["#fff6ea", 2.6], "dust": ["#ffffff", "#eef4fb", "#dde8f4"] },
 	"autumn": { "bg": "#f6eee4", "floor": "#f5ece0", "hemi": ["#fff1de", "#d9b48c", 0.75], "fill": ["#ffb978", 1.3], "sun": ["#ffcf95", 2.8], "dust": ["#c98a4e", "#e0a35f", "#d9b48c"] },
+	"cave": { "bg": "#0f1a2a", "floor": "#132236", "hemi": ["#6a8ed0", "#1c2a48", 1.1], "fill": ["#58d0ff", 0.8], "sun": ["#9cc4ff", 1.0], "dust": ["#5fd8ff", "#4a8dff", "#7fe8ff"] },
 }
+const WARP_IN := 0.45
+const WARP_DARK := 1.05
+const WARP_END := 1.75
 var CAM_DIR := Vector3(1, tan(deg_to_rad(54)) * sqrt(2.0), 1).normalized()
 
 var sfx: Node
@@ -78,6 +82,11 @@ var ruin_sets := {}
 var puffs: Array[CPUParticles3D] = []
 var puff_i := 0
 var _time := 0.0
+var stage := "surface"       # a door level has a surface and a cave underneath
+var door_nodes := {}         # tile index -> the door block standing there
+var warp := { "t": -1.0 }
+var fade: ColorRect
+var gate_optimal := 0
 
 
 func setup(camera: Camera3D, environment: Environment, sound: Node) -> void:
@@ -97,6 +106,8 @@ func setup(camera: Camera3D, environment: Environment, sound: Node) -> void:
 	add_child(ground)
 	add_child(ruins)
 	cam_step = int(Save.get_opt("cam", 0)); cam_w = CAM_STEPS[cam_step]
+	var fl := CanvasLayer.new(); fl.layer = 5; add_child(fl)
+	fade = ColorRect.new(); fade.color = Color(0.05, 0.08, 0.13, 0); fade.set_anchors_preset(Control.PRESET_FULL_RECT); fade.mouse_filter = Control.MOUSE_FILTER_IGNORE; fl.add_child(fade)
 	var tex := _soft_dot()
 	for i in 10: # dust puffs: soft billboards that drift up and fade
 		var p := CPUParticles3D.new()
@@ -152,19 +163,25 @@ func load_set(b: String) -> Dictionary:
 	while found.has("stone%d" % i):
 		s.stones.append(found["stone%d" % i]); s.caps.append(found["cap%d" % i]); i += 1
 	s.door = found.get("door")
+	s.door_yaw = 0.0
+	for n in scn.find_children("door", "Node3D", true, false):
+		if n.has_meta("extras"): s.door_yaw = float(n.get_meta("extras").get("yaw", 0.0))
 	scn.free()
 	sets[b] = s
 	return s
 
 
 # ---------- building a level ----------
-func build_level(level: int) -> void:
-	L = level
+func build_level(level: int, stg := "surface", spawn = null, keep := false) -> void:
+	L = level; stage = stg
 	var plan := Maze.level_plan(L)
 	var world: Dictionary = Maze.WORLDS[plan.world]
-	apply_biome(world.biome)
-	var s := load_set(world.biome)
-	maze = Maze.for_level(L)
+	var b: String = "cave" if stage == "cave" else world.biome
+	apply_biome(b)
+	var s := load_set(b)
+	maze = Maze.for_level(L, stage == "cave")
+	if not maze.has("goal"): maze.goal = [-9, -9] # (no portal in the cave)
+	if spawn != null: maze.start = spawn
 	N = maze.N; origin = (N - 1) / 2.0
 	var T := N * N
 	heights = PackedFloat32Array(); heights.resize(T)
@@ -181,19 +198,34 @@ func build_level(level: int) -> void:
 		caps_mm.append(_multimesh(s.caps[v], T, false))
 	st = { "gx": maze.start[0], "gz": maze.start[1], "fx": maze.start[0], "fz": maze.start[1], "tx": maze.start[0], "tz": maze.start[1],
 		"t": 1.0, "moving": false, "facing": PI * 0.75, "bump": -1.0, "bdx": 0, "bdz": 0 }
+	for d in door_nodes.values(): d.queue_free()
+	door_nodes.clear()
+	for d in maze.get("doors", []): # door blocks: a stone with a cave mouth (and a tree on top), facing the side you come from
+		var mi := MeshInstance3D.new(); mi.mesh = s.door
+		mi.rotation.y = s.door_yaw + atan2(-(d.out[1] - d.z), d.out[0] - d.x)
+		mi.position = tile_pos(d.x, d.z); add_child(mi)
+		door_nodes[d.z * N + d.x] = mi
 	if player == null: set_character(char_id, skin)
 	player.position = tile_pos(st.gx, st.gz)
 	player.scale = Vector3.ONE; body.rotation.y = st.facing
-	key_at = maze.key; has_key = false; won_t = -1.0; steps = 0; elapsed = 0.0
-	held_dir = null; queued = null
-	optimal = Maze.bfs(maze, maze.start)[key_at[1] * N + key_at[0]] + Maze.bfs(maze, key_at)[maze.goal[1] * N + maze.goal[0]]
+	key_at = maze.get("key", [-9, -9])
+	if not keep:
+		has_key = false; steps = 0; elapsed = 0.0
+	won_t = -1.0; held_dir = null; queued = null
+	if plan.gateway and stage == "surface" and not keep: # walk to door A, through the cave to the key and door B, then the portal
+		var cave := Maze.for_level(L, true); var a: Dictionary = maze.doors[0]; var bb: Dictionary = maze.doors[1]
+		gate_optimal = Maze.dist(maze, maze.start, a.out) + Maze.dist(cave, cave.doors[0].out, cave.key) + Maze.dist(cave, cave.key, cave.doors[1].out) + Maze.dist(maze, bb.out, maze.goal) + 4
+	optimal = gate_optimal if plan.gateway else Maze.dist(maze, maze.start, key_at) + Maze.dist(maze, key_at, maze.goal)
 	_make_key(); _make_portal(s)
+	key_node.visible = key_at[0] >= 0 and not has_key
+	portal.visible = stage == "surface"
+	if has_key and portal_mat: portal_mat.set_shader_parameter("on", 1.0)
 	_make_grass(); _place_ruins()
 	update_targets(true)
 	for i in T: heights[i] = targets[i]
 	cam_target = player.position + AHEAD
-	intro_t = 0.0
-	steps_changed.emit(0)
+	intro_t = -1.0 if keep else 0.0
+	steps_changed.emit(steps)
 
 
 func _multimesh(mesh: Mesh, count: int, shadow: bool) -> MultiMeshInstance3D:
@@ -328,6 +360,8 @@ func update_stones(dt: float) -> void:
 		if heights[i] < 0.0:
 			if targets[i] == 0.0 and vels[i] < -0.4: sfx.play("land", 0.35)
 			heights[i] = 0.0; vels[i] = 0.0
+		if door_nodes.has(i): # door blocks move as one piece
+			door_nodes[i].position.y = heights[i]; continue
 		var v: int = var_idx[i]
 		var xf := Transform3D(Basis(Vector3.UP, rot_idx[i] * PI / 2), Vector3(i % N - origin, heights[i], i / N - origin))
 		if heights[i] > 0.003:
@@ -353,13 +387,16 @@ func set_character(id: String, skin_idx: int) -> void:
 
 
 func try_move(d: Array) -> bool:
-	if not playing or won_t >= 0.0: return false
+	if not playing or won_t >= 0.0 or warp.t >= 0.0: return false
 	if intro_t >= 0.0:
 		skip_intro(); return false
 	if st.moving:
 		queued = d; return false
 	var nx: int = st.gx + d[0]; var nz: int = st.gz + d[1]
 	st.facing = atan2(-d[1], d[0]) # the model faces +X
+	for door in maze.get("doors", []):
+		if door.x == nx and door.z == nz:
+			_start_warp(door); return false
 	if is_wall(nx, nz):
 		if st.bump < 0.0 or st.bump > 0.45:
 			st.bump = 0.0; st.bdx = d[0]; st.bdz = d[1]; sfx.play("bump", 0.3)
@@ -371,7 +408,43 @@ func try_move(d: Array) -> bool:
 	return true
 
 
+# ---------- going through a door ----------
+# Buddy walks into the cave mouth and shrinks into it, the view fades to dark, the other side is built, then the view
+# fades back in and Buddy walks out of the matching door
+func _start_warp(door: Dictionary) -> void:
+	warp = { "t": 0.0, "door": door, "swapped": false, "from": tile_pos(st.gx, st.gz), "to": tile_pos(door.x, door.z) }
+	st.facing = atan2(-(door.z - st.gz), door.x - st.gx); held_dir = null; queued = null
+	sfx.play("step", 0.62)
+
+
+func _update_warp(dt: float) -> void:
+	warp.t += dt
+	var t: float = warp.t
+	if t < WARP_IN: # into the cave mouth, shrinking
+		var k := t / WARP_IN
+		player.position = warp.from.lerp(warp.to, k); player.scale = Vector3.ONE * (1.0 - 0.9 * k)
+	fade.color.a = clampf((t - WARP_IN * 0.6) / (WARP_DARK - WARP_IN * 0.6), 0.0, 1.0) if t < WARP_DARK else clampf(1.0 - (t - WARP_DARK) / (WARP_END - WARP_DARK), 0.0, 1.0)
+	if t >= WARP_DARK and not warp.swapped:
+		warp.swapped = true
+		var to_cave := stage != "cave"
+		var other := Maze.for_level(L, to_cave)
+		var d: Dictionary = {}
+		for o in other.doors:
+			if o.id == warp.door.id: d = o
+		build_level(L, "cave" if to_cave else "surface", d.out, true)
+		warp.from = tile_pos(d.x, d.z); warp.to = tile_pos(d.out[0], d.out[1])
+		st.facing = atan2(-(d.out[1] - d.z), d.out[0] - d.x); body.rotation.y = st.facing
+		cam_target = warp.to + AHEAD
+	if warp.swapped: # out of the other door, growing back
+		var k2 := clampf((t - WARP_DARK) / (WARP_END - WARP_DARK), 0.0, 1.0)
+		player.position = warp.from.lerp(warp.to, k2); player.scale = Vector3.ONE * (0.1 + 0.9 * k2)
+	if t >= WARP_END:
+		warp.t = -1.0; player.scale = Vector3.ONE; fade.color.a = 0.0
+
+
 func update_player(dt: float) -> void:
+	if warp.t >= 0.0:
+		_update_warp(dt); return
 	if won_t >= 0.0: # hop into the portal: drift to its middle, spin and shrink away
 		won_t += dt
 		var k := minf(1.0, won_t / 0.7); var e := k * k

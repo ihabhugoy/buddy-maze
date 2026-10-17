@@ -24,6 +24,8 @@ var shot_t := -1.0
 var shot_state := ""
 var auto_walk := false
 var _auto_t := 0.0
+var test_level := -1
+var test_cave := false
 
 
 func _ready() -> void:
@@ -31,6 +33,8 @@ func _ready() -> void:
 		if a.begins_with("--shot="): shot_path = a.substr(7); shot_t = 6.0
 		if a.begins_with("--state="): shot_state = a.substr(8)
 		if a == "--autowalk": auto_walk = true
+		if a.begins_with("--level="): test_level = int(a.substr(8))
+		if a == "--cave": test_cave = true
 	char_id = str(Save.get_opt("char", "buddy")); skin = int(Save.get_opt("skin", 0))
 	cam = Camera3D.new(); cam.near = 0.05; cam.far = 200.0; add_child(cam)
 	var we := WorldEnvironment.new(); env = Environment.new()
@@ -52,7 +56,9 @@ func _ready() -> void:
 	_build_ui()
 	_apply_volumes()
 	sfx.music()
-	if shot_state == "play": play_level(Save.next_level())
+	if shot_state == "play":
+		play_level(test_level if test_level >= 0 else Save.next_level())
+		if test_cave: world.build_level(world.L, "cave", null, true)
 	else: show_screen(shot_state if shot_state != "" else "title")
 
 

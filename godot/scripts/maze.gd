@@ -301,12 +301,70 @@ static func key_tile(m: Dictionary, a: Array, b: Array, detour := 0.5) -> Array:
 	return best if best != null else [b[0], b[1]]
 
 
-## the maze of level L (door levels are plain mazes until the cave is ported)
-static func for_level(L: int) -> Dictionary:
+## a door level: two halves pulled apart, each with a door into the cave underneath (one in, one out)
+static func gen_split_maze(C: int, rnd: Rng) -> Dictionary:
+	var N := C * 2 + 1; var h := C / 2; var z_div := 2 * h
+	var g := PackedByteArray(); g.resize(N * N); g.fill(1)
+	for half in 2:
+		var in_half := func(cz: int) -> bool: return cz < h if half == 0 else cz >= h
+		var cells := []
+		for cz in C:
+			for cx in C:
+				if in_half.call(cz): cells.append([cx, cz])
+		var ok := func(cx: int, cz: int) -> bool: return cx >= 0 and cx < C and cz >= 0 and cz < C and in_half.call(cz)
+		var s0: Array = cells[rnd.pick(cells.size())]
+		var stack := [s0]
+		g[(2 * s0[1] + 1) * N + 2 * s0[0] + 1] = 0
+		while stack.size() > 0:
+			var top: Array = stack[stack.size() - 1]
+			var cx: int = top[0]; var cz: int = top[1]
+			var opts := []
+			for d in DIRS:
+				if ok.call(cx + d[0], cz + d[1]) and g[(2 * (cz + d[1]) + 1) * N + 2 * (cx + d[0]) + 1] == 1: opts.append(d)
+			if opts.is_empty():
+				stack.pop_back(); continue
+			var d: Array = opts[rnd.pick(opts.size())]
+			g[(2 * cz + 1 + d[1]) * N + 2 * cx + 1 + d[0]] = 0
+			g[(2 * (cz + d[1]) + 1) * N + 2 * (cx + d[0]) + 1] = 0
+			stack.append([cx + d[0], cz + d[1]])
+	var xA := N - 2 - 2 * rnd.pick(2); var xB := 1 + 2 * rnd.pick(2)
+	# pull the two halves apart with an open gap between them, so you can see they are not connected
+	var GAP := 3; var M := N + GAP + 1; var ox := (GAP + 1) / 2; var dz := GAP + 1
+	var g2 := PackedByteArray(); g2.resize(M * M); g2.fill(1)
+	var empty := PackedByteArray(); empty.resize(M * M); empty.fill(1)
+	for z in range(0, z_div + 1):
+		for x in N:
+			g2[z * M + x + ox] = g[z * N + x]; empty[z * M + x + ox] = 0
+	for z in range(z_div, N):
+		for x in N:
+			g2[(z + dz) * M + x + ox] = g[z * N + x]; empty[(z + dz) * M + x + ox] = 0
+	return { "N": M, "g": g2, "empty": empty, "start": [N - 2 + ox, N - 2 + dz], "goal": [1 + ox, 1],
+		"doors": [{ "id": "A", "x": xA + ox, "z": z_div + dz, "out": [xA + ox, z_div + dz + 1] }, { "id": "B", "x": xB + ox, "z": z_div, "out": [xB + ox, z_div - 1] }] }
+
+
+## the cave under a door level: door A near the bottom corner, door B at the far corner
+static func gen_cave_maze(L: int) -> Dictionary:
+	var m := gen_maze(4 + mini(4, L / 10), Rng.new(L * 7919 + 3))
+	var N: int = m.N
+	m.doors = [{ "id": "A", "x": N - 2, "z": N - 1, "out": [N - 2, N - 2] }, { "id": "B", "x": 1, "z": 0, "out": [1, 1] }]
+	m.empty = PackedByteArray(); m.start = [N - 2, N - 2]
+	return m
+
+
+static func dist(m: Dictionary, a: Array, b: Array) -> int:
+	return bfs(m, a)[b[1] * m.N + b[0]]
+
+
+## the maze of level L (for a door level: its surface, or with cave = true the cave underneath)
+static func for_level(L: int, cave := false) -> Dictionary:
 	var plan := level_plan(L)
 	var rnd := Rng.new(L * 9973 + 17)
 	var m: Dictionary
-	if plan.shape != null and not plan.gateway:
+	if plan.gateway:
+		m = gen_cave_maze(L) if cave else gen_split_maze(plan.cells, rnd)
+		if cave: m.key = key_tile(m, m.doors[0].out, m.doors[1].out, plan.detour)
+		return m
+	if plan.shape != null:
 		m = gen_shaped_maze(plan.cells, rnd, plan.shape)
 	else:
 		m = gen_maze(plan.cells, rnd)

@@ -101,6 +101,26 @@ const unlocked = L => BETA_ALL_OPEN || L === 0 || save.stars(L - 1) > 0;
 const nextLevel = () => { for (let L = 0; L < TOTAL_LEVELS; L++) if (!save.stars(L)) return L; return TOTAL_LEVELS - 1; };
 function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
+// ?memdebug: count every byte the game asks the graphics chip for (textures, render buffers, vertex data), so memory
+// problems can be measured instead of guessed; window.__gpu() returns the totals in MB
+if (params.has('memdebug')) {
+  const P = WebGL2RenderingContext.prototype, sizes = new Map(), bound = new Map(), kind = {};
+  const bpp = f => ({ 0x8058: 4, 0x881A: 8, 0x8814: 16, 0x8C43: 4, 0x81A5: 2, 0x81A6: 3, 0x88F0: 4, 0x8CAC: 4, 0x8229: 1, 0x822B: 2, 0x8D48: 1, 0x1908: 4, 0x1907: 3 }[f] || 4);
+  const set = (o, k, b, d = '') => { const old = sizes.get(o); if (old) kind[old.k] -= old.b; sizes.set(o, { k, b, d }); kind[k] = (kind[k] || 0) + b; };
+  const del = o => { const old = sizes.get(o); if (old) { kind[old.k] -= old.b; sizes.delete(o); } };
+  const wrap = (n, f) => { const g = P[n]; P[n] = function (...a) { f.call(this, ...a); return g.apply(this, a); }; };
+  wrap('bindTexture', function (t, tex) { bound.set(this, Object.assign(bound.get(this) || {}, { ['t' + t]: tex })); });
+  wrap('bindBuffer', function (t, b) { bound.set(this, Object.assign(bound.get(this) || {}, { ['b' + t]: b })); });
+  wrap('bindRenderbuffer', function (t, r) { bound.set(this, Object.assign(bound.get(this) || {}, { r })); });
+  wrap('texStorage2D', function (t, lv, f, w, h) { let b = 0; for (let i = 0; i < lv; i++) b += Math.max(1, w >> i) * Math.max(1, h >> i) * bpp(f); set((bound.get(this) || {})['t' + t], 'textures', b, w + 'x' + h + ' f' + f.toString(16) + ' L' + lv); });
+  wrap('texImage2D', function (t, lv, f, w, h) { if (lv === 0 && typeof w === 'number' && typeof h === 'number') set((bound.get(this) || {})['t' + t] || (bound.get(this) || {})['t3553'], 'textures', w * h * 4 * 1.33); else if (lv === 0 && w && w.width) set((bound.get(this) || {})['t' + t], 'textures', w.width * w.height * 4 * 1.33); });
+  wrap('renderbufferStorageMultisample', function (t, n, f, w, h) { set((bound.get(this) || {}).r, 'renderbuffers', w * h * bpp(f) * Math.max(1, n), w + 'x' + h + ' x' + n); });
+  wrap('renderbufferStorage', function (t, f, w, h) { set((bound.get(this) || {}).r, 'renderbuffers', w * h * 4); });
+  wrap('bufferData', function (t, d) { set((bound.get(this) || {})['b' + t], 'buffers', typeof d === 'number' ? d : d ? d.byteLength : 0); });
+  wrap('deleteTexture', function (o) { del(o); }); wrap('deleteBuffer', function (o) { del(o); }); wrap('deleteRenderbuffer', function (o) { del(o); });
+  window.__gpuTop = (n = 25) => [...sizes.values()].sort((a, b) => b.b - a.b).slice(0, n).map(e => e.k[0] + ' ' + e.d + ' ' + (e.b / 1e6).toFixed(1) + 'MB');
+  window.__gpu = () => Object.fromEntries(Object.entries(kind).map(([k, v]) => [k, Math.round(v / 1e6)]).concat([['canvases', Math.round([...document.querySelectorAll('canvas')].reduce((m, c) => m + c.width * c.height * 4 * 2, 0) / 1e6)]]));
+}
 // ---------- renderer / scene ----------
 // phones get a lighter setup: smaller shadows and no composer (the composer does its own antialiasing)
 const PHONE = matchMedia('(pointer: coarse)').matches;
@@ -1624,10 +1644,9 @@ function floorMeshes(T) {
 // the cave doors' mushroom glow: two lights that always stay in the scene (dark when unused), because adding or
 // removing a light makes the browser rebuild every material's shader, a long stall on phones
 const doorLights = [0, 1].map(() => { const l = new THREE.PointLight('#c77dff', 0, 3, 1.5); scene.add(l); return l; });
-// phones: the other worlds' stones leave the GPU while you play (three.js uploads them again by itself if the map shows
+// the other worlds' stones leave the GPU while you play (three.js uploads them again by itself if the map shows
 // them later), so only the level's own world is held in graphics memory
-function trimGPU() {
-  if (!PHONE) return;
+function trimGPU() { // (every device: laptops held ~110 MB per world visited otherwise)
   for (const [b, set] of Object.entries(stoneSets)) {
     if (!set || !set.variants || set === curSet || b === 'cave') continue;
     for (const m of [...(set.wallMats || []), set.door && set.door.mat]) if (m) for (const k in m) if (m[k] && m[k].isTexture) m[k].dispose();
@@ -4036,8 +4055,11 @@ function frame(now = performance.now()) {
     renderer.shadowMap.needsUpdate = true;
     if (PHONE) renderer.render(scene, camera); else composer.render(); // phones: no post effects (memory)
   }
-  requestAnimationFrame(frame);
+  if (!manualStep) requestAnimationFrame(frame);
 }
+// ?memdebug: __step(n) draws n frames on demand (measuring works even while the tab isn't on screen)
+let manualStep = false;
+if (params.has('memdebug')) window.__step = (n = 1) => { manualStep = true; for (let i = 0; i < n; i++) { lastDraw = -1e9; frame(); } manualStep = false; };
 
 await load();
 { const ch = await loadChar(charId).catch(() => loadChar('buddy')); charId = ch.id; document.body.dataset.char = charId; setupPlayer(ch); face.init(ch); }

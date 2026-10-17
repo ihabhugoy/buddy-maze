@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#fbf0dd">
-<title>Buddy</title>
+<title>Buddy · Remember the way</title>
+<meta name="description" content="A cozy little maze game. The walls only rise near you: remember the way, find the key, reach the portal.">
+<meta property="og:title" content="Buddy · Remember the way">
+<meta property="og:description" content="A cozy little maze game. The walls only rise near you: remember the way, find the key, reach the portal. Race your friends!">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='6' y='14' width='52' height='44' rx='14' fill='%236cc15a'/%3E%3Crect x='6' y='14' width='52' height='38' rx='14' fill='%2386d070'/%3E%3Cellipse cx='32' cy='36' rx='16' ry='13' fill='%23fff8ec'/%3E%3Ccircle cx='26' cy='36' r='3' fill='%235b4535'/%3E%3Ccircle cx='38' cy='36' r='3' fill='%235b4535'/%3E%3Cpath d='M32 14c0-6 4-9 10-9 0 6-4 9-10 9z' fill='%234fa343'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bagel+Fat+One&family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
@@ -144,7 +148,8 @@
   .logo .word > span { display: inline-block; }
   .logo .word > span > i { display: inline-block; font-style: normal; animation: letter 3.4s ease-in-out infinite; animation-delay: calc(var(--i) * .12s); }
   @keyframes letter { 0%, 100% { transform: translateY(0) rotate(0); } 30% { transform: translateY(-7px) rotate(-2deg); } 60% { transform: translateY(1px) rotate(1deg); } }
-  .logo .sprout { position: absolute; left: 4%; top: -14%; width: .42em; height: .42em; transform-origin: 50% 100%; animation: sway 3s ease-in-out infinite; filter: drop-shadow(0 3px 0 #fff) drop-shadow(0 -2px 0 #fff) drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff); }
+  .logo .word > span > i { position: relative; }
+  .logo .sprout { position: absolute; left: .1em; top: -.27em; width: .36em; height: .36em; transform-origin: 50% 100%; animation: sway 3s ease-in-out infinite; filter: drop-shadow(0 3px 0 #fff) drop-shadow(0 -2px 0 #fff) drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff); }
   @keyframes sway { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }
   .logo .sub { position: relative; z-index: 1; display: inline-block; margin-top: 16px; padding: 6px 18px 8px; border-radius: 999px; background: rgba(255,252,246,.85); font-size: 14px; font-weight: 900; color: var(--ink-soft); letter-spacing: .16em; text-transform: uppercase;
     box-shadow: inset 0 0 0 2px var(--edge), var(--shadow-s); }
@@ -163,7 +168,7 @@
   .mitem.sel { background: var(--card); color: var(--ink); transform: translateX(6px); box-shadow: inset 0 -4px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); }
   .mitem.sel .mi { background: var(--c, var(--leaf)); color: #fff; transform: rotate(-6deg) scale(1.06); box-shadow: inset 0 -3px 0 rgba(0,0,0,.14); }
   .mitem.sel .go { opacity: 1; animation: nudge .9s ease-in-out infinite; }
-  #playBtn { --c: var(--leaf); } #raceBtn { --c: var(--coral); } #outfitBtn { --c: var(--berry); } #settingsBtn { --c: var(--sky); }
+  #playBtn { --c: var(--leaf); } #raceBtn { --c: var(--coral); } #outfitBtn { --c: var(--berry); } #settingsBtn { --c: var(--sky); } #helpBtn { --c: var(--honey-lip); }
   /* the continue card: a soft tall card with a ribbon and a little 3D picture of the world's doorway */
   .cont { --tilt: rotateY(calc(-20deg + var(--mx, 0) * 5deg)) rotateX(calc(var(--my, 0) * -4deg)); transform-origin: 100% 50%;
     position: absolute !important; right: 5vw; top: 60%; transform: translateY(-50%) var(--tilt); width: clamp(210px, 19vw, 250px); border-radius: 30px; background: var(--card); padding: 10px; z-index: 2; text-align: center; cursor: pointer;
@@ -356,6 +361,28 @@
   .rank li b { width: 40px; color: var(--leaf-ink); }
   .rank li i { width: 20px; height: 20px; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,.15); }
 
+  /* how to play */
+  .helpcard { width: min(470px, 94vw) !important; text-align: left; }
+  .helpcard h2, .helpcard .ribbon { display: block; text-align: center; width: max-content; margin-left: auto; margin-right: auto; }
+  .tip { display: flex; align-items: center; gap: 12px; margin: 0 0 9px; padding: 9px 12px 9px 9px; border-radius: 18px; background: var(--well); }
+  .tip .mi { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: var(--card); color: var(--c, var(--leaf)); box-shadow: inset 0 -3px 0 var(--lip); flex: none; }
+  .tip .mi .ico { width: 24px; height: 24px; }
+  .tip b { display: block; font-size: 16px; } .tip span { display: block; font-size: 14px; color: var(--ink-soft); font-weight: 700; line-height: 1.3; }
+  .tip .keys { display: grid; grid-template-columns: repeat(3, 11px); grid-template-rows: repeat(2, 11px); gap: 1.5px; }
+  .tip .keys b { display: grid; place-items: center; border-radius: 3px; background: var(--well); font-size: 7px; box-shadow: inset 0 -1px 0 var(--lip); }
+  .tip .keys b:nth-child(1) { grid-area: 1 / 2; } .tip .keys b:nth-child(2) { grid-area: 2 / 1; } .tip .keys b:nth-child(3) { grid-area: 2 / 2; } .tip .keys b:nth-child(4) { grid-area: 2 / 3; }
+  .setting label small { color: var(--ink-soft); font-size: 12px; margin-left: 4px; }
+
+  /* play with a friend */
+  .friendbtn { width: 100%; margin-top: 10px; color: var(--berry); }
+  .friendbtn .ico { color: var(--berry); }
+  .codebox { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 0 0 12px; padding: 10px 10px 10px 18px; border-radius: 20px; background: var(--well); }
+  .codebox span { flex: 1; text-align: left; font-family: var(--title); font-size: 34px; letter-spacing: .14em; color: var(--ink); }
+  .joinrow { display: flex; gap: 8px; margin: 4px 0 12px; }
+  .joinrow input { flex: 1; min-width: 0; font: inherit; font-size: 18px; letter-spacing: .12em; text-transform: uppercase; padding: 10px 14px; border: none; border-radius: 16px; background: var(--well); color: var(--ink); outline: none; box-shadow: inset 0 2px 0 var(--lip); }
+  .joinrow input::placeholder { letter-spacing: 0; text-transform: none; color: var(--ink-soft); }
+  .seg button { padding: 6px 8px; }
+
   /* overlays */
   #busy { position: fixed; left: 0; right: 0; bottom: 30%; text-align: center; pointer-events: none; opacity: 0; transition: opacity .2s; z-index: 5; }
   #busy.on { opacity: 1; }
@@ -443,6 +470,9 @@
   <symbol id="i-w-cave" viewBox="0 0 24 24"><path d="M12 3c5 0 8 2.8 8 6.8 0 1.6-1 2.7-2.6 2.7H14v6a2 2 0 0 1-4 0v-6H6.6C5 12.5 4 11.4 4 9.8 4 5.8 7 3 12 3zm-3 4a1.2 1.2 0 1 0 0 2.4A1.2 1.2 0 0 0 9 7zm5.5-.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/></symbol>
   <symbol id="i-portal" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M4 21V9.5a8 8 0 0 1 16 0V21h-3V10a5 5 0 0 0-10 0v11zm8-12a3 3 0 0 1 3 3v8H9v-8a3 3 0 0 1 3-3z"/></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M12 5c4.6 0 8.2 3 9.7 6.3a1.6 1.6 0 0 1 0 1.4C20.2 16 16.6 19 12 19s-8.2-3-9.7-6.3a1.6 1.6 0 0 1 0-1.4C3.8 8 7.4 5 12 5zm0 3.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M12 2.5a9.5 9.5 0 1 1 0 19 9.5 9.5 0 0 1 0-19zM12 16a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6zm.1-9.6c-2.1 0-3.6 1.2-3.8 3a1 1 0 0 0 2 .3c.1-.8.8-1.3 1.8-1.3s1.7.6 1.7 1.4c0 .7-.4 1-1.2 1.6-.9.6-1.6 1.3-1.6 2.6a1 1 0 0 0 2 0c0-.5.2-.7.9-1.2 1-.7 1.9-1.5 1.9-3 0-2-1.6-3.4-3.7-3.4z"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.5c-.3 0-.6-.1-.8-.3C6.9 16.7 3 13.4 3 9.2 3 6.3 5.2 4 8 4c1.6 0 3 .8 4 2 1-1.2 2.4-2 4-2 2.8 0 5 2.3 5 5.2 0 4.2-3.9 7.5-8.2 11-.2.2-.5.3-.8.3z"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10.6 13.4a1 1 0 0 1 0-1.4l3.5-3.5a1 1 0 1 1 1.4 1.4L12 13.4a1 1 0 0 1-1.4 0zM7.8 19.6a4.4 4.4 0 0 1-3.1-7.5l2.1-2.1a1 1 0 1 1 1.4 1.4l-2.1 2.1a2.4 2.4 0 0 0 3.4 3.4l2.1-2.1a1 1 0 0 1 1.4 1.4l-2.1 2.1a4.4 4.4 0 0 1-3.1 1.3zm8.8-5.2a1 1 0 0 1-.7-1.7l2.1-2.1a2.4 2.4 0 0 0-3.4-3.4l-2.1 2.1a1 1 0 0 1-1.4-1.4l2.1-2.1a4.4 4.4 0 0 1 6.2 6.2l-2.1 2.1a1 1 0 0 1-.7.3z"/></symbol>
   <symbol id="i-sprout" viewBox="0 0 24 24"><path fill="#6cc15a" d="M11 21v-6.6C7 14.6 3.5 12 3.5 7c4.3 0 7.4 2.3 7.9 6 .3-4.8 3.5-8 9.1-8 0 5.4-3.3 8.6-7.5 8.9V21z"/><path fill="#4fa343" d="M11 21v-6.6c.5.1 1.5.1 2 0V21z"/></symbol>
 </svg>
 
@@ -478,7 +508,8 @@
     <button class="mitem sel" id="playBtn"><i class="mi"><svg class="ico"><use href="#i-map"/></svg></i>Adventure<svg class="ico go"><use href="#i-next"/></svg></button>
     <button class="mitem" id="raceBtn"><i class="mi"><svg class="ico"><use href="#i-flag"/></svg></i>Race<svg class="ico go"><use href="#i-next"/></svg></button>
     <button class="mitem" id="outfitBtn"><i class="mi"><svg class="ico"><use href="#i-shirt"/></svg></i>Outfit<svg class="ico go"><use href="#i-next"/></svg></button>
-    <button class="mitem" id="settingsBtn"><i class="mi"><svg class="ico"><use href="#i-sound"/></svg></i>Sound<svg class="ico go"><use href="#i-next"/></svg></button>
+    <button class="mitem" id="settingsBtn"><i class="mi"><svg class="ico"><use href="#i-sound"/></svg></i>Settings<svg class="ico go"><use href="#i-next"/></svg></button>
+    <button class="mitem" id="helpBtn"><i class="mi"><svg class="ico"><use href="#i-help"/></svg></i>Help<svg class="ico go"><use href="#i-next"/></svg></button>
   </nav>
   <div class="cont" id="contCard">
     <div class="tag">Continue</div>
@@ -520,7 +551,8 @@
       <button class="pitem main" id="resumeBtn"><i class="mi"><svg class="ico"><use href="#i-play"/></svg></i>Resume</button>
       <button class="pitem" id="restartBtn"><i class="mi"><svg class="ico"><use href="#i-redo"/></svg></i>Restart</button>
       <button class="pitem" data-go="worlds"><i class="mi"><svg class="ico"><use href="#i-map"/></svg></i>Map</button>
-      <button class="pitem" id="pauseSoundBtn"><i class="mi"><svg class="ico"><use href="#i-sound"/></svg></i>Sound</button>
+      <button class="pitem" id="pauseSoundBtn"><i class="mi"><svg class="ico"><use href="#i-sound"/></svg></i>Settings</button>
+      <button class="pitem" id="pauseHelpBtn"><i class="mi"><svg class="ico"><use href="#i-help"/></svg></i>How to play</button>
       <button class="pitem" data-go="title"><i class="mi"><svg class="ico"><use href="#i-home"/></svg></i>Main menu</button>
     </nav>
   </div>
@@ -533,12 +565,27 @@
     <p>Everyone starts in a different corner.<br>First to the key wins!</p>
     <div class="rc-row"><span>Buddies</span><div class="stepper"><button class="round" data-rc="racers:-1" aria-label="Fewer Buddies">−</button><b id="rcRacers">3</b><button class="round" data-rc="racers:1" aria-label="More Buddies">+</button></div></div>
     <div class="rc-row"><span>Teammates</span><div class="stepper"><button class="round" data-rc="mates:-1" aria-label="Fewer teammates">−</button><b id="rcMates">0</b><button class="round" data-rc="mates:1" aria-label="More teammates">+</button></div></div>
+    <div class="rc-row"><span>World</span><div class="seg" id="rcBiome"><button data-rc="biome:woods">Woods</button><button data-rc="biome:desert">Dunes</button><button data-rc="biome:snow">Frost</button><button data-rc="biome:autumn">Autumn</button><button data-rc="biome:cave">Cave</button></div></div>
+    <div class="rc-row"><span>Maze</span><div class="seg" id="rcShape"><button data-rc="shape:square">Square</button><button data-rc="shape:circle">Circle</button><button data-rc="shape:gem">Gem</button><button data-rc="shape:plus">Plus</button><button data-rc="shape:snowflake">Flake</button></div></div>
     <div class="rc-row"><span>Rivals</span><div class="seg" id="rcSpeed"><button data-rc="speed:0">Easy</button><button data-rc="speed:1">Normal</button><button data-rc="speed:2">Hard</button><button data-rc="speed:3">Pro</button></div></div>
     <div class="rc-preview" id="rcPreview"></div>
     <div class="row">
       <button class="btn blue" data-go="title"><svg class="ico"><use href="#i-back"/></svg>Back</button>
       <button class="btn green" id="raceGo"><svg class="ico"><use href="#i-flag"/></svg>Start</button>
     </div>
+    <button class="btn small friendbtn" id="friendBtn"><svg class="ico"><use href="#i-heart"/></svg>Play with a friend</button>
+  </div>
+</section>
+
+<section class="screen modal" id="friend">
+  <div class="card pop">
+    <div class="medal" style="color:var(--berry)"><svg class="ico"><use href="#i-heart"/></svg></div>
+    <h2 class="sticker">With a friend</h2>
+    <p>Send your friend this code or the link.<br>You race in the same maze, from opposite corners.</p>
+    <div class="codebox"><span id="friendCode">·····</span><button class="btn small yellow" id="friendCopy"><svg class="ico"><use href="#i-link"/></svg>Copy link</button></div>
+    <div class="ribbon" id="friendStatus">Getting a code…</div>
+    <div class="joinrow"><input id="friendInput" maxlength="6" placeholder="Friend's code" autocomplete="off" spellcheck="false"><button class="btn small green" id="friendJoin">Join</button></div>
+    <button class="btn blue small" id="friendBack" style="width:100%"><svg class="ico"><use href="#i-back"/></svg>Back</button>
   </div>
 </section>
 
@@ -557,13 +604,27 @@
 
 <section class="screen modal" id="settings">
   <div class="card pop">
-    <h2 class="sticker">Sound</h2>
+    <h2 class="sticker">Settings</h2>
     <div class="ribbon">Saved on this computer</div>
     <div class="setting"><i class="mi" style="--c:var(--lilac)"><svg class="ico"><use href="#i-music"/></svg></i><label for="musicVol">Music</label><input type="range" id="musicVol" min="0" max="100"></div>
     <div class="setting"><i class="mi" style="--c:var(--honey-lip)"><svg class="ico"><use href="#i-sparkle"/></svg></i><label for="fxVol">Effects</label><input type="range" id="fxVol" min="0" max="100"></div>
     <div class="setting"><i class="mi" style="--c:var(--sky-lip)"><svg class="ico"><use href="#i-wind"/></svg></i><label for="ambVol">Ambience</label><input type="range" id="ambVol" min="0" max="100"><button class="toggle" id="ambBtn" aria-label="Ambience on or off"></button></div>
     <div class="setting"><i class="mi" style="--c:var(--coral)"><svg class="ico"><use href="#i-mute"/></svg></i><label>Mute all</label><button class="toggle" id="muteBtn" aria-label="Mute all"></button></div>
+    <div class="setting"><i class="mi" style="--c:var(--leaf-ink)"><svg class="ico"><use href="#i-zoom"/></svg></i><label>Fullscreen <small>F</small></label><button class="toggle" id="fullBtn" aria-label="Fullscreen"></button></div>
     <button class="btn yellow" id="settingsDone" style="width:100%;margin-top:6px"><svg class="ico"><use href="#i-check"/></svg>Done</button>
+  </div>
+</section>
+
+<section class="screen modal" id="help">
+  <div class="card pop helpcard">
+    <h2 class="sticker">How to play</h2>
+    <div class="ribbon">Remember the way</div>
+    <div class="tip"><i class="mi"><div class="keys"><b>W</b><b>A</b><b>S</b><b>D</b></div></i><div><b>Walk</b><span>W A S D or the arrow keys. Hold a key to keep walking.</span></div></div>
+    <div class="tip"><i class="mi" style="--c:var(--sky-lip)"><svg class="ico"><use href="#i-eye"/></svg></i><div><b>The maze is hidden</b><span>Walls rise only near you, then sink back. Remember your way. Hold the eye button to peek.</span></div></div>
+    <div class="tip"><i class="mi" style="--c:var(--honey-lip)"><svg class="ico"><use href="#i-key"/></svg></i><div><b>Find the key</b><span>It waits at the end of a side path.</span></div></div>
+    <div class="tip"><i class="mi" style="--c:var(--lilac)"><svg class="ico"><use href="#i-portal"/></svg></i><div><b>Reach the portal</b><span>With the key, the stone portal wakes up. Walk in. Fewer steps, more stars.</span></div></div>
+    <div class="tip"><i class="mi" style="--c:var(--leaf-ink)"><svg class="ico"><use href="#i-w-woods"/></svg></i><div><b>Tree doorways</b><span>Some mazes come in two halves: go underground through a doorway.</span></div></div>
+    <button class="btn yellow" id="helpDone" style="width:100%;margin-top:4px"><svg class="ico"><use href="#i-check"/></svg>Got it</button>
   </div>
 </section>
 

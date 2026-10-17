@@ -199,7 +199,7 @@ const sfx = (() => {
   // each biome mixes its own layers into the basic sounds: [pool, volume, playback rate]
   const MIX = {
     desert: { step: [['step', 0.8], ['sand', 0.5, 1.15]], rise: [['rise', 0.85], ['pebble', 0.35]], land: [['land', 0.9], ['sand', 0.35, 0.9]] },
-    snow: { step: [['snow', 0.9], ['step', 0.22]], rise: [['rise', 0.75], ['snow', 0.45, 0.8], ['gravel', 0.2]], land: [['land', 0.75], ['snow', 0.5, 0.75]] },
+    snow: { step: [['snow', 0.5, 0.92], ['step', 0.5]], rise: [['rise', 0.95], ['snow', 0.22, 0.8], ['gravel', 0.18]], land: [['land', 0.95], ['snow', 0.25, 0.78]] }, // snow softly on top of the stone sounds
     autumn: { step: [['step', 0.75], ['leaf', 0.5]], rise: [['rise', 0.9], ['pebble', 0.2], ['leaf', 0.22, 0.8]], land: [['land', 0.9], ['leaf', 0.3, 0.85]] },
     cave: { rise: [['rise', 0.8], ['pebble', 0.4, 0.85]], land: [['land', 0.85], ['gravel', 0.3, 0.8]] },
   };
@@ -239,12 +239,12 @@ const sfx = (() => {
     master.connect(dim).connect(soft).connect(ctx.destination);
     // the cave adds a soft echo to the stone sounds
     echo = { send: ctx.createGain(), delay: ctx.createDelay(1), fb: ctx.createGain(), lp: ctx.createBiquadFilter() };
-    echo.send.gain.value = 0; echo.delay.delayTime.value = 0.23; echo.fb.gain.value = 0.42; echo.lp.type = 'lowpass'; echo.lp.frequency.value = 1400;
+    echo.send.gain.value = 0; echo.delay.delayTime.value = 0.21; echo.fb.gain.value = 0.28; echo.lp.type = 'lowpass'; echo.lp.frequency.value = 1400;
     echo.send.connect(echo.delay).connect(echo.lp).connect(echo.fb).connect(echo.delay);
     echo.lp.connect(soft);
     // a second, longer tap so the echo sounds like a hollow space rather than a single slap
     const d2 = ctx.createDelay(1), f2 = ctx.createGain(), l2 = ctx.createBiquadFilter();
-    d2.delayTime.value = 0.37; f2.gain.value = 0.3; l2.type = 'lowpass'; l2.frequency.value = 1000;
+    d2.delayTime.value = 0.34; f2.gain.value = 0.16; l2.type = 'lowpass'; l2.frequency.value = 1000;
     echo.send.connect(d2).connect(l2).connect(f2).connect(d2); l2.connect(soft);
     ambGain = ctx.createGain(); ambGain.gain.value = 0; ambGain.connect(ctx.destination);
     for (const n of Object.keys(AMB_FILES)) fetch(`assets/ambience/${n}.m4a`).then(r => r.arrayBuffer()).then(b => ctx.decodeAudioData(b)).then(buf => { ambBuf[n] = buf; setAmbience(ambWant); }).catch(() => {});
@@ -318,8 +318,8 @@ const sfx = (() => {
     setAmbience(name);
     if (!echo) return;
     const cave = name === 'cave', now = ctx.currentTime;
-    echo.send.gain.setTargetAtTime(cave ? 0.6 : 0, now, 0.3);
-    dim.gain.setTargetAtTime(cave ? 0.68 : 1, now, 0.3);
+    echo.send.gain.setTargetAtTime(cave ? 0.32 : 0, now, 0.3);
+    dim.gain.setTargetAtTime(cave ? 0.78 : 1, now, 0.3);
     soft.frequency.setTargetAtTime(cave ? 1700 : 6500, now, 0.3);
   }
   // now and then in the cave, a few pebbles trickle somewhere in the dark
@@ -346,6 +346,10 @@ const sfx = (() => {
     g.gain.value = vol * (0.8 + Math.random() * 0.3);
     if (maxDur) g.gain.setTargetAtTime(0, now + maxDur * 0.6, maxDur * 0.2);
     let node = src.connect(g);
+    if (kind === 'snow') { // the snow recordings are crisp: round them off
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2600; lp.Q.value = 0.4;
+      node = node.connect(lp);
+    }
     if (kind === 'rise') { // darker and softer: less grinding friction, more of a low rumble
       const lp = ctx.createBiquadFilter();
       lp.type = 'lowpass'; lp.frequency.value = 1800; lp.Q.value = 0.5;
@@ -809,20 +813,34 @@ function genShapedMaze(cells, rnd, shape) {
   return { N, g, empty, start, goal: [far % N, (far / N) | 0] };
 }
 // race maze: one quarter is generated, then mirrored both ways, so every corner entry is exactly as far from the key
-function genFairRaceMaze(cells) {
-  const N = cells * 2 + 1, H = (N - 1) / 2, rnd = Math.random;
-  const q = genMaze(Math.ceil(cells / 2), rnd); // a small maze for the quarter (covers tiles 0..H)
+// race maze: one quarter is generated, then mirrored both ways, so every corner entry is exactly as far from the key.
+// A shape (one that looks the same from all four corners) can trim it: the quarter is grown inside the shape.
+const RACE_SHAPES = ['square', 'circle', 'gem', 'plus', 'snowflake'];
+function genFairRaceMaze(cells, rnd = Math.random, shape = 'square') {
+  const N = cells * 2 + 1, H = (N - 1) / 2, Cq = Math.ceil(cells / 2);
+  let q;
+  if (shape === 'square' || !SHAPES[shape]) q = genMaze(Cq, rnd); // a small maze for the quarter (covers tiles 0..H)
+  else { SHAPES.__quarter = { inside: (cx, cz) => SHAPES[shape].inside(cx, cz, cells) }; q = genShapedMaze(Cq, rnd, '__quarter'); }
   const g = new Uint8Array(N * N).fill(1);
   for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) {
     const qx = Math.min(x, N - 1 - x), qz = Math.min(z, N - 1 - z);
     if (qx < q.N && qz < q.N) g[z * N + x] = q.g[qz * q.N + qx];
   }
-  // open the center lines where the quarters meet so they connect, then make sure the center is open
+  // open the center lines where the quarters meet so they connect (only between open tiles), then open the center
   for (let k = 1; k <= H; k += 2) {
-    if (rnd() < 0.5) { g[H * N + k] = g[H * N + N - 1 - k] = 0; g[k * N + H] = g[(N - 1 - k) * N + H] = 0; }
+    if (rnd() < 0.5 && (shape === 'square' || !g[(H - 1) * N + k])) { g[H * N + k] = g[H * N + N - 1 - k] = 0; g[k * N + H] = g[(N - 1 - k) * N + H] = 0; }
   }
   g[H * N + H] = g[(H - 1) * N + H] = g[(H + 1) * N + H] = g[H * N + H - 1] = g[H * N + H + 1] = 0;
-  return { N, g };
+  let empty = null;
+  if (shape !== 'square') { // tiles away from any open path stay empty floor, so the walls hug the shape
+    empty = new Uint8Array(N * N);
+    for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) {
+      let near = false;
+      for (let dz = -1; dz <= 1 && !near; dz++) for (let dx = -1; dx <= 1; dx++) { const X = x + dx, Z = z + dz; if (X >= 0 && Z >= 0 && X < N && Z < N && !g[Z * N + X]) { near = true; break; } }
+      if (!near) empty[z * N + x] = 1;
+    }
+  }
+  return { N, g, empty };
 }
 function shortestPath({ N, g }, sx, sz, tx, tz) {
   const dist = new Int32Array(N * N).fill(-1), q = [sz * N + sx];
@@ -1035,8 +1053,10 @@ function tintRock(tex, ref, k, contrast = 0.65, lift = true, skip = null) {
     // near-black is empty texture (holes, gaps between UV islands), not shading: it gets the plain rock tone, or it
     // shows as muddy stains on the stone tops
     const Lc = Math.max(0.62, 1 + (L0 - 1) * contrast), hole = Math.max(0, Math.min(1, (0.28 - L0) / 0.18));
-    const L = lift ? Lc + (0.95 - Lc) * hole : L0;
-    const w = lift ? Math.max(rockness(r, g, b) * k, Math.min(1, Math.max(0, (0.68 - L0) / 0.25))) : rockness(r, g, b) * k * Math.min(1, L0 / 0.45);
+    // without the lift (door stones keep their dark cave mouth) only true holes, near black, are filled
+    const voidK = Math.max(0, Math.min(1, (0.12 - L0) / 0.08));
+    const L = lift ? Lc + (0.95 - Lc) * hole : L0 + (0.85 - L0) * voidK;
+    const w = lift ? Math.max(rockness(r, g, b) * k, Math.min(1, Math.max(0, (0.68 - L0) / 0.25))) : Math.max(voidK, rockness(r, g, b) * k * Math.min(1, L0 / 0.45));
     if (w <= 0) continue;
     px[i] = Math.min(255, r + (ref[0] * L - r) * w);
     px[i + 1] = Math.min(255, g + (ref[1] * L - g) * w);
@@ -1248,7 +1268,7 @@ function prepDoor(gltf) {
     return cells.reduce((m, v) => m + v, 0) / cells.length;
   });
   const arch = reach.indexOf(Math.min(...reach)), [ax, az] = sides[arch];
-  const mat = new THREE.MeshStandardMaterial({ map: canvasTexture(pm.material.map, 1024), roughness: 0.92, metalness: 0 });
+  const mat = new THREE.MeshStandardMaterial({ map: canvasTexture(pm.material.map, 2048), roughness: 0.92, metalness: 0 });
   return { raw, mat, reach, yaw: -Math.atan2(-az, ax) };
 }
 // flat floor tiles show a picture of each stone, lit by the biome's light and captured once (4 turns each)
@@ -1364,7 +1384,8 @@ function stoneSet(name) {
       v.cap = v.raw.clone(); v.cap.setIndex(idx);
     }
     door.mat.clippingPlanes = clip; door.mat.clipShadows = true;
-    addGrassGlow(door.mat, 1, true, B.doorGlow || B.glow);
+    // the door's tree is a big leafy mass: the moss glow made it look flat and haloed, so it gets only a touch
+    addGrassGlow(door.mat, 1, true, B.doorGlow || { ...B.glow, amt: B.glow.amt * 0.15 });
     // the cave's mushroom door: the mushrooms above the stone keep their own colors (teal, violet, pink) pushed to
     // fluorescent, and glow; a soft wave of light runs up the stalks into the caps, which shine brightest
     if (B.doorPlant) {
@@ -1399,26 +1420,34 @@ async function load() {
 
 let mode = 'levels', start = [0, 0], goal = [1, 1], rivals = [], raceSize = 3, raceTeam = false, keyDist = null;
 // race setup, saved on this device: how many Buddies (2-4, one per corner), how many are your teammates, rival speed
-const raceCfg = { racers: 3, mates: 0, speed: 1 };
+const raceCfg = { racers: 3, mates: 0, speed: 1, biome: 'woods', shape: 'square' };
 try { Object.assign(raceCfg, JSON.parse(localStorage.getItem('hidden-maze-race') || '{}')); } catch {}
 const RIVAL_PACE = [{ step: 2.2, detour: 0.42 }, { step: 1.8, detour: 0.3 }, { step: 1.45, detour: 0.18 }, { step: 1.2, detour: 0.07 }]; // easy, normal, hard, pro
 // every two race wins the race maze grows (10 -> 16 cells)
 let raceWins = 0;
 try { raceWins = +localStorage.getItem('hidden-maze-race-wins') || 0; } catch {}
 // race: a big maze with an entry near each corner and one key in the middle
-function makeRaceMaze() {
-  let m, N, d;
-  // mirrored maze: all four corner entries are the same distance from the key (retry if the middle isn't reachable)
+function makeRaceMaze(rnd = Math.random, shape = raceCfg.shape, cells = 10 + 2 * Math.min(3, Math.floor(raceWins / 2))) {
+  let m, N, d, ends;
+  // mirrored maze: all four entries are the same distance from the key (retry if the middle isn't reachable)
   for (let tries = 0; tries < 30; tries++) {
-    m = genFairRaceMaze(10 + 2 * Math.min(3, Math.floor(raceWins / 2))); N = m.N;
-    for (const [x, z] of [[1, 0], [N - 2, 0], [1, N - 1], [N - 2, N - 1]]) m.g[z * N + x] = 0;
-    d = shortestPath(m, N - 2, N - 1, (N - 1) / 2, (N - 1) / 2);
+    m = genFairRaceMaze(cells, rnd, shape); N = m.N;
+    if (shape === 'square') {
+      ends = [[N - 2, N - 1], [1, N - 1], [N - 2, 0], [1, 0]];
+      for (const [x, z] of ends) m.g[z * N + x] = 0;
+    } else { // in a shape, everyone starts on the open tile furthest from the middle in their own quarter
+      let best = null, bd = -1; const H = (N - 1) / 2;
+      for (let z = 0; z < H; z++) for (let x = 0; x < H; x++) if (!m.g[z * N + x]) { const dd = (x - H) ** 2 + (z - H) ** 2; if (dd > bd) { bd = dd; best = [x, z]; } }
+      const [ex, ez] = best || [1, 1];
+      ends = [[N - 1 - ex, N - 1 - ez], [ex, N - 1 - ez], [N - 1 - ex, ez], [ex, ez]];
+    }
+    d = shortestPath(m, ends[0][0], ends[0][1], (N - 1) / 2, (N - 1) / 2);
     if (d > 10) break;
   }
   // yours is nearest the camera; with 3 racers the rivals take the two side corners, with 2 the far one;
   // in a team race your teammate starts in the far corner (listed last)
-  const entries = raceSize === 2 ? [[N - 2, N - 1], [1, 0]] : raceSize === 3 ? [[N - 2, N - 1], [1, N - 1], [N - 2, 0]] : [[N - 2, N - 1], [1, N - 1], [N - 2, 0], [1, 0]];
-  return { maze: m, entries, goal: [(N - 1) / 2, (N - 1) / 2] };
+  const entries = raceSize === 2 ? [ends[0], ends[3]] : raceSize === 3 ? [ends[0], ends[1], ends[2]] : ends;
+  return { maze: m, entries, goal: [(N - 1) / 2, (N - 1) / 2], cells };
 }
 // ---------- door levels ----------
 // Door levels (see the level plan) are split in two: no way across on the surface. A door block in your half leads down
@@ -1490,8 +1519,8 @@ function applyBiome(name) {
 function buildLevel(level, race = null, opts = {}) {
   L = level; mode = race ? 'race' : 'levels';
   stage = opts.stage || 'surface';
-  const world = WORLDS[race ? 0 : Math.floor(L / LEVELS_PER_WORLD)];
-  const bName = race ? 'woods' : stage === 'cave' ? 'cave' : world.biome;
+  const world = race ? (WORLDS.find(w => w.biome === race.biome) || { tint: [1, 1, 1], reveal: 2.1, icon: 'i-w-cave' }) : WORLDS[Math.floor(L / LEVELS_PER_WORLD)];
+  const bName = race ? race.biome || 'woods' : stage === 'cave' ? 'cave' : world.biome;
   curSet = stoneSets[bName];
   applyBiome(bName);
   if (floor) { scene.remove(...walls, ...caps, floor, floorShadow, key); for (const m of [...walls, ...caps, floor, floorShadow]) m.dispose(); }
@@ -1591,7 +1620,7 @@ function buildLevel(level, race = null, opts = {}) {
   } else optimal = race ? shortestPath(maze, start[0], start[1], goal[0], goal[1]) : shortestPath(maze, start[0], start[1], keyAt[0], keyAt[1]) + shortestPath(maze, keyAt[0], keyAt[1], goal[0], goal[1]);
   ui.level.textContent = race ? 'RACE' : `${Math.floor(L / LEVELS_PER_WORLD) + 1}-${L % LEVELS_PER_WORLD + 1}`;
   ui.steps.textContent = steps;
-  $('worldBadgeIco').setAttribute('href', '#' + (race ? 'i-flag' : stage === 'cave' ? 'i-w-cave' : world.icon));
+  $('worldBadgeIco').setAttribute('href', '#' + (stage === 'cave' || bName === 'cave' ? 'i-w-cave' : world.icon));
   coach.level(race ? -1 : L, stage, opts.keep);
   for (const r of rivals) scene.remove(r.root);
   keyDist = null;
@@ -1606,7 +1635,8 @@ function buildLevel(level, race = null, opts = {}) {
       }
     }
   }
-  rivals = race ? race.entries.slice(1).map((e, i) => makeRival(e, RIVAL_SKINS.filter(c => c !== skin)[i])) : [];
+  rivals = race ? race.entries.slice(1).map((e, i) => makeRival(e, race.online ? race.friendSkin : RIVAL_SKINS.filter(c => c !== skin)[i])) : [];
+  if (race && race.online) rivals[0].remote = true; // your friend, moved by the network
   for (let k = 0; race && k < raceCfg.mates; k++) rivals[rivals.length - 1 - k].team = true; // your teammates (the far corners first)
   updateTargets(true);
   for (let i = 0; i < T; i++) heights[i] = targets[i];
@@ -2034,6 +2064,7 @@ function tryMove(dx, dz) {
   }
   st.fx = st.gx; st.fz = st.gz; st.tx = nx; st.tz = nz; st.t = 0; st.moving = true;
   steps++; ui.steps.textContent = steps;
+  if (mode === 'race') net.send({ t: 'pos', x: nx, z: nz });
   updateTargets(false);
   const p = worldPos(st.gx, st.gz);
   footPuffs(p.x, p.z, dx, dz);
@@ -2254,7 +2285,8 @@ function updateRivals(dt, time) {
   const racing = mode === 'race' && state === 'play' && !won && intro.t < 0;
   for (const r of rivals) {
     let hop = 0;
-    if (racing) {
+    if (racing && r.remote) { if (r.t < 1) { r.t = Math.min(1, r.t + dt / r.stepTime); hop = Math.abs(Math.sin(r.U.uPhase.value)) * 0.05; } }
+    else if (racing) {
       if (r.wait > 0) r.wait -= dt;
       else if (r.t >= 1 && r.i < r.route.length) { // start the next step
         r.fx = r.x; r.fz = r.z;
@@ -2285,7 +2317,9 @@ function updateRivals(dt, time) {
 }
 const COLOR_NAMES = ['Green', 'Blue', 'Red', 'Orange', 'Pink', 'Purple', 'Yellow', 'Teal', 'White'];
 function raceEnd(winner) {
+  if (won) return;
   won = true;
+  if (!winner) net.send({ t: 'win' });
   heldDir = queued = null;
   const p = key.position;
   for (let i = 0; i < 18; i++) {
@@ -2340,7 +2374,17 @@ function updateRaceUI() {
     arrow.style.transform = `translate(${cx + dx * k}px, ${cy + dy * k}px) translate(-50%, -50%) rotate(${Math.atan2(dy, dx)}rad)`;
   });
 }
-function startRace() { raceSize = raceCfg.racers; raceTeam = raceCfg.mates > 0; buildLevel(-1, makeRaceMaze()); setupRaceUI(); show('play'); intro.t = 0; intro.warm = 3; intro.wave = false; lastCount = -1; }
+// a race: on your own against computer Buddies, or online against a friend (same seed, same maze, opposite corners)
+async function startRace(online = null) {
+  raceSize = online ? 2 : raceCfg.racers; raceTeam = !online && raceCfg.mates > 0;
+  const b = online ? online.biome : raceCfg.biome;
+  if (!stoneSets[b]) { $('busy').classList.add('on'); await stoneSet(b); $('busy').classList.remove('on'); }
+  const rm = online ? makeRaceMaze(mulberry32(online.seed), online.shape, online.cells) : makeRaceMaze();
+  rm.biome = b;
+  if (online) { rm.online = true; rm.friendSkin = online.friendSkin === skin ? (skin + 1) % SKINS.length : online.friendSkin; if (online.guest) rm.entries = [rm.entries[1], rm.entries[0]]; }
+  warp.t = -1; $('fader').style.opacity = 0;
+  buildLevel(-1, rm); setupRaceUI(); show('play'); intro.t = 0; intro.warm = 3; intro.wave = false; lastCount = -1;
+}
 
 function win() {
   won = true; enterT = 0;
@@ -2379,6 +2423,77 @@ function confetti() {
     return `<i style="--c:${COL[i % COL.length]};--x:${Math.cos(a) * d * 1.3}px;--y:${Math.sin(a) * d - 60}px;--r:${Math.random() * 720 - 360}deg;--w:${0.75 + Math.random() * 0.2}s"></i>`;
   }).join('');
 }
+
+// ---------- playing with a friend: a short code (or a link) connects two browsers directly (PeerJS) ----------
+// The host picks the world and maze; both race the same maze from opposite corners. Moves and the win are sent as
+// small messages; your friend's Buddy walks where they walk.
+const net = (() => {
+  let peer = null, conn = null, host = false, code = '', friendSkin = 1;
+  const status = t => { $('friendStatus').textContent = t; };
+  const loadPeer = () => window.Peer ? Promise.resolve() : new Promise((res, rej) => {
+    const sc = document.createElement('script'); sc.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc);
+  });
+  const idOf = c => 'buddy-maze-' + c.toLowerCase();
+  const newCode = () => Array.from({ length: 5 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
+  const link = () => location.origin + location.pathname + '?join=' + code;
+  function send(m) { if (conn && conn.open) conn.send(m); }
+  function round() { // the host starts a round with a fresh maze
+    const setup = { t: 'setup', seed: (Math.random() * 1e9) | 0, biome: raceCfg.biome, shape: raceCfg.shape, cells: 10, skin };
+    send(setup);
+    startRace({ ...setup, friendSkin, guest: false });
+  }
+  function onData(m) {
+    if (m.t === 'hello') { friendSkin = m.skin; status('Your friend is here!'); setTimeout(round, 600); }
+    else if (m.t === 'setup') { friendSkin = m.skin; startRace({ ...m, friendSkin, guest: true }); }
+    else if (m.t === 'pos') {
+      const r = rivals.find(o => o.remote); if (!r) return;
+      r.fx = r.x; r.fz = r.z; r.x = m.x; r.z = m.z; r.t = 0; r.stepTime = CFG.stepTime;
+      r.facing = Math.atan2(-(r.z - r.fz), r.x - r.fx);
+    }
+    else if (m.t === 'win') { const r = rivals.find(o => o.remote); if (r && !won) raceEnd(r); }
+    else if (m.t === 'again' && host) round();
+  }
+  function wire(c) {
+    conn = c;
+    c.on('data', onData);
+    c.on('close', () => { conn = null; toast('Your friend left the game'); status('Your friend left.'); });
+  }
+  function reset() { if (conn) conn.close(); if (peer) peer.destroy(); peer = conn = null; }
+  return {
+    get online() { return !!(conn && conn.open); },
+    send,
+    async host() {
+      reset(); host = true; code = newCode();
+      $('friendCode').textContent = code; status('Getting a code…');
+      try { await loadPeer(); } catch { return status('Could not reach the friend service. Check your connection.'); }
+      peer = new Peer(idOf(code));
+      peer.on('open', () => status('Send the link to your friend, then wait here.'));
+      peer.on('connection', c => { wire(c); status('Your friend is joining…'); });
+      peer.on('error', e => status(e.type === 'unavailable-id' ? 'That code is taken, try again.' : 'Connection problem: ' + e.type));
+    },
+    async join(c) {
+      reset(); host = false; code = c.trim().toUpperCase();
+      if (code.length < 4) return status('Type the 5-letter code from your friend.');
+      status('Looking for your friend…');
+      try { await loadPeer(); } catch { return status('Could not reach the friend service. Check your connection.'); }
+      peer = new Peer();
+      peer.on('open', () => {
+        const cc = peer.connect(idOf(code), { reliable: true });
+        wire(cc);
+        cc.on('open', () => { status('Connected! Starting…'); send({ t: 'hello', skin }); });
+      });
+      peer.on('error', e => status(e.type === 'peer-unavailable' ? 'No game with that code. Check it and try again.' : 'Connection problem: ' + e.type));
+    },
+    again() { if (host) round(); else { send({ t: 'again' }); toast('Asked your friend for a rematch'); } },
+    copy() { navigator.clipboard.writeText(link()).then(() => toast('Link copied! Send it to your friend'), () => toast(link())); },
+    leave: reset,
+  };
+})();
+$('friendBtn').addEventListener('click', () => { show('friend'); net.host(); });
+$('friendCopy').addEventListener('click', () => net.copy());
+$('friendJoin').addEventListener('click', () => net.join($('friendInput').value));
+$('friendInput').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') net.join($('friendInput').value); });
+$('friendBack').addEventListener('click', () => { net.leave(); show('race'); });
 
 // ---------- the continue card's picture: the world's doorway, rendered once into an image ----------
 const previews = {};
@@ -2467,7 +2582,7 @@ function show(name) {
     doorPreview(wd.biome).then(url => { $('contArt').innerHTML = `<img alt="" src="${url}">`; });
   }
   if (name === 'title' || name === 'outfit') $(name).querySelector('.faceSlot').appendChild($('faceCanvas'));
-  if ((name === 'settings' && settingsBack === 'title') || name === 'race') $('title').classList.add('show'); // these panels sit over the title
+  if (((name === 'settings' || name === 'help') && (name === 'settings' ? settingsBack : helpBack) === 'title') || name === 'race' || name === 'friend') $('title').classList.add('show'); // these panels sit over the title
   if (name === 'race') renderRaceSetup();
   if (name === 'pause') $('pauseInfo').textContent = mode === 'race' ? (raceTeam ? `Team race · ${raceCfg.mates + 1} vs ${raceSize - raceCfg.mates - 1}` : `Race · ${raceSize} Buddies`) : `${WORLDS[Math.floor(L / LEVELS_PER_WORLD)].name} · level ${L % LEVELS_PER_WORLD + 1}`;
   if (name !== 'play') heldDir = queued = null;
@@ -2540,7 +2655,7 @@ function groundTexture(kind) {
     let base, v;
     if (kind === 'desert') { // warm sand with soft wind ripples and a fine grain
       const rip = Math.sin((y / S * 22 + n1[i] * 3.2 + n2[i] * 0.6) * Math.PI * 2);
-      v = 0.035 * rip + 0.05 * (n1[i] - 0.5) + 0.05 * (n3[i] - 0.5) + (rnd() - 0.5) * 0.035;
+      v = 0.02 * rip + 0.04 * (n1[i] - 0.5) + 0.035 * (n3[i] - 0.5) + (rnd() - 0.5) * 0.025;
       base = [236, 212, 164];
     } else if (kind === 'cave') { // dark slate with faint cool mottling
       v = 0.1 * (n1[i] - 0.5) + 0.08 * (n2[i] - 0.5) + 0.06 * (n3[i] - 0.5);
@@ -2562,6 +2677,7 @@ $('map').addEventListener('click', e => {
 });
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-go]'); if (!b) return;
+  if (b.dataset.go === 'title' && mode === 'race') net.leave();
   show(b.dataset.go);
 });
 $('playBtn').addEventListener('click', () => show('worlds')); // adventure opens the map
@@ -2614,6 +2730,26 @@ $('fxVol').addEventListener('change', () => sfx.play('step', 0.62, 0, { maxDur: 
 $('ambBtn').addEventListener('click', () => { sfx.set('ambOn', !sfx.prefs.ambOn); $('ambBtn').classList.toggle('on', sfx.prefs.ambOn); });
 $('muteBtn').addEventListener('click', () => { sfx.set('mute', !sfx.prefs.mute); $('muteBtn').classList.toggle('on', sfx.prefs.mute); });
 $('settingsBtn').addEventListener('click', () => openSettings('title'));
+// how to play: from the title or the pause menu, back to where you came from
+let helpBack = 'title';
+$('helpBtn').addEventListener('click', () => { helpBack = 'title'; show('help'); });
+$('pauseHelpBtn').addEventListener('click', () => { helpBack = 'pause'; show('help'); });
+$('helpDone').addEventListener('click', () => show(helpBack));
+// fullscreen: the F key, or the toggle in settings
+const toggleFull = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {});
+$('fullBtn').addEventListener('click', toggleFull);
+document.addEventListener('fullscreenchange', () => $('fullBtn').classList.toggle('on', !!document.fullscreenElement));
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'KeyF') toggleFull();
+  // Esc steps back out of any menu
+  if (e.code === 'Escape' && !['play', 'pause', 'title', 'loading'].includes(state)) {
+    const back = { settings: settingsBack, help: helpBack, worlds: 'title', outfit: 'title', race: 'title', friend: 'race', raceEnd: 'title', win: 'worlds' }[state];
+    if (back) { if (state === 'friend') net.leave(); show(back); }
+  }
+});
+// the game pauses itself when the window loses focus (not in an online race: the friend keeps going)
+addEventListener('blur', () => { if (state === 'play' && !net.online) show('pause'); });
 $('pauseSoundBtn').addEventListener('click', () => openSettings('pause'));
 $('settingsDone').addEventListener('click', () => show(settingsBack));
 $('outfitBtn').addEventListener('click', () => show('outfit'));
@@ -2625,6 +2761,8 @@ function renderRaceSetup() {
   $('rcRacers').textContent = raceCfg.racers;
   $('rcMates').textContent = raceCfg.mates;
   document.querySelectorAll('#rcSpeed button').forEach((b, i) => b.classList.toggle('on', i === raceCfg.speed));
+  document.querySelectorAll('#rcBiome button').forEach(b => b.classList.toggle('on', b.dataset.rc === 'biome:' + raceCfg.biome));
+  document.querySelectorAll('#rcShape button').forEach(b => b.classList.toggle('on', b.dataset.rc === 'shape:' + raceCfg.shape));
   const others = RIVAL_SKINS.filter(c => c !== skin);
   const dot = c => `<i style="--c:${SKINS[c]}"></i>`;
   const team = [skin, ...others.slice(raceCfg.racers - 1 - raceCfg.mates, raceCfg.racers - 1)];
@@ -2635,11 +2773,11 @@ function renderRaceSetup() {
 $('race').addEventListener('click', e => {
   const b = e.target.closest('[data-rc]'); if (!b) return;
   const [key, d] = b.dataset.rc.split(':');
-  if (key === 'speed') raceCfg.speed = +d; else raceCfg[key] += +d;
+  if (key === 'speed') raceCfg.speed = +d; else if (key === 'biome' || key === 'shape') raceCfg[key] = d; else raceCfg[key] += +d;
   renderRaceSetup();
 });
 $('raceGo').addEventListener('click', () => startRace());
-$('raceAgain').addEventListener('click', () => startRace());
+$('raceAgain').addEventListener('click', () => net.online ? net.again() : startRace());
 $('pauseBtn').addEventListener('click', () => show('pause'));
 $('resumeBtn').addEventListener('click', () => show('play'));
 $('restartBtn').addEventListener('click', () => mode === 'race' ? startRace() : play(L));
@@ -2651,8 +2789,7 @@ $('nextBtn').addEventListener('click', () => {
 {
   const el = $('logoA'), letters = [...el.textContent], mid = (letters.length - 1) / 2;
   // the word bobs as one piece; each letter sits on a gentle arch, tilted outward
-  el.innerHTML = letters.map((ch, i) => `<span style="transform:translateY(${(0.035 * (i - mid) ** 2).toFixed(3)}em) rotate(${((i - mid) * 2.5).toFixed(1)}deg)"><i style="--i:${i}">${ch}</i></span>`).join('')
-    + '<svg class="sprout"><use href="#i-sprout"/></svg>';
+  el.innerHTML = letters.map((ch, i) => `<span style="transform:translateY(${(0.035 * (i - mid) ** 2).toFixed(3)}em) rotate(${((i - mid) * 2.5).toFixed(1)}deg)"><i style="--i:${i}">${ch}${i === 0 ? '<svg class="sprout"><use href="#i-sprout"/></svg>' : ''}</i></span>`).join(''); // a sprout growing out of the B, moving with it
 }
 
 // ---------- title: the character's face peeking up, looking at the cursor or tilting its head ----------
@@ -3036,13 +3173,15 @@ const atmosphere = (() => {
   const sprite = draw => { const c = document.createElement('canvas'); c.width = c.height = 64; draw(c.getContext('2d')); return new THREE.CanvasTexture(c); };
   const soft = sprite(x => { const g = x.createRadialGradient(32, 32, 0, 32, 32, 30); g.addColorStop(0, '#fff'); g.addColorStop(0.45, 'rgba(255,255,255,.85)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64); });
   const leaf = sprite(x => { x.translate(32, 32); x.rotate(0.6); x.fillStyle = '#fff'; x.beginPath(); x.moveTo(0, -26); x.quadraticCurveTo(20, -4, 0, 26); x.quadraticCurveTo(-20, -4, 0, -26); x.fill(); });
-  const flake = sprite(x => { const g = x.createRadialGradient(32, 32, 0, 32, 32, 30); g.addColorStop(0, '#fff'); g.addColorStop(0.45, '#f4f8ff'); g.addColorStop(0.7, 'rgba(150,172,205,.85)'); g.addColorStop(1, 'rgba(150,172,205,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64); }); // a faint cool edge so it shows on white snow
+  const flake = sprite(x => { // a soft round flake with a faint cool shadow under it, so it reads on white snow
+    const sh = x.createRadialGradient(32, 37, 0, 32, 37, 20); sh.addColorStop(0, 'rgba(120,145,185,.45)'); sh.addColorStop(1, 'rgba(120,145,185,0)'); x.fillStyle = sh; x.fillRect(0, 0, 64, 64);
+    const g = x.createRadialGradient(31, 30, 0, 32, 32, 17); g.addColorStop(0, '#fff'); g.addColorStop(0.7, 'rgba(255,255,255,.95)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64); });
   const grain = sprite(x => { x.fillStyle = '#fff'; x.beginPath(); x.arc(32, 32, 14, 0, 7); x.fill(); });
   // fall: speed down, sway: side to side, wind: steady sideways drift
   const WEATHER = {
     woods: { tex: soft, colors: ['#ffffff', '#fff8e6'], size: 0.4, n: 90, fall: 0.18, sway: 0.25, wind: 0.08, opacity: 0.8 }, // dandelion fluff
     desert: { tex: grain, colors: ['#e8cfa0', '#d9b77f', '#f3e2c2'], size: 0.16, n: 260, fall: 0.12, sway: 0.1, wind: 1.1, opacity: 0.75 }, // blowing sand
-    snow: { tex: flake, colors: ['#ffffff', '#f2f7ff'], size: 0.75, n: 320, fall: 0.38, sway: 0.22, wind: 0.06, opacity: 0.95 },
+    snow: { tex: flake, colors: ['#ffffff', '#f4f8ff'], size: 0.5, n: 300, fall: 0.26, sway: 0.32, wind: 0.05, opacity: 0.9 }, // slow, soft, drifting
     autumn: { tex: leaf, colors: ['#e07a2e', '#f2a93b', '#c9542a', '#e9c24a'], size: 0.8, n: 35, fall: 0.16, sway: 0.35, wind: 0.15, opacity: 1 },
     cave: { tex: soft, colors: ['#7ff6e6', '#5fd8ff', '#c9a2ff', '#ff9ad8'], size: 0.4, n: 45, fall: 0.1, sway: 0.15, wind: 0, opacity: 0.9, glow: true }, // drifting spores
   };
@@ -3211,7 +3350,7 @@ function frame() {
   updateCamera(dt);
   updateFocus();
   updateRaceUI();
-  if (state === 'title' || state === 'outfit' || state === 'race' || (state === 'settings' && settingsBack === 'title')) face.render(dt, time); // menus are opaque; skip the maze behind them
+  if (state === 'title' || state === 'outfit' || state === 'race' || state === 'friend' || (state === 'settings' && settingsBack === 'title') || (state === 'help' && helpBack === 'title')) face.render(dt, time); // menus are opaque; skip the maze behind them
   else if (state === 'worlds') map3d && map3d.render(dt, time); // the map has its own little 3D board
   else {
     renderer.shadowMap.needsUpdate = true;
@@ -3228,6 +3367,7 @@ setSkin(skin);
 await stoneSet(levelBiome(nextLevel()));
 buildLevel(nextLevel());
 show('title');
+{ const j = params.get('join'); if (j) { show('friend'); $('friendInput').value = j; net.join(j); } }
 $('loading').style.opacity = 0; setTimeout(() => $('loading').remove(), 450);
 frame();
 window.__game = { st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };

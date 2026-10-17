@@ -65,16 +65,23 @@ export function createMap3D({ canvas, layer, worlds, perWorld, stars, unlocked, 
     }
     const mask = new THREE.CanvasTexture(c);
     const tex = new THREE.CanvasTexture(pat); tex.colorSpace = THREE.SRGBColorSpace;
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(W / 3.2, D / 3.2); tex.anisotropy = 8; // one tile every 3.2 units: fine, never blurry
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(W / 4.5, D / 4.5); tex.anisotropy = 8; // one tile every 4.5 units: fine, and no visible repeats
     const m = new THREE.Mesh(new THREE.PlaneGeometry(W, D).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: tex, alphaMap: mask, transparent: true, depthWrite: false, toneMapped: false, opacity: 0.92 }));
     m.position.set((R.x0 + R.x1) / 2, -0.02, 0); m.renderOrder = 1; sc.add(m);
   });
 
   // the stones of a world, built when its stone set is ready (they load one world at a time, as you scroll near)
   const stoneMeshes = new Array(total);
+  // the map is lit warmly for every world, which turns the snow's pale stones grey: there they are brightened and cooled
+  const LIFT = { snow: [1.3, 1.34, 1.42] };
+  const matsFor = (set, b) => !LIFT[b] ? set.wallMats : set.wallMats.map(m0 => {
+    const m = m0.clone(); m.onBeforeCompile = m0.onBeforeCompile; m.customProgramCacheKey = m0.customProgramCacheKey;
+    m.color.setRGB(...LIFT[b]); return m;
+  });
   function build(i) {
     const R = regions[i]; if (R.built) return; R.built = true;
-    stoneSet(R.biome).then(set => {
+    stoneSet(R.biome).then(set0 => {
+      const set = { ...set0, wallMats: matsFor(set0, R.biome) };
       const V = set.variants, rnd = seeded(i * 977 + 3);
       for (let L = i * perWorld; L < (i + 1) * perWorld; L++) {
         const v = (L * 7) % V.length, p = nodePos(L);

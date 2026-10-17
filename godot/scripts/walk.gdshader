@@ -17,6 +17,9 @@ uniform float neck = 0.06;
 uniform float len = 0.36;
 uniform float baked = 0.0;
 uniform float ears = 0.0;
+uniform vec3 tint : source_color = vec3(0.36, 0.42, 0.25);
+uniform float tint_on = 0.0;
+uniform float rim = 1.0;
 
 vec2 rot2(vec2 p, float a) { return vec2(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a)); }
 
@@ -42,7 +45,21 @@ void vertex() {
 }
 
 void fragment() {
-	ALBEDO = texture(albedo_tex, UV).rgb;
+	vec3 c = texture(albedo_tex, UV).rgb;
+	// outfit color: the olive hood and jacket pixels are recolored (hue ~0.2, saturated), keeping their shading
+	float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b)), d = mx - mn, hue = 0.0;
+	if (d > 1e-4) {
+		if (mx == c.r) hue = mod((c.g - c.b) / d, 6.0);
+		else if (mx == c.g) hue = (c.b - c.r) / d + 2.0;
+		else hue = (c.r - c.g) / d + 4.0;
+		hue /= 6.0;
+	}
+	float sat = d / max(mx, 1e-4);
+	float m = smoothstep(0.075, 0.035, abs(hue - 0.2)) * smoothstep(0.25, 0.45, sat) * tint_on;
+	float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+	ALBEDO = mix(c, tint * clamp(lum / 0.16, 0.0, 1.4), m);
+	// warm rim light so the character pops off the stone
+	EMISSION = vec3(1.0, 0.78, 0.5) * pow(1.0 - max(dot(NORMAL, VIEW), 0.0), 2.5) * 0.4 * rim;
 	ROUGHNESS = 0.78;
 	METALLIC = 0.0;
 	SPECULAR = 0.3;

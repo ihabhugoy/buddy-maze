@@ -144,11 +144,12 @@ let liteChoice = null; try { liteChoice = localStorage.getItem('buddy-lite'); } 
 const LITE = params.has('lite') || liteChoice === '1' || (PHONE && liteChoice !== '0' && !params.has('full') && ((navigator.deviceMemory > 0 && navigator.deviceMemory <= 4) || WEAK_GPU));
 // ?exp: an unattended test on a phone, to find what fills its memory. The game plays itself with one part switched
 // off; when the page gets closed (out of memory) or lasts 4 minutes, the next part is tried. Results stay on screen.
-const EXP_LIST = ['idle', 'noshadow', 'noaa', 'nofx', 'nohud'];
-let EXP = null;
+const EXP_SETS = { a: ['idle', 'noshadow', 'noaa', 'nofx', 'nohud'], b: ['cssvar', 'bumpy', 'idle'] };
+let EXP = null, EXP_LIST = [];
 if (params.has('exp')) {
   try { EXP = JSON.parse(localStorage.getItem('buddy-exp') || 'null'); } catch {}
-  if (!EXP || params.get('exp') === 'reset') { EXP = { i: 0, r: [] }; history.replaceState(null, '', location.pathname + '?exp'); } // (a reload after a crash carries on)
+  if (!EXP || /^reset/.test(params.get('exp'))) { EXP = { set: params.get('exp') === 'reset2' ? 'b' : 'a', i: 0, r: [] }; history.replaceState(null, '', location.pathname + '?exp'); } // (a reload after a crash carries on)
+  EXP_LIST = EXP_SETS[EXP.set || 'a'];
   if (EXP.run && EXP.run.i === EXP.i) { EXP.r[EXP.i] = `${EXP_LIST[EXP.i]}: closed after ${Math.round((EXP.run.last - EXP.run.start) / 1000)} s`; EXP.i++; } // the page died during that run
   EXP.run = EXP.i < EXP_LIST.length ? { i: EXP.i, start: Date.now(), last: Date.now() } : null;
   try { localStorage.setItem('buddy-exp', JSON.stringify(EXP)); } catch {}
@@ -3373,7 +3374,10 @@ document.addEventListener('pointerover', e => {
   sfx.ui('hover', 0.22);
 });
 // the 3D menu panels sway a little toward the mouse
+// (a mouse only, and only in the menus: a finger dragging over the maze set these 60+ times a second, and each change
+// restyles the whole page; on iPhones that piled up until iOS closed the page, about 1.5 minutes into playing)
 addEventListener('pointermove', e => {
+  if (e.pointerType !== 'mouse' || state === 'play') return;
   const r = document.documentElement.style;
   r.setProperty('--mx', (e.clientX / innerWidth * 2 - 1).toFixed(3));
   r.setProperty('--my', (e.clientY / innerHeight * 2 - 1).toFixed(3));
@@ -4285,6 +4289,11 @@ if (params.has('autoplay') || XF) (async () => {
   while (!assets) await wait(200);
   await wait(1500);
   if (XF === 'idle') { await play(+(params.get('autoplay') || 0) || 2); return; } // stands still in a level
+  if (XF === 'bumpy') { // wanders at random, bumping into walls like a person exploring
+    await play(3); await wait(6000);
+    const D = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    for (;;) { if (state === 'win') { await wait(2500); await play(3); await wait(6000); } const d = D[(Math.random() * 4) | 0]; tryMove(d[0], d[1]); await wait(260); }
+  }
   const path = (from, to) => {
     const m = maze, N = m.N, prev = new Int32Array(N * N).fill(-2), q = [from[1] * N + from[0]]; prev[q[0]] = -1;
     for (let h = 0; h < q.length; h++) { const i = q[h], x = i % N, z = (i / N) | 0; if (x === to[0] && z === to[1]) break;
@@ -4321,6 +4330,7 @@ if (EXP) { // the test's own little board: which part is off, for how long, and 
     setTimeout(tick, 1000);
   };
   tick();
+  if (XF === 'cssvar') { let k = 0; setInterval(() => { const r = document.documentElement.style; k++; r.setProperty('--mx', Math.sin(k * 0.05).toFixed(3)); r.setProperty('--my', Math.cos(k * 0.07).toFixed(3)); }, 16); }
   if (XF === 'nohud') document.head.appendChild(Object.assign(document.createElement('style'), { textContent: '.grade, #hud, .hud, #coach { display: none !important; }' }));
 }
 await load();

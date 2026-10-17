@@ -134,14 +134,23 @@ addEventListener('pagehide', () => { if (bb.lostAt && Date.now() - bb.lostAt < 3
 const PHONE = matchMedia('(pointer: coarse)').matches;
 // (1.5 on Retina laptops too: 2x is ~1.8 times the pixels through MSAA, tilt-shift and the reflection, which kept the
 // GPU flat out and the fans on, for a difference the soft tilt-shift look hides)
-const PR_MAX = Math.min(devicePixelRatio, PHONE ? 1.25 : 1.5); // (phones: fixed, see adaptRes)
+// lite: the lightest look. On with ?lite, the Light mode switch in Settings (or when the game turned it on itself
+// because a phone stayed slow), low-memory phones (Chrome reports 4 GB or less) and phones with entry-level
+// graphics chips (most budget Android phones: Mali-G5x/G6x, older Adreno, PowerVR). ?nosound: no audio at all.
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const GPU_NAME = (() => { try { const gl = document.createElement('canvas').getContext('webgl'), ext = gl && gl.getExtension('WEBGL_debug_renderer_info'), name = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : ''; const lose = gl && gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext(); return String(name || ''); } catch { return ''; } })();
+const WEAK_GPU = /Mali-(G5\d|G6\d|G7[0-6]|T\d)|PowerVR|Adreno \(TM\) ([1-5]\d\d|6[0-2]\d)\b/i.test(GPU_NAME);
+let liteChoice = null; try { liteChoice = localStorage.getItem('buddy-lite'); } catch {} // '1' on, '0' off (your choice wins)
+const LITE = params.has('lite') || liteChoice === '1' || (PHONE && liteChoice !== '0' && !params.has('full') && ((navigator.deviceMemory > 0 && navigator.deviceMemory <= 4) || WEAK_GPU));
+const NOSOUND = params.has('nosound');
+const PR_MAX = Math.min(devicePixelRatio, PHONE ? (LITE ? 1 : 1.25) : 1.5); // (phones: fixed, see adaptRes)
 if (PHONE) document.documentElement.classList.add('phone');
 // (phones draw straight to the screen, so they use the canvas's own antialiasing and skip the composer's big buffers)
 const renderer = new THREE.WebGLRenderer({ antialias: PHONE, powerPreference: 'high-performance' });
 renderer.setPixelRatio(PR_MAX);
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = LITE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 renderer.shadowMap.autoUpdate = false; // updated once per frame, not again for the reflection
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
@@ -220,7 +229,7 @@ function addLights(target, withShadow, B = BIOMES.woods) {
   sun.userData = { hemi, fill };
   if (withShadow) {
     sun.castShadow = true;
-    sun.shadow.mapSize.set(PHONE ? 1024 : 2048, PHONE ? 1024 : 2048);
+    sun.shadow.mapSize.set(LITE ? 512 : PHONE ? 1024 : 2048, LITE ? 512 : PHONE ? 1024 : 2048);
     Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12, near: 1, far: 50 });
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.02;
@@ -302,6 +311,7 @@ const sfx = (() => {
   }
   const buffers = {}, last = {}, lastT = {};
   function init() { // needs a user gesture (browser autoplay rules)
+    if (NOSOUND) return;
     if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
     ctx = new (window.AudioContext || window.webkitAudioContext)();
     master = ctx.createGain();
@@ -338,9 +348,7 @@ const sfx = (() => {
       for (let i = 0; i < n; i++) d[i] *= 0.6 / peak;
       buffers['lf0' + k] = b;
     }
-    loading = Promise.all(NAMES.filter(n => !n.startsWith('lf')).map(async n => {
-      try { buffers[n] = await ctx.decodeAudioData(await (await fetch(`assets/sfx/${n}.m4a`)).arrayBuffer()); } catch {}
-    }));
+    loading = loadPools(['rise', 'land', 'bump', 'step', ...UI_KINDS, ...Object.values(MIX[mixBiome] || {}).flat().map(m => m[0])]);
     apply();
     wantMusic = true; // the music starts with the game (quietly under the menus), not only once you play
     // (streamed from an <audio> element through the mixer, not decoded whole into memory)
@@ -387,8 +395,18 @@ const sfx = (() => {
     g.gain.setTargetAtTime(A[3], now, 1.2);
     ambNow = { name, src, g };
   }
+  // decode a set of sound pools (each file once); a world's own layers (snow, sand, gravel...) load when you get there
+  const asked = new Set();
+  function loadPools(pools) {
+    const names = [...new Set(pools.flatMap(k => (POOLS[k] || []).map(([n]) => n)))].filter(n => !n.startsWith('lf') && !asked.has(n));
+    names.forEach(n => asked.add(n));
+    return Promise.all(names.map(async n => {
+      try { buffers[n] = await ctx.decodeAudioData(await (await fetch(`assets/sfx/${n}.m4a`)).arrayBuffer()); } catch {}
+    }));
+  }
   function setBiome(name) {
     mixBiome = name;
+    if (ctx) loadPools(Object.values(MIX[name] || {}).flat().map(m => m[0]));
     setAmbience(name);
     if (!echo) return;
     const cave = name === 'cave', now = ctx.currentTime;
@@ -406,9 +424,25 @@ const sfx = (() => {
     if (!mix) return play1(kind, vol, pan, o);
     for (const [pool, k, rate = 1] of mix) play1(pool, vol * k, pan, { ...o, rate: (o.rate || 1) * rate });
   }
+  // Every sound is a short chain (source -> volume -> [pan] -> a shared bus) that takes itself apart when it ends:
+  // iPhone Safari doesn't clean finished audio pieces up by itself, and a minute of footsteps piled up hundreds of
+  // chains (the likely reason the page was closed). The filters are shared buses, made once; at most 12 voices.
+  const stats = { made: 0, active: 0, peak: 0 };
+  let buses = null;
+  function bus(kind, echoed) {
+    if (!buses) {
+      const lp = (f, q) => { const b = ctx.createBiquadFilter(); b.type = 'lowpass'; b.frequency.value = f; b.Q.value = q; return b; };
+      buses = { dry: ctx.createGain(), wet: ctx.createGain(), snow: lp(2600, 0.4), rise: lp(1800, 0.5), snowWet: lp(2600, 0.4), riseWet: lp(1800, 0.5) };
+      buses.dry.connect(master); buses.wet.connect(master); if (echo) buses.wet.connect(echo.send);
+      buses.snow.connect(buses.dry); buses.rise.connect(buses.dry); buses.snowWet.connect(buses.wet); buses.riseWet.connect(buses.wet);
+    }
+    if (kind === 'snow') return echoed ? buses.snowWet : buses.snow; // the snow recordings are crisp: round them off
+    if (kind === 'rise') return echoed ? buses.riseWet : buses.rise; // darker and softer: more of a low rumble
+    return echoed ? buses.wet : buses.dry;
+  }
   // maxDur cuts long clips short with a quick fade (footsteps come every ~0.17 s)
   function play1(kind, vol, pan = 0, { rate = 1, maxDur = 0 } = {}) {
-    if (!ctx || ctx.state !== 'running') return;
+    if (!ctx || ctx.state !== 'running' || stats.active >= 12) return;
     const now = ctx.currentTime;
     if (now - (lastT[kind] || 0) < GAP[kind]) return;
     const n = pick(kind); if (!n) return;
@@ -419,26 +453,20 @@ const sfx = (() => {
     const g = ctx.createGain();
     g.gain.value = vol * (0.8 + Math.random() * 0.3);
     if (maxDur) g.gain.setTargetAtTime(0, now + maxDur * 0.6, maxDur * 0.2);
-    let node = src.connect(g);
-    if (kind === 'snow') { // the snow recordings are crisp: round them off
-      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2600; lp.Q.value = 0.4;
-      node = node.connect(lp);
-    }
-    if (kind === 'rise') { // darker and softer: less grinding friction, more of a low rumble
-      const lp = ctx.createBiquadFilter();
-      lp.type = 'lowpass'; lp.frequency.value = 1800; lp.Q.value = 0.5;
-      node = node.connect(lp);
-    }
-    if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = pan; node = node.connect(p); }
-    node.connect(master);
-    if (echo && !UI_KINDS.has(kind) && (mixBiome === 'cave' || (kind !== 'step' && kind !== 'snow' && kind !== 'sand'))) node.connect(echo.send); // in the cave, footsteps echo too
+    src.connect(g);
+    const p = !PHONE && ctx.createStereoPanner ? ctx.createStereoPanner() : null; // (phones: no panning, one node less)
+    if (p) { p.pan.value = pan; g.connect(p); }
+    const echoed = !!echo && !UI_KINDS.has(kind) && (mixBiome === 'cave' || (kind !== 'step' && kind !== 'snow' && kind !== 'sand')); // in the cave, footsteps echo too
+    (p || g).connect(bus(kind, echoed));
+    stats.made++; stats.active++; stats.peak = Math.max(stats.peak, stats.active);
+    src.onended = () => { stats.active--; try { src.disconnect(); g.disconnect(); if (p) p.disconnect(); } catch {} };
     src.start();
     if (maxDur) src.stop(now + maxDur + 0.15);
     // a faint footstep-texture layer under the stone sounds
     if (kind === 'rise' || kind === 'land') play1('layer', vol * 0.18, pan, { rate: 0.8, maxDur: 0.45 });
   }
   const ui = (kind, vol = 0.5) => play1(kind, vol);
-  return { init, play, ui, set, prefs, setScene, setBiome, tick, get ready() { return !!ctx && ctx.state === 'running' && Object.keys(buffers).length; } };
+  return { stats, init, play, ui, set, prefs, setScene, setBiome, tick, get ready() { return !!ctx && ctx.state === 'running' && Object.keys(buffers).length; } };
 })();
 addEventListener('pointerdown', () => sfx.init());
 addEventListener('keydown', () => sfx.init());
@@ -1460,15 +1488,23 @@ function stoneSet(name) {
     variants.forEach(v => addGrassGlow(v.mat, 0.5, false, B.glow)); // the bake renders at half light
     const clip = [new THREE.Plane(new THREE.Vector3(0, 1, 0), -CFG.clipY)];
     const wallMats = variants.map(v => { const m = v.mat.clone(); m.clippingPlanes = clip; m.clipShadows = true; addGrassGlow(m, 1, true, B.glow); if (v.glowTex) addStepGlow(m, v.glowTex); return m; });
-    // the visible top of each stone when it lies flat: only the triangles above the floor cut (much lighter to draw)
-    for (const v of variants) {
+    // the visible top of each stone when it lies flat: only the triangles above the floor cut (much lighter to draw);
+    // and for the walls, everything except the part that stays underground even fully raised (never seen). Both share
+    // the stone's vertex data (one copy in memory), with their own lists of triangles.
+    const part = (v, minY) => {
       const src = v.raw.index.array, P = v.raw.attributes.position, idx = [];
-      for (let t = 0; t < src.length; t += 3) {
-        const y = Math.max(P.getY(src[t]), P.getY(src[t + 1]), P.getY(src[t + 2]));
-        if (y > CFG.clipY - 0.05) idx.push(src[t], src[t + 1], src[t + 2]);
-      }
-      v.cap = v.raw.clone(); v.cap.setIndex(idx);
-      v.raw.userData.shared = v.cap.userData.shared = true; // (the portal's stones use them too: never freed with a level)
+      for (let t = 0; t < src.length; t += 3) if (Math.max(P.getY(src[t]), P.getY(src[t + 1]), P.getY(src[t + 2])) > minY) idx.push(src[t], src[t + 1], src[t + 2]);
+      const g = new THREE.BufferGeometry();
+      for (const k in v.raw.attributes) g.setAttribute(k, v.raw.attributes[k]);
+      g.setIndex(idx); g.boundingBox = v.raw.boundingBox; g.boundingSphere = v.raw.boundingSphere;
+      g.userData.shared = true; // (never freed with a level)
+      return g;
+    };
+    for (const v of variants) {
+      v.raw.computeBoundingBox(); v.raw.computeBoundingSphere();
+      v.cap = part(v, CFG.clipY - 0.05);
+      v.wall = part(v, CFG.clipY - CFG.wallH - 0.05);
+      v.raw.userData.shared = true; // (the portal's stones use the whole stone)
     }
     door.mat.clippingPlanes = clip; door.mat.clipShadows = true;
     // the door's tree is a big leafy mass: the moss glow made it look flat and haloed, so it gets only a touch
@@ -1624,7 +1660,7 @@ function setMeshes(set, T) {
   if (set.meshes) for (const m of [...set.meshes.walls, ...set.meshes.caps]) m.dispose(); // (frees only their instance data)
   const room = roomFor(T);
   const walls = set.variants.map((v, i) => {
-    const m = new THREE.InstancedMesh(v.raw, set.wallMats[i], room);
+    const m = new THREE.InstancedMesh(v.wall || v.raw, set.wallMats[i], room);
     m.castShadow = true;
     return m;
   });
@@ -1666,7 +1702,7 @@ function trimGPU() { // (every device: laptops held ~110 MB per world visited ot
     if (!set || !set.variants || set === curSet || b === 'cave') continue;
     for (const m of [...(set.wallMats || []), set.door && set.door.mat]) if (m) for (const k in m) if (m[k] && m[k].isTexture) m[k].dispose();
     if (set.floorMat) { new Set(set.floorMat.map(m => m.map)).forEach(t => t.userData.rt.dispose()); set.floorMat = null; } // (a render target: baked again on return)
-    for (const v of set.variants) { if (v.raw) v.raw.dispose(); if (v.cap) v.cap.dispose(); }
+    for (const v of set.variants) { if (v.raw) v.raw.dispose(); if (v.cap) v.cap.dispose(); if (v.wall) v.wall.dispose(); }
     if (set.door && set.door.raw) set.door.raw.dispose();
   }
 }
@@ -1808,7 +1844,7 @@ function updateTargets(silent) {
 // only the big structures (castles, towers, arches, gate, shrine, ruined walls), each on a soft patch of grass
 const SCENERY = [[1, 'arch'], [2, 'arch'], [3, 'arch'], [4, 'arch'], [5, 'arch'], [7, 'arch'], [8, 'arch'], [15, 'arch'], [16, 'arch']];
 const KIND = {
-  arch: { size: [3.0, 4.4], sink: [0.1, 0.22], count: PHONE ? 3 : 6, gap: 6, inner: 3.4, outer: 11 }, // (phones: fewer, it's background)
+  arch: { size: [3.0, 4.4], sink: [0.1, 0.22], count: PHONE ? 0 : 6, gap: 6, inner: 3.4, outer: 11 }, // (phones: none, it's far background)
 };
 const sceneryModels = { arch: [] };
 const sceneryGroup = new THREE.Group();
@@ -1829,7 +1865,7 @@ function addHaze(mat) {
 }
 async function loadScenery() {
   const loader = new GLB();
-  for (const [n, kind] of PHONE ? SCENERY.slice(0, 4) : SCENERY) { // (phones: 4 ruin models, not 9; they're far, hazy background)
+  for (const [n, kind] of PHONE ? [] : SCENERY) { // (phones skip the ruins entirely: not even downloaded) // (phones: 4 ruin models, not 9; they're far, hazy background)
     const url = `assets/decor/d${String(n).padStart(2, '0')}.glb`;
     try {
       const g = await loader.loadAsync(url);
@@ -3350,6 +3386,13 @@ for (const [id, key] of [['musicVol', 'music'], ['fxVol', 'fx'], ['ambVol', 'amb
 }
 $('fxVol').addEventListener('change', () => sfx.play('step', 0.62, 0, { maxDur: 0.26 })); // preview the effects level
 $('ambBtn').addEventListener('click', () => { sfx.set('ambOn', !sfx.prefs.ambOn); $('ambBtn').classList.toggle('on', sfx.prefs.ambOn); });
+// light mode: the lightest look for older or slower phones (applies on restart)
+$('liteBtn').classList.toggle('on', LITE);
+$('liteBtn').addEventListener('click', () => {
+  const on = !$('liteBtn').classList.contains('on');
+  try { localStorage.setItem('buddy-lite', on ? '1' : '0'); } catch {}
+  location.reload();
+});
 $('muteBtn').addEventListener('click', () => { sfx.set('mute', !sfx.prefs.mute); $('muteBtn').classList.toggle('on', sfx.prefs.mute); });
 $('settingsBtn').addEventListener('click', () => openSettings('title'));
 // how to play: from the title or the pause menu, back to where you came from
@@ -3472,7 +3515,7 @@ $('nextBtn').addEventListener('click', () => {
 const face = (() => {
   const canvas = $('faceCanvas');
   const r = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-  r.setPixelRatio(Math.min(devicePixelRatio, PHONE ? 1.5 : 2));
+  r.setPixelRatio(Math.min(devicePixelRatio, LITE ? 1 : PHONE ? 1.5 : 2));
   r.outputColorSpace = THREE.SRGBColorSpace;
   r.toneMapping = THREE.ACESFilmicToneMapping;
   const sc = new THREE.Scene();
@@ -3904,7 +3947,7 @@ const atmosphere = (() => {
   scene.add(group);
 
   // dust motes: soft glowing specks drifting slowly around the player
-  const MOTES = PHONE ? 110 : 220, R = 4.5;
+  const MOTES = LITE ? 0 : PHONE ? 110 : 220, R = 4.5;
   const pos = new Float32Array(MOTES * 3), vel = [];
   for (let i = 0; i < MOTES; i++) {
     pos.set([rand(-R, R), rand(0.05, 2.2), rand(-R, R)], i * 3);
@@ -3942,7 +3985,7 @@ const atmosphere = (() => {
   }
   let dustDark = false;
   // in the cave the dust becomes glowing fireflies
-  function setDust(color, dark) { motes.material.color.set(color); motes.material.size = dark ? 0.1 : 0.07; dustDark = dark; geo.setDrawRange(0, dark ? 80 : MOTES); }
+  function setDust(color, dark) { motes.material.color.set(color); motes.material.size = dark ? 0.1 : 0.07; dustDark = dark; geo.setDrawRange(0, Math.min(dark ? 80 : MOTES, MOTES)); }
 
   // weather: things slowly coming down from above, one kind per biome
   const sprite = draw => { const c = document.createElement('canvas'); c.width = c.height = 64; draw(c.getContext('2d')); return new THREE.CanvasTexture(c); };
@@ -3960,7 +4003,7 @@ const atmosphere = (() => {
     autumn: { tex: leaf, colors: ['#e07a2e', '#f2a93b', '#c9542a', '#e9c24a'], size: 0.8, n: 35, fall: 0.16, sway: 0.35, wind: 0.15, opacity: 1 },
     cave: { tex: soft, colors: ['#7ff6e6', '#5fd8ff', '#c9a2ff', '#ff9ad8'], size: 0.4, n: 45, fall: 0.1, sway: 0.15, wind: 0, opacity: 0.9, glow: true }, // drifting spores
   };
-  const WN = 320, WR = 6, TOP = 5;
+  const WN = LITE ? 80 : PHONE ? 160 : 320, WR = 6, TOP = 5;
   const wpos = new Float32Array(WN * 3), wcol = new Float32Array(WN * 3), wvar = [];
   for (let i = 0; i < WN; i++) { wpos.set([rand(-WR, WR), rand(0, TOP), rand(-WR, WR)], i * 3); wvar.push([rand(0.7, 1.3), rand(0, 6.28), rand(0.6, 1.4)]); }
   const wgeo = new THREE.BufferGeometry();
@@ -3979,14 +4022,14 @@ const atmosphere = (() => {
     const c = new THREE.Color();
     for (let i = 0; i < WN; i++) { c.set(W.colors[i % W.colors.length]); wcol.set([c.r, c.g, c.b], i * 3); }
     wgeo.attributes.color.needsUpdate = true;
-    wgeo.setDrawRange(0, W.n);
+    wgeo.setDrawRange(0, Math.min(W.n, WN));
   }
   const baseUpdate = update;
   function updateAll(dt, t) {
     baseUpdate(dt, t);
     if (!group.visible) return;
     const cx = camTarget.x, cz = camTarget.z;
-    for (let i = 0; i < W.n; i++) {
+    for (let i = 0, wn = Math.min(W.n, WN); i < wn; i++) {
       const v = wvar[i], k3 = i * 3;
       wpos[k3] += (W.wind * v[2] + Math.sin(t * 0.9 * v[0] + v[1]) * W.sway) * dt;
       wpos[k3 + 1] -= W.fall * v[0] * dt;
@@ -3997,7 +4040,7 @@ const atmosphere = (() => {
     }
     wgeo.attributes.position.needsUpdate = true;
   }
-  return { update: updateAll, setDust, setWeather, flakes };
+  return { update: updateAll, setDust, setWeather, flakes, group };
 })();
 
 // ---------- input ----------
@@ -4078,12 +4121,21 @@ peekBtn.addEventListener('pointerleave', setPeek(false));
 
 let fitW = 0, fitH = 0;
 // the render resolution follows the frame rate: long frames lower it a step, a long smooth run raises it back
-let prNow = PR_MAX, slowT = 0, fastT = 0;
+let prNow = PR_MAX, slowT = 0, fastT = 0, liteAuto = false;
+// this phone stayed slow: the heaviest extras go now, and the game starts in light mode next time
+function goLite() {
+  try { localStorage.setItem('buddy-lite', '1'); } catch {}
+  sun.castShadow = false; renderer.shadowMap.needsUpdate = true;
+  sceneryGroup.visible = false; atmosphere.group && (atmosphere.group.visible = false);
+  toast('Light mode on: smoother on this phone');
+}
 function adaptRes(raw) {
   // phones keep one resolution: every change reallocates the screen buffers (iPhones pile that memory up until Safari
   // closes the page), and the hiccups of loading a level were read as slowness, dropping a step each level
-  if (PHONE || state !== 'play' || raw > 0.25) return; // (a hitch from loading or a hidden tab says nothing)
+  if ((PHONE && IOS) || state !== 'play' || raw > 0.25) return; // (a hitch from loading or a hidden tab says nothing)
   if (raw > 1 / 42) { slowT += raw; fastT = 0; } else { fastT += raw; if (raw < 1 / 55) slowT = Math.max(0, slowT - raw); }
+  // Android phones only step down (never back up); still slow at the lowest step: light mode, from now on
+  if (PHONE && slowT > 3 && prNow <= 0.75 && !LITE && !liteAuto) { liteAuto = true; goLite(); }
   const step = slowT > 1.2 && prNow > 0.75 ? -0.25 : !PHONE && fastT > 10 && prNow < PR_MAX ? 0.25 : 0; // (phones only step down)
   if (!step) return;
   prNow = Math.min(PR_MAX, Math.max(0.75, prNow + step)); slowT = fastT = 0;
@@ -4165,6 +4217,7 @@ if (params.has('memdebug')) window.__step = (n = 1) => { manualStep = true; for 
   bb.save = () => {
     const g = window.__gpu ? window.__gpu() : {};
     const rec = { t: Date.now(), start: bb.start, state, level: L, biome, mode, mb: (g.textures || 0) + (g.renderbuffers || 0) + (g.buffers || 0), pr: renderer.getPixelRatio(), fps,
+      snd: sfx.stats.made + '/' + sfx.stats.active + '/' + sfx.stats.peak, lite: LITE ? 1 : 0, nosnd: NOSOUND ? 1 : 0,
       errs: bb.errs.slice(-4), lost: bb.lost, hidden: document.hidden, clean: 0, ua: navigator.userAgent, scr: `${screen.width}x${screen.height}@${devicePixelRatio}` };
     try { localStorage.setItem(BB_KEY, JSON.stringify(rec)); } catch {}
     if (dbg) dbg.textContent = `${fps} fps · ${rec.mb} MB · x${rec.pr} · ${state}${bb.lost ? ' · reset ' + bb.lost : ''}${bb.errs.length ? ' · err ' + bb.errs.length : ''}`;
@@ -4180,6 +4233,7 @@ if (params.has('memdebug')) window.__step = (n = 1) => { manualStep = true; for 
       `Graphics memory: ${P.mb} MB · quality x${P.pr} · ${P.fps} fps`,
       `In the background: ${P.hidden ? 'yes' : 'no'} · graphics resets: ${P.lost}`,
       `Errors: ${P.errs.length ? P.errs.join(' | ') : 'none'}`,
+      `Sounds made/playing/most: ${P.snd || '-'}${P.nosnd ? ' · sound off' : ''}${P.lite ? ' · lite' : ''}`,
       `Device: ${dev}${os ? ' iOS ' + os.replace(/_/g, '.') : ''} · ${P.scr}`,
     ];
     const card = document.createElement('div');

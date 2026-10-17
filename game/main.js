@@ -108,7 +108,7 @@ let bbPrev = null;
 try { bbPrev = JSON.parse(localStorage.getItem(BB_KEY) || 'null'); } catch {}
 addEventListener('error', e => { bb.errs.push(String(e.message || e).slice(0, 160)); });
 addEventListener('unhandledrejection', e => { bb.errs.push('promise: ' + String(e.reason && (e.reason.message || e.reason)).slice(0, 160)); });
-addEventListener('pagehide', () => { try { const d = JSON.parse(localStorage.getItem(BB_KEY) || '{}'); d.clean = 1; localStorage.setItem(BB_KEY, JSON.stringify(d)); } catch {} });
+addEventListener('pagehide', () => { if (bb.lostAt && Date.now() - bb.lostAt < 30000) return; try { const d = JSON.parse(localStorage.getItem(BB_KEY) || '{}'); d.clean = 1; localStorage.setItem(BB_KEY, JSON.stringify(d)); } catch {} });
 // count every byte the game asks the graphics chip for (textures, render buffers, vertex data), so memory
 // problems can be measured instead of guessed; window.__gpu() returns the totals in MB
 { // (always on: it only adds a little bookkeeping to allocation calls)
@@ -149,8 +149,16 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.localClippingEnabled = true;
 renderer.domElement.id = 'game';
 // if the phone's graphics chip resets, keep the page alive and reload it once the context is back (your progress is saved)
-renderer.domElement.addEventListener('webglcontextlost', e => { e.preventDefault(); bb.lost++; bb.save && bb.save(); }, false);
-renderer.domElement.addEventListener('webglcontextrestored', () => location.reload(), false);
+// When a phone's graphics chip stalls, the browser resets it ("context lost"). The page used to reload here, which
+// threw you back to the menu; now three.js restores the context in place (it re-uploads every texture and mesh by
+// itself) and only what lived purely on the GPU is made again: the light environment and the baked floor atlases.
+renderer.domElement.addEventListener('webglcontextlost', e => { e.preventDefault(); bb.lost++; bb.lostAt = Date.now(); bb.save && bb.save(); }, false);
+renderer.domElement.addEventListener('webglcontextrestored', () => {
+  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+  for (const set of Object.values(stoneSets)) if (set && set.floorMat) { new Set(set.floorMat.map(m => m.map)).forEach(t => t.userData.rt && t.userData.rt.dispose()); set.floorMat = null; }
+  if (floor && curSet) floor.material = floorMatOf(curSet);
+  stillDrawn = false;
+}, false);
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -1732,6 +1740,7 @@ function buildLevel(level, race = null, opts = {}) {
   portal.userData.on = hasKey ? 1 : 0;
   scene.add(portal);
   trimGPU();
+  if (renderer.compileAsync) renderer.compileAsync(scene, camera).catch(() => {}); // (shaders ready before you start walking)
   $('keyHud').style.display = race ? 'none' : '';
   $('keyHud').classList.toggle('got', hasKey);
 
@@ -3420,6 +3429,7 @@ const face = (() => {
   r.toneMapping = THREE.ACESFilmicToneMapping;
   const sc = new THREE.Scene();
   sc.environment = new THREE.PMREMGenerator(r).fromScene(new RoomEnvironment(), 0.04).texture;
+  canvas.addEventListener('webglcontextrestored', () => { sc.environment = new THREE.PMREMGenerator(r).fromScene(new RoomEnvironment(), 0.04).texture; w = 0; }, false);
   sc.environmentIntensity = 0.55;
   sc.add(new THREE.HemisphereLight('#ffffff', '#dbe9cc', 0.8));
   const keyL = new THREE.DirectionalLight('#fff1dc', 2.1); keyL.position.set(-2, 3, 4);

@@ -365,6 +365,58 @@
   .rank li b { width: 40px; color: var(--leaf-ink); }
   .rank li i { width: 20px; height: 20px; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,.15); }
 
+  /* ---------- pages (outfit, race, friends): your character in the middle, panels on each side ---------- */
+  .page { padding: 0; perspective: 1100px; }
+  .pagehead { position: absolute !important; left: 24px; top: 20px; display: flex; align-items: center; gap: 14px; z-index: 3; }
+  .pagehead h2 { margin: 0; font-size: 44px; }
+  .page .card { position: absolute !important; top: 54%; width: clamp(290px, 30vw, 390px); max-height: 80vh; overflow-y: auto; scrollbar-width: none; text-align: left; z-index: 2; padding: 22px 20px 20px; }
+  .page .card::-webkit-scrollbar { display: none; }
+  .page .pleft { left: 3vw; transform: translateY(-50%) rotateY(calc(16deg + var(--mx, 0) * 4deg)); transform-origin: 0 50%; animation: slidein-l .6s var(--spring) backwards; }
+  .page .pright { right: 3vw; transform: translateY(-50%) rotateY(calc(-16deg + var(--mx, 0) * 4deg)); transform-origin: 100% 50%; animation: slidein-r .6s var(--spring) backwards; }
+  .page .rc-row.col { flex-direction: column; align-items: stretch; gap: 6px; }
+  .page .rc-row.col .seg { flex-wrap: wrap; justify-content: center; }
+  .page .card p { margin: 0 0 12px; font-size: 15px; }
+  .page .friendbtn { margin-top: 10px; }
+  .guestonly { display: none; } #friend.guest .guestonly { display: block; }
+  #friend.guest .pane-host, #friend.guest .pane-join { display: none !important; }
+  /* characters in the outfit screen */
+  .chars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+  .charcard { position: relative; border-radius: 18px; background: var(--well); padding: 6px 4px 7px; text-align: center; font-size: 13px; transition: transform .25s var(--bounce); }
+  .charcard img { width: 100%; aspect-ratio: 1; object-fit: contain; display: block; }
+  .charcard:hover { transform: translateY(-3px) rotate(-2deg); }
+  .charcard.on { background: var(--leaf-light); box-shadow: inset 0 0 0 3px var(--leaf); }
+  .charcard.locked { filter: grayscale(.9); opacity: .6; }
+  .charcard.locked::after { content: attr(data-lock); position: absolute; inset: auto 4px 4px; font-size: 10px; color: var(--ink-soft); }
+  #outfit .skins, #outfit .colornote { display: none; } #outfit.colors .skins { display: grid; } #outfit.colors .chars { display: none; }
+  #outfit.colors:not(.buddy) .colornote { display: block; } #outfit.colors:not(.buddy) .skins { opacity: .4; pointer-events: none; }
+  .colornote { font-size: 13px; color: var(--ink-soft); margin: -8px 0 12px; }
+
+  /* phones and narrow windows: the 3D scene on top, panels as a sheet underneath */
+  @media (max-aspect-ratio: 5/4) {
+    .page .card { position: relative !important; top: auto; left: auto !important; right: auto !important; transform: none !important; width: auto; max-height: none; flex-shrink: 0; overflow: visible; margin: 0 12px 12px; animation: fadeup .5s var(--spring) backwards; }
+    .page { overflow-y: auto; padding-top: 46vh; justify-content: flex-start; }
+    .page .faceSlot { position: fixed !important; height: 50vh; }
+    .pagehead h2 { font-size: 34px; }
+    #outfit { padding-top: 48vh; align-items: stretch; overflow-y: auto; }
+    #outfit .panel { width: auto; margin: 0 12px 12px; transform: none; }
+    #outfit .faceSlot { position: fixed !important; height: 50vh; }
+    /* title on a phone: logo on top, Buddy in the middle, menu as a row of big buttons at the bottom */
+    .side-menu { top: auto; left: 8px; right: 8px; bottom: 10px; width: auto; align-content: center; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 10px; transform: none !important; border-radius: 26px; }
+    .side-menu::before { inset: 6px; border-radius: 20px; }
+    .mitem { flex: 0 0 auto; flex-direction: column; gap: 4px; padding: 6px 4px; font-size: 11px; letter-spacing: .02em; width: 64px; text-align: center; transform: none !important; }
+    .mitem .go { display: none; } .mitem .mi { width: 38px; height: 38px; }
+    .cont { display: none; }
+    #title .faceSlot { height: 72vh; }
+  }
+  @media (max-height: 520px) and (min-aspect-ratio: 5/4) { /* phones held sideways */
+    .logo .word { font-size: 58px; } .logo .sub { font-size: 11px; margin-top: 8px; padding: 4px 12px 6px; }
+    .side-menu { width: 200px; padding: 10px; gap: 2px; top: 58%; } .mitem { font-size: 14px; padding: 5px 10px 6px 6px; } .mitem .mi { width: 30px; height: 30px; }
+    .cont { width: 170px; } .cont .art { height: 90px; } .cont h3 { font-size: 18px; margin-top: 6px; } .cont p { margin-bottom: 6px; }
+    .page .card { max-height: 86vh; padding: 14px; width: 270px; } .pagehead h2 { font-size: 30px; } .rc-row { padding: 5px 8px 5px 12px; font-size: 14px; }
+    .hud .chip { height: 38px; font-size: 15px; } .round { width: 44px; height: 44px; border-radius: 15px; } .peek { right: 14px; bottom: 14px; } .camzoom { bottom: 66px; }
+    .coach .card { max-width: 46vw; padding: 10px 14px 12px 10px; } .coach .pic { width: 46px; height: 46px; } .coach h4 { font-size: 17px; } .coach p { font-size: 13px; }
+  }
+
   /* how to play */
   .helpcard { width: min(470px, 94vw) !important; text-align: left; }
   .helpcard h2, .helpcard .ribbon { display: block; text-align: center; width: max-content; margin-left: auto; margin-right: auto; }
@@ -378,8 +430,6 @@
   .setting label small { color: var(--ink-soft); font-size: 12px; margin-left: 4px; }
 
   /* play with a friend */
-  #friend .card { width: min(460px, 94vw); max-height: 94vh; overflow-y: auto; scrollbar-width: none; }
-  #friend .card .medal { margin-top: 0; }
   #friend.guest .hostonly { display: none; }
   #friend .pane-join { display: none; } #friend.joining .pane-join { display: block; } #friend.joining .pane-host, #friend.joining #friendStart, #friend.joining .teamhint { display: none; }
   #friend.guest .pane-join { display: none; }
@@ -430,19 +480,10 @@
   #loading .stones i:nth-child(2) { animation-delay: .15s; } #loading .stones i:nth-child(3) { animation-delay: .3s; }
   @keyframes stone { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-14px); } }
 
-  /* narrow windows: the side panels tuck into the corners so they never cover Buddy */
+  /* narrow windows: a smaller logo and stats */
   @media (max-aspect-ratio: 5/4) {
-    .side-menu { left: 4vw; top: auto; bottom: 4vh; transform: var(--tilt); width: min(250px, 42vw); padding: 14px 12px; }
-    @keyframes slidein-l { from { opacity: 0; transform: translateX(-40px) var(--tilt); } }
-    .mitem { font-size: 16px; padding: 7px 12px 8px 8px; } .mitem .mi { width: 32px; height: 32px; }
-    .cont { right: 4vw; top: auto; bottom: 4vh; transform: var(--tilt); width: min(200px, 38vw); }
-    @keyframes slidein-r { from { opacity: 0; transform: translateX(40px) var(--tilt); } }
-    .cont:hover { transform: translateY(-5px) var(--tilt); }
-    .cont .art { height: 110px; }
-    .logo .word { font-size: clamp(64px, 16vw, 120px); }
-    .counters { top: auto; bottom: calc(4vh + 8px); right: 50%; transform: translateX(50%); display: none; }
-    #outfit { justify-content: center; align-items: flex-end; padding: 0 0 4vh; }
-    #outfit .panel { width: min(380px, 92vw); transform: none; transform-origin: 50% 100%; }
+    .logo .word { font-size: clamp(56px, 15vw, 110px); } .logo { top: 2vh; }
+    .counters { top: 14px; right: 14px; } .counters .chip { font-size: 14px; }
     .hud .stats small { display: none; }
   }
   /* short windows: tighter cards so nothing is cut off */
@@ -554,8 +595,10 @@
   <div class="faceSlot"></div>
   <div class="panel card">
     <div class="panel-head"><h2 class="sticker">Outfit</h2></div>
-    <div class="tabs"><span class="on"><svg class="ico"><use href="#i-palette"/></svg>Colors</span></div>
+    <div class="tabs" id="outTabs"><span class="on" data-otab="chars"><svg class="ico"><use href="#i-heart"/></svg>Characters</span><span data-otab="colors"><svg class="ico"><use href="#i-palette"/></svg>Colors</span></div>
+    <div class="chars" id="chars"></div>
     <div class="skins" id="skins"></div>
+    <p class="colornote" id="colorNote">Colors are for Buddy's hood and jacket.</p>
     <div class="row">
       <button class="btn blue" data-go="title"><svg class="ico"><use href="#i-back"/></svg>Back</button>
       <button class="btn yellow" data-go="title"><svg class="ico"><use href="#i-check"/></svg>Done</button>
@@ -587,48 +630,54 @@
   </div>
 </section>
 
-<section class="screen modal" id="race">
-  <div class="card pop">
-    <div class="medal" style="color:var(--coral)"><svg class="ico"><use href="#i-flag"/></svg></div>
-    <h2 class="sticker">Race</h2>
-    <p>Everyone starts in a different corner.<br>First to the key wins!</p>
+<section class="screen warm page" id="race">
+  <div class="motes"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="faceSlot"></div>
+  <div class="pagehead"><button class="round" data-go="title" aria-label="Back"><svg class="ico"><use href="#i-back"/></svg></button><h2 class="sticker">Race</h2></div>
+  <div class="card pleft">
+    <div class="ribbon">Race settings</div>
     <div class="rc-row"><span>Buddies</span><div class="stepper"><button class="round" data-rc="racers:-1" aria-label="Fewer Buddies">−</button><b id="rcRacers">3</b><button class="round" data-rc="racers:1" aria-label="More Buddies">+</button></div></div>
     <div class="rc-row"><span>Teammates</span><div class="stepper"><button class="round" data-rc="mates:-1" aria-label="Fewer teammates">−</button><b id="rcMates">0</b><button class="round" data-rc="mates:1" aria-label="More teammates">+</button></div></div>
-    <div class="rc-row"><span>World</span><div class="seg" id="rcBiome"><button data-rc="biome:woods">Woods</button><button data-rc="biome:desert">Dunes</button><button data-rc="biome:snow">Frost</button><button data-rc="biome:autumn">Autumn</button><button data-rc="biome:cave">Cave</button></div></div>
-    <div class="rc-row"><span>Maze</span><div class="seg" id="rcShape"><button data-rc="shape:square">Square</button><button data-rc="shape:circle">Circle</button><button data-rc="shape:gem">Gem</button><button data-rc="shape:plus">Plus</button><button data-rc="shape:snowflake">Flake</button></div></div>
-    <div class="rc-row"><span>Rivals</span><div class="seg" id="rcSpeed"><button data-rc="speed:0">Easy</button><button data-rc="speed:1">Normal</button><button data-rc="speed:2">Hard</button><button data-rc="speed:3">Pro</button></div></div>
+    <div class="rc-row col"><span>World</span><div class="seg" id="rcBiome"><button data-rc="biome:woods">Woods</button><button data-rc="biome:desert">Dunes</button><button data-rc="biome:snow">Frost</button><button data-rc="biome:autumn">Autumn</button><button data-rc="biome:cave">Cave</button></div></div>
+    <div class="rc-row col"><span>Maze</span><div class="seg" id="rcShape"><button data-rc="shape:square">Square</button><button data-rc="shape:circle">Circle</button><button data-rc="shape:gem">Gem</button><button data-rc="shape:plus">Plus</button><button data-rc="shape:snowflake">Flake</button></div></div>
+    <div class="rc-row col"><span>Rivals</span><div class="seg" id="rcSpeed"><button data-rc="speed:0">Easy</button><button data-rc="speed:1">Normal</button><button data-rc="speed:2">Hard</button><button data-rc="speed:3">Pro</button></div></div>
+  </div>
+  <div class="card pright">
+    <p>Everyone starts in a different corner. First to the key wins!</p>
     <div class="rc-preview" id="rcPreview"></div>
-    <div class="row">
-      <button class="btn blue" data-go="title"><svg class="ico"><use href="#i-back"/></svg>Back</button>
-      <button class="btn green" id="raceGo"><svg class="ico"><use href="#i-flag"/></svg>Start</button>
-    </div>
-    <button class="btn small friendbtn" id="friendBtn"><svg class="ico"><use href="#i-heart"/></svg>Play with a friend</button>
+    <button class="btn green" id="raceGo" style="width:100%"><svg class="ico"><use href="#i-flag"/></svg>Start</button>
+    <button class="btn small friendbtn" id="friendBtn"><svg class="ico"><use href="#i-heart"/></svg>Play with friends instead</button>
   </div>
 </section>
 
-<section class="screen modal" id="friend">
-  <div class="card pop">
-    <div class="medal" style="color:var(--berry)"><svg class="ico"><use href="#i-heart"/></svg></div>
-    <h2 class="sticker" id="friendTitle">Play with friends</h2>
+<section class="screen warm page" id="friend">
+  <div class="motes"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="faceSlot"></div>
+  <div class="pagehead"><button class="round" id="friendBack" aria-label="Back"><svg class="ico"><use href="#i-back"/></svg></button><h2 class="sticker" id="friendTitle">Friends</h2></div>
+  <div class="card pleft">
     <div class="tabs hostonly" id="frTabs"><span class="on" data-tab="host"><svg class="ico"><use href="#i-link"/></svg>Invite</span><span data-tab="join"><svg class="ico"><use href="#i-key"/></svg>Join with code</span></div>
     <div class="pane-host hostonly">
       <div class="rc-row"><span>Players</span><div class="stepper"><button class="round" data-fr="size:-1" aria-label="Fewer players">−</button><b id="frSize">2</b><button class="round" data-fr="size:1" aria-label="More players">+</button></div></div>
-      <div class="rc-row"><span>Mode</span><div class="seg" id="frMode"><button data-fr="mode:ffa">Everyone for themselves</button><button data-fr="mode:teams">Teams</button></div></div>
-      <div class="rc-row"><span>Fill with computer Buddies</span><button class="toggle" id="frBots" data-fr="bots:1" aria-label="Fill empty spots with computer Buddies"></button></div>
-      <div class="rc-row"><span>World</span><div class="seg" id="frBiome"><button data-rc="biome:woods">Woods</button><button data-rc="biome:desert">Dunes</button><button data-rc="biome:snow">Frost</button><button data-rc="biome:autumn">Autumn</button><button data-rc="biome:cave">Cave</button></div></div>
-      <div class="rc-row"><span>Maze</span><div class="seg" id="frShape"><button data-rc="shape:square">Square</button><button data-rc="shape:circle">Circle</button><button data-rc="shape:gem">Gem</button><button data-rc="shape:plus">Plus</button><button data-rc="shape:snowflake">Flake</button></div></div>
-      <button class="btn green" id="friendCopy" style="width:100%"><svg class="ico"><use href="#i-link"/></svg>Invite friends</button>
-      <div class="codehint">or tell them the code <b id="friendCode">·····</b></div>
+      <div class="rc-row col"><span>Mode</span><div class="seg" id="frMode"><button data-fr="mode:ffa">Everyone for themselves</button><button data-fr="mode:teams">Teams</button></div></div>
+      <div class="rc-row"><span>Computer Buddies fill empty spots</span><button class="toggle" id="frBots" data-fr="bots:1" aria-label="Fill empty spots with computer Buddies"></button></div>
+      <div class="rc-row col"><span>World</span><div class="seg" id="frBiome"><button data-rc="biome:woods">Woods</button><button data-rc="biome:desert">Dunes</button><button data-rc="biome:snow">Frost</button><button data-rc="biome:autumn">Autumn</button><button data-rc="biome:cave">Cave</button></div></div>
+      <div class="rc-row col"><span>Maze</span><div class="seg" id="frShape"><button data-rc="shape:square">Square</button><button data-rc="shape:circle">Circle</button><button data-rc="shape:gem">Gem</button><button data-rc="shape:plus">Plus</button><button data-rc="shape:snowflake">Flake</button></div></div>
     </div>
     <div class="pane-join">
       <p class="hostonly">Type the code your friend sent you.</p>
       <div class="joinrow hostonly"><input id="friendInput" maxlength="6" placeholder="ABCDE" autocomplete="off" spellcheck="false"><button class="btn green" id="friendJoin">Join</button></div>
     </div>
+    <p class="guestonly">You're in! The host picks the world and starts the race.</p>
+  </div>
+  <div class="card pright">
+    <div class="pane-host hostonly">
+      <button class="btn green" id="friendCopy" style="width:100%"><svg class="ico"><use href="#i-link"/></svg>Invite friends</button>
+      <div class="codehint">or tell them the code <b id="friendCode">·····</b></div>
+    </div>
     <div class="lobby" id="lobby"></div>
     <div class="teamhint" id="teamHint">Tap a player to switch their team</div>
     <div class="ribbon" id="friendStatus">Getting ready…</div>
-    <button class="btn yellow" id="friendStart" style="width:100%;margin-bottom:10px"><svg class="ico"><use href="#i-flag"/></svg>Start</button>
-    <button class="btn blue small" id="friendBack" style="width:100%"><svg class="ico"><use href="#i-back"/></svg>Back</button>
+    <button class="btn yellow" id="friendStart" style="width:100%"><svg class="ico"><use href="#i-flag"/></svg>Start</button>
   </div>
 </section>
 

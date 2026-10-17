@@ -239,12 +239,12 @@ const sfx = (() => {
     master.connect(dim).connect(soft).connect(ctx.destination);
     // the cave adds a soft echo to the stone sounds
     echo = { send: ctx.createGain(), delay: ctx.createDelay(1), fb: ctx.createGain(), lp: ctx.createBiquadFilter() };
-    echo.send.gain.value = 0; echo.delay.delayTime.value = 0.21; echo.fb.gain.value = 0.28; echo.lp.type = 'lowpass'; echo.lp.frequency.value = 1400;
+    echo.send.gain.value = 0; echo.delay.delayTime.value = 0.16; echo.fb.gain.value = 0.12; echo.lp.type = 'lowpass'; echo.lp.frequency.value = 1400;
     echo.send.connect(echo.delay).connect(echo.lp).connect(echo.fb).connect(echo.delay);
     echo.lp.connect(soft);
     // a second, longer tap so the echo sounds like a hollow space rather than a single slap
     const d2 = ctx.createDelay(1), f2 = ctx.createGain(), l2 = ctx.createBiquadFilter();
-    d2.delayTime.value = 0.34; f2.gain.value = 0.16; l2.type = 'lowpass'; l2.frequency.value = 1000;
+    d2.delayTime.value = 0.3; f2.gain.value = 0; l2.type = 'lowpass'; l2.frequency.value = 1000;
     echo.send.connect(d2).connect(l2).connect(f2).connect(d2); l2.connect(soft);
     ambGain = ctx.createGain(); ambGain.gain.value = 0; ambGain.connect(ctx.destination);
     for (const n of Object.keys(AMB_FILES)) fetch(`assets/ambience/${n}.m4a`).then(r => r.arrayBuffer()).then(b => ctx.decodeAudioData(b)).then(buf => { ambBuf[n] = buf; setAmbience(ambWant); }).catch(() => {});
@@ -318,7 +318,7 @@ const sfx = (() => {
     setAmbience(name);
     if (!echo) return;
     const cave = name === 'cave', now = ctx.currentTime;
-    echo.send.gain.setTargetAtTime(cave ? 0.32 : 0, now, 0.3);
+    echo.send.gain.setTargetAtTime(cave ? 0.12 : 0, now, 0.3); // just a hint of a hollow space
     dim.gain.setTargetAtTime(cave ? 0.78 : 1, now, 0.3);
     soft.frequency.setTargetAtTime(cave ? 1700 : 6500, now, 0.3);
   }
@@ -1409,7 +1409,8 @@ function stoneSet(name) {
 
 async function load() {
   const loader = new GLTFLoader();
-  const cg = await loader.loadAsync('assets/character.glb');
+  const cg = { scene: (await loadChar('buddy')).scene };
+  charCache.buddyLoaded = await loadChar('buddy');
   const woods = await stoneSet('woods');
   const slab = -CFG.clipY;
   const floorGeo = new THREE.BoxGeometry(CFG.tileW, slab, CFG.tileW).translate(0, -slab / 2, 0);
@@ -1635,7 +1636,7 @@ function buildLevel(level, race = null, opts = {}) {
       }
     }
   }
-  rivals = race ? race.entries.slice(1).map((e, i) => makeRival(e, race.online ? race.others[i].skin : RIVAL_SKINS.filter(c => c !== skin)[i])) : [];
+  rivals = race ? race.entries.slice(1).map((e, i) => makeRival(e, race.online ? race.others[i].skin : RIVAL_SKINS.filter(c => c !== skin)[i], race.online ? race.others[i].ch : undefined)) : [];
   // your friends are moved by the network; computer Buddies are run by the host (and sent to everyone)
   if (race && race.online) rivals.forEach((r, i) => { const o = race.others[i]; r.pid = o.pid; r.team = o.team; r.bot = o.bot; r.remote = !(o.bot && race.host); });
   for (let k = 0; race && !race.online && k < raceCfg.mates; k++) rivals[rivals.length - 1 - k].team = true; // your teammates (the far corners first)
@@ -1909,7 +1910,7 @@ function setSkin(i) {
   TINT.uTintOn.value = i === 0 ? 0 : 1;
   // the logo wears the hood color, a little lighter so it reads like the lit hood
   document.documentElement.style.setProperty('--logo', '#' + new THREE.Color(SKINS[i]).offsetHSL(0, 0.08, 0.1).getHexString());
-  if (silhouette) silhouette.traverse(o => { if (o.isMesh) o.material.color.set(SKINS[i]); });
+  if (silhouette && charId === 'buddy') silhouette.traverse(o => { if (o.isMesh) o.material.color.set(SKINS[i]); });
   try { localStorage.setItem('hidden-maze-skin', i); } catch {}
   [...$('skins').children].forEach((b, k) => b.classList.toggle('on', k === i));
 }
@@ -1919,12 +1920,66 @@ $('skins').addEventListener('click', e => {
   setSkin([...$('skins').children].indexOf(b));
 });
 
+// ---------- characters ----------
+// Buddy and four animal friends, one unlocked with each world (all open for now). The animal scans stand facing +Z in a
+// T-pose; they are baked into Buddy's own space (facing +X, height -0.5..0.5) and their hips, shoulders and arms are
+// measured, so the same walk, idle and bump animations drive every character.
+const CHARS = [
+  { id: 'buddy', name: 'Buddy', file: 'assets/character.glb', world: -1 },
+  { id: 'frog', name: 'Frog', file: 'assets/chars/frog.glb', world: 0 },
+  { id: 'fennec', name: 'Fennec', file: 'assets/chars/fennec.glb', world: 1 },
+  { id: 'bear', name: 'Polar Bear', file: 'assets/chars/bear.glb', world: 2 },
+  { id: 'cat', name: 'Cat', file: 'assets/chars/cat.glb', world: 3 },
+];
+const CHARS_ALL_OPEN = true; // for now every character is unlocked
+const charUnlocked = c => CHARS_ALL_OPEN || c.world < 0 || unlocked(c.world * LEVELS_PER_WORLD);
+const BUDDY_P = { hip: -0.28, sho: 0.03, armZ: 0.14, drop: 0.28, top: 0.08, bot: -0.36, neck: 0.06, ears: 0 };
+let charId = 'buddy';
+try { charId = localStorage.getItem('hidden-maze-char') || 'buddy'; } catch {}
+const charCache = {};
+function loadChar(id) {
+  const C = CHARS.find(c => c.id === id) || CHARS[0];
+  return charCache[C.id] ||= new GLTFLoader().loadAsync(C.file).then(g => {
+    if (C.id === 'buddy') return { id: 'buddy', scene: g.scene, P: BUDDY_P };
+    g.scene.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(g.scene), h = box.max.y - box.min.y;
+    const M = new THREE.Matrix4().makeScale(1 / h, 1 / h, 1 / h).multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2))
+      .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y - h / 2, -(box.min.z + box.max.z) / 2));
+    const root = new THREE.Group(), pts = [];
+    g.scene.traverse(o => {
+      if (!o.isMesh) return;
+      const geo = o.geometry.clone().applyMatrix4(o.matrixWorld).applyMatrix4(M), mat = o.material.clone();
+      mat.metalness = 0; mat.roughness = Math.max(0.65, mat.roughness ?? 1);
+      root.add(new THREE.Mesh(geo, mat));
+      const P = geo.attributes.position; for (let i = 0; i < P.count; i++) pts.push(P.getX(i), P.getY(i), P.getZ(i));
+    });
+    return { id: C.id, scene: root, P: measureBody(pts) };
+  });
+}
+// where a T-posed body's parts are: arms are the parts furthest out sideways, the torso just under them, and the hip
+// is where the legs meet (the lowest point on the middle line, front half, so a tail doesn't count)
+function measureBody(pts) {
+  let maxZ = 0, ys = [], tz = 0, lo = 1;
+  // (only below the head: a fennec's big ears stick out further than its arms)
+  for (let i = 0; i < pts.length; i += 3) if (pts[i + 1] < 0.12) maxZ = Math.max(maxZ, Math.abs(pts[i + 2]));
+  for (let i = 0; i < pts.length; i += 3) if (pts[i + 1] < 0.12 && Math.abs(pts[i + 2]) > maxZ * 0.75) ys.push(pts[i + 1]);
+  const sho = ys.reduce((a, b) => a + b, 0) / Math.max(1, ys.length) + 0.02;
+  for (let i = 0; i < pts.length; i += 3) {
+    const x = pts[i], y = pts[i + 1], z = Math.abs(pts[i + 2]);
+    if (y > sho - 0.17 && y < sho - 0.09) tz = Math.max(tz, z);
+    if (z < 0.02 && x > -0.05 && y > -0.47) lo = Math.min(lo, y);
+  }
+  const armZ = Math.min(tz * 1.03, maxZ * 0.6);
+  return { hip: Math.max(-0.42, Math.min(-0.18, lo)), sho, armZ, drop: 1.18, top: sho + 0.1, bot: sho - 0.15, neck: sho + 0.07, ears: 1 };
+}
+
 // ---------- player ----------
 // procedural walk: the model has no skeleton, so legs and arms are swung in the vertex shader.
 // Values are in the model's own space: height -0.5..0.5, facing +X, legs/arms split along Z.
 const walkU = { uPhase: { value: 0 }, uAmp: { value: 0 }, uHurt: { value: 0 }, uHurtWig: { value: 0 }, uWave: { value: 0 }, uWaveT: { value: 0 } };
 const newWalkU = () => ({ uPhase: { value: 0 }, uAmp: { value: 0 }, uHurt: { value: 0 }, uHurtWig: { value: 0 }, uWave: { value: 0 }, uWaveT: { value: 0 } });
-function addWalk(mat, { outline = 0, outfit = false, U = walkU, T = TINT } = {}) {
+function addWalk(mat, { outline = 0, outfit = false, U = walkU, T = TINT, P = BUDDY_P, key = 'buddy' } = {}) {
+  const f = v => v.toFixed(3);
   mat.onBeforeCompile = sh => {
     if (outfit) addOutfit(sh, true, T);
     Object.assign(sh.uniforms, U);
@@ -1934,26 +1989,29 @@ function addWalk(mat, { outline = 0, outfit = false, U = walkU, T = TINT } = {})
         float sw = sin(uPhase) * uAmp;
         vec3 q = transformed;
         // legs: pivot at the hip, opposite legs swing opposite ways
-        const float hip = -0.28;
+        const float hip = ${f(P.hip)};
         float wl = smoothstep(hip + 0.03, hip - 0.05, q.y) * clamp(q.z / 0.04, -1.0, 1.0);
         q.xy = rot2(q.xy - vec2(0.0, hip), 0.6 * sw * wl) + vec2(0.0, hip);
-        // arms: drop them a bit from the A-pose, then swing opposite to the leg on the same side
-        const float sho = 0.03;
+        ${P.ears ? `// ears and head trail a little behind when walking, and bob on each step
+        float ear = smoothstep(${f(P.neck + 0.1)}, ${f(P.neck + 0.32)}, q.y);
+        q.x -= 0.035 * uAmp * ear; q.z += sin(uPhase * 2.0 - 1.1) * 0.022 * uAmp * ear;` : ''}
+        // arms: lowered from the rest pose, then swing opposite to the leg on the same side
+        const float sho = ${f(P.sho)}, az = ${f(P.armZ)};
         float side = sign(q.z);
-        float wa = smoothstep(0.125, 0.16, abs(q.z)) * smoothstep(sho + 0.05, sho - 0.02, q.y) * step(-0.36, q.y);
+        float wa = smoothstep(az - 0.015, az + 0.02, abs(q.z)) * smoothstep(${f(P.top)}, ${f(P.top - 0.07)}, q.y) * step(${f(P.bot)}, q.y);
         // uHurt throws both arms up and out; uWave raises one arm high and waves it
         float waveUp = uWave * step(0.0, side) * (2.3 + 0.4 * sin(uWaveT));
-        vec2 yz = rot2(vec2(q.y - sho, abs(q.z) - 0.14), (0.28 - 1.2 * uHurt - waveUp) * wa);
-        q.y = yz.x + sho; q.z = side * (yz.y + 0.14);
+        vec2 yz = rot2(vec2(q.y - sho, abs(q.z) - az), (${f(P.drop)} - 1.2 * uHurt - waveUp) * wa);
+        q.y = yz.x + sho; q.z = side * (yz.y + az);
         float along = clamp((sho - q.y) / 0.36, 0.0, 1.0); // 0 at the shoulder, 1 at the hand
         float wig = sin(uPhase * 2.0 - along * 2.6) * along * uAmp;
         q.xy = rot2(q.xy - vec2(0.0, sho), (-0.85 * sw * side - 0.45 * wig + uHurtWig * side) * wa) + vec2(0.0, sho);
-        vec2 fl = rot2(vec2(q.y - sho, abs(q.z) - 0.14), 0.22 * along * uAmp * (0.5 + 0.5 * sin(uPhase * 2.0 + 1.3)) * wa);
-        q.y = fl.x + sho; q.z = side * (fl.y + 0.14);
+        vec2 fl = rot2(vec2(q.y - sho, abs(q.z) - az), 0.22 * along * uAmp * (0.5 + 0.5 * sin(uPhase * 2.0 + 1.3)) * wa);
+        q.y = fl.x + sho; q.z = side * (fl.y + az);
         transformed = q${outline ? ` + normalize(normal) * ${outline.toFixed(4)}` : ''};
       }`);
   };
-  mat.customProgramCacheKey = () => 'walk' + outline + outfit;
+  mat.customProgramCacheKey = () => 'walk' + outline + outfit + key;
 }
 
 // dizzy stars: three little stars circle Buddy's head after he bumps into a wall
@@ -1984,31 +2042,43 @@ function updateDizzy(dt) {
     sp.material.rotation = dizzy.t * 4;
   });
 }
-function setupPlayer() {
+function setupPlayer(ch) {
+  const old = player;
   player = new THREE.Group();
-  const inner = assets.char.clone(true);
+  const inner = ch.scene.clone(true), P = ch.P, buddy = ch.id === 'buddy';
   const box = new THREE.Box3().setFromObject(inner);
   const s = CFG.charH / (box.max.y - box.min.y);
   inner.scale.setScalar(s);
   inner.position.set(-(box.min.x + box.max.x) / 2 * s, -box.min.y * s, -(box.min.z + box.max.z) / 2 * s);
   // drawn in the transparent pass after the silhouette, so the silhouette only shows where stone hides the character
-  inner.traverse(o => { if (o.isMesh) { o.castShadow = true; o.material.metalness = 0; o.material.transparent = true; o.renderOrder = 20; addWalk(o.material, { outfit: true }); } });
+  inner.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.castShadow = true; o.material.metalness = 0; o.material.transparent = true; o.renderOrder = 20; addWalk(o.material, { outfit: buddy, P, key: ch.id }); } });
   // comic ink outline (inverted hull) so the character reads clearly against the stone
   const outline = inner.clone(true);
   const outMat = new THREE.MeshBasicMaterial({ color: '#161414', side: THREE.BackSide });
-  addWalk(outMat, { outline: 0.016 });
+  addWalk(outMat, { outline: 0.016, P, key: ch.id });
   outline.traverse(o => { if (o.isMesh) { o.material = outMat; o.castShadow = false; } });
   const body = new THREE.Group(); body.add(inner, outline);
   player.add(body);
   player.userData.body = body;
   // silhouette that shows through stone
   silhouette = inner.clone(true);
-  const silMat = new THREE.MeshBasicMaterial({ color: OLIVE, transparent: true, opacity: 0.55, depthFunc: THREE.GreaterDepth, depthWrite: false });
-  addWalk(silMat);
+  const silMat = new THREE.MeshBasicMaterial({ color: buddy ? SKINS[skin] : '#8a6a4a', transparent: true, opacity: 0.55, depthFunc: THREE.GreaterDepth, depthWrite: false });
+  addWalk(silMat, { P, key: ch.id });
   silhouette.traverse(o => { if (o.isMesh) { o.material = silMat; o.castShadow = false; o.renderOrder = 10; } });
   body.add(silhouette);
+  if (old) { player.position.copy(old.position); player.rotation.copy(old.rotation); scene.remove(old); }
   scene.add(player);
   scene.add(dizzy.group);
+}
+// pick a character: the player, the title screen and the outfit screen all change to it
+async function setChar(id) {
+  const ch = await loadChar(id);
+  charId = ch.id;
+  try { localStorage.setItem('hidden-maze-char', charId); } catch {}
+  setupPlayer(ch);
+  face.init(ch);
+  document.body.dataset.char = charId;
+  renderChars();
 }
 
 // a short message over the game (throttled so walking into the same thing doesn't spam it)
@@ -2263,17 +2333,17 @@ function planRoute(from, to) {
   }
   return route.map(j => [j % maze.N, (j / maze.N) | 0]);
 }
-function makeRival(entry, skinIdx) {
+function makeRival(entry, skinIdx, ch = charCache.buddyLoaded) {
   const U = newWalkU(), T = { uTint: { value: new THREE.Color(SKINS[skinIdx]) }, uTintOn: { value: 1 } };
-  const inner = assets.char.clone(true);
+  const inner = ch.scene.clone(true), P = ch.P, buddy = ch.id === 'buddy';
   const box = new THREE.Box3().setFromObject(inner);
   const s = CFG.charH / (box.max.y - box.min.y);
   inner.scale.setScalar(s);
   inner.position.set(-(box.min.x + box.max.x) / 2 * s, -box.min.y * s, -(box.min.z + box.max.z) / 2 * s);
-  inner.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.metalness = 0; o.castShadow = true; addWalk(o.material, { outfit: true, U, T }); } });
+  inner.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.metalness = 0; o.castShadow = true; addWalk(o.material, { outfit: buddy, U, T, P, key: ch.id }); } });
   const outline = inner.clone(true);
   const outMat = new THREE.MeshBasicMaterial({ color: '#161414', side: THREE.BackSide });
-  addWalk(outMat, { outline: 0.016, U });
+  addWalk(outMat, { outline: 0.016, U, P, key: ch.id });
   outline.traverse(o => { if (o.isMesh) { o.material = outMat; o.castShadow = false; } });
   const body = new THREE.Group(); body.add(inner, outline);
   const root = new THREE.Group(); root.add(body);
@@ -2389,6 +2459,7 @@ async function startRace(online = null) {
     rm.others = order.map(i => ({ pid: i, bot: !!online.players[i].bot, team: online.mode === 'teams' && online.players[i].team === online.players[online.me].team,
       skin: online.players[i].skin === skin ? (online.players[i].skin + 1 + i) % SKINS.length : online.players[i].skin }));
     rm.host = online.me === 0;
+    for (let i = 0; i < rm.others.length; i++) rm.others[i].ch = await loadChar(online.players[rm.others[i].pid].char || 'buddy');
     rm.entries = [rm.entries[online.me], ...order.map(i => rm.entries[i])];
   }
   warp.t = -1; $('fader').style.opacity = 0;
@@ -2461,6 +2532,8 @@ const net = (() => {
   function lobby() {
     const size = host ? raceCfg.size : Math.max(players.length, 2), humans = players.filter(p => !p.bot).length;
     $('friend').classList.toggle('teams', mode === 'teams');
+    const others = players.filter((_, i) => i !== me);
+    Promise.all(others.map(p => loadChar(p.char || 'buddy'))).then(chs => { if (state === 'friend') face.setCrew(chs.map((ch, k) => ({ ch, skin: others[k].skin }))); });
     $('lobby').innerHTML = players.map((p, i) => `<span class="lp" data-pi="${i}"><i style="--c:${SKINS[p.skin]}"></i>${i === me ? 'You' : p.bot ? 'Computer' : i === 0 ? 'Host' : 'Friend'}${mode === 'teams' ? `<em style="--t:${TEAM[p.team]}">${TEAM_NAME[p.team]}</em>` : ''}</span>`).join('')
       + Array.from({ length: Math.max(0, size - players.length) }, () => '<span class="lp empty"><i></i>…</span>').join('');
     $('friendStart').disabled = !(host && players.length > 1);
@@ -2472,8 +2545,8 @@ const net = (() => {
   function syncLobby() {
     if (!host) return;
     const keep = players.map(p => p.team);
-    const humans = [{ skin }, ...live().map(c => ({ skin: c.skin ?? 1 }))].slice(0, raceCfg.size);
-    const bots = raceCfg.bots ? Array.from({ length: raceCfg.size - humans.length }, (_, k) => ({ skin: RIVAL_SKINS[k % RIVAL_SKINS.length], bot: true })) : [];
+    const humans = [{ skin, char: charId }, ...live().map(c => ({ skin: c.skin ?? 1, char: c.char || 'buddy' }))].slice(0, raceCfg.size);
+    const bots = raceCfg.bots ? Array.from({ length: raceCfg.size - humans.length }, (_, k) => ({ skin: RIVAL_SKINS[k % RIVAL_SKINS.length], bot: true, char: 'buddy' })) : [];
     mode = raceCfg.mode;
     players = [...humans, ...bots].map((p, i) => ({ ...p, team: keep[i] ?? i % 2 }));
     lobby();
@@ -2490,7 +2563,7 @@ const net = (() => {
   function onData(c, m) {
     dbg('got', m.t);
     if (host) {
-      if (m.t === 'hello') { if (live().length > raceCfg.size - 1) { c.send({ t: 'full' }); return; } c.skin = m.skin; syncLobby(); }
+      if (m.t === 'hello') { if (live().length > raceCfg.size - 1) { c.send({ t: 'full' }); return; } c.skin = m.skin; c.char = m.char; syncLobby(); }
       else if (m.t === 'pos' || m.t === 'win') { toAll(m, c); remote(m); } // pass it on to the others too
       else if (m.t === 'again') start();
     } else {
@@ -2555,7 +2628,7 @@ const net = (() => {
         cc.on('open', () => {
           clearTimeout(waitTimer); hostConn = cc;
           for (const o of pending) if (o !== cc) o.close();
-          cc.send({ t: 'hello', skin });
+          cc.send({ t: 'hello', skin, char: charId });
           status('Joined! Waiting for the host to start…');
         });
         clearTimeout(waitTimer); waitTimer = setTimeout(attempt, 5000);
@@ -2611,6 +2684,57 @@ const joinTyped = () => { const v = $('friendInput').value.trim(); if (v.length 
 $('friendJoin').addEventListener('click', joinTyped);
 $('friendInput').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') joinTyped(); });
 $('friendBack').addEventListener('click', () => { net.leave(); show('title'); });
+
+// the race page shows the computer Buddies you'll race standing behind you
+function raceCrew() {
+  if (state !== 'race') return;
+  const others = RIVAL_SKINS.filter(c => c !== skin).slice(0, raceCfg.racers - 1);
+  face.setCrew(others.map(k => ({ ch: charCache.buddyLoaded, skin: k })));
+}
+// the outfit screen's characters: a little picture of each, locked ones greyed with the world that unlocks them
+const charPics = {};
+function charPreview(id) {
+  return charPics[id] ||= loadChar(id).then(ch => {
+    const S = 384, sc = new THREE.Scene();
+    sc.add(new THREE.HemisphereLight('#ffffff', '#dbe9cc', 1.1));
+    const kl = new THREE.DirectionalLight('#fff1dc', 2.2); kl.position.set(-2, 3, 4); sc.add(kl);
+    sc.environment = scene.environment; sc.environmentIntensity = 0.4;
+    const m = ch.scene.clone(true), U0 = newWalkU();
+    m.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.metalness = 0; addWalk(o.material, { outfit: ch.id === 'buddy', U: U0, P: ch.P, key: ch.id + 'pic' }); } });
+    const box = new THREE.Box3().setFromObject(m), k = 1 / (box.max.y - box.min.y);
+    m.scale.setScalar(k); m.position.set(0, -box.min.y * k, 0); m.rotation.y = -Math.PI / 2 + 0.35;
+    sc.add(m);
+    const cam = new THREE.PerspectiveCamera(26, 1, 0.1, 20); cam.position.set(0, 0.75, 2.6); cam.lookAt(0, 0.48, 0);
+    const rt = new THREE.WebGLRenderTarget(S, S, { colorSpace: THREE.SRGBColorSpace });
+    renderer.setClearColor(0x000000, 0); renderer.setRenderTarget(rt); renderer.clear(); renderer.render(sc, cam);
+    const px = new Uint8Array(S * S * 4); renderer.readRenderTargetPixels(rt, 0, 0, S, S, px);
+    renderer.setRenderTarget(null); renderer.setClearColor(0x000000, 1); rt.dispose();
+    const c = document.createElement('canvas'); c.width = c.height = S;
+    const x = c.getContext('2d'), img = x.createImageData(S, S);
+    for (let y = 0; y < S; y++) img.data.set(px.subarray((S - 1 - y) * S * 4, (S - y) * S * 4), y * S * 4);
+    x.putImageData(img, 0, 0);
+    return c.toDataURL();
+  });
+}
+function renderChars() {
+  $('outfit').classList.toggle('buddy', charId === 'buddy');
+  $('chars').innerHTML = CHARS.map(c => {
+    const open = charUnlocked(c), lock = c.world >= 0 ? 'Unlock in ' + WORLDS[c.world].name : '';
+    return `<button class="charcard ${c.id === charId ? 'on' : ''} ${open ? '' : 'locked'}" data-char="${c.id}" data-lock="${lock}"><img alt="" data-pic="${c.id}">${c.name}</button>`;
+  }).join('');
+  for (const c of CHARS) charPreview(c.id).then(u => { const im = document.querySelector(`[data-pic="${c.id}"]`); if (im) im.src = u; });
+}
+$('chars').addEventListener('click', e => {
+  const b = e.target.closest('[data-char]'); if (!b) return;
+  const c = CHARS.find(o => o.id === b.dataset.char);
+  if (!charUnlocked(c)) { toast(b.dataset.lock); return; }
+  setChar(c.id);
+});
+$('outTabs').addEventListener('click', e => {
+  const t = e.target.closest('[data-otab]'); if (!t) return;
+  document.querySelectorAll('#outTabs span').forEach(o => o.classList.toggle('on', o === t));
+  $('outfit').classList.toggle('colors', t.dataset.otab === 'colors');
+});
 
 // ---------- the continue card's picture: the world's doorway, rendered once into an image ----------
 const previews = {};
@@ -2698,8 +2822,11 @@ function show(name) {
     $('contArt').style.setProperty('--wc', wd.card);
     doorPreview(wd.biome).then(url => { $('contArt').innerHTML = `<img alt="" src="${url}">`; });
   }
-  if (name === 'title' || name === 'outfit') $(name).querySelector('.faceSlot').appendChild($('faceCanvas'));
-  if (((name === 'settings' || name === 'help') && (name === 'settings' ? settingsBack : helpBack) === 'title') || name === 'race' || name === 'friend') $('title').classList.add('show'); // these panels sit over the title
+  if (['title', 'outfit', 'race', 'friend'].includes(name)) $(name).querySelector('.faceSlot').appendChild($('faceCanvas'));
+  if (name === 'title' || name === 'outfit') face.setCrew([]);
+  if (name === 'race') raceCrew();
+  if (name === 'outfit') renderChars();
+  if ((name === 'settings' || name === 'help') && (name === 'settings' ? settingsBack : helpBack) === 'title') $('title').classList.add('show'); // these panels sit over the title
   if (name === 'race') renderRaceSetup();
   if (name === 'pause') $('pauseInfo').textContent = mode === 'race' ? (raceTeam ? `Team race · ${raceCfg.mates + 1} vs ${raceSize - raceCfg.mates - 1}` : `Race · ${raceSize} Buddies`) : `${WORLDS[Math.floor(L / LEVELS_PER_WORLD)].name} · level ${L % LEVELS_PER_WORLD + 1}`;
   if (name !== 'play') heldDir = queued = null;
@@ -2876,6 +3003,7 @@ $('raceBtn').addEventListener('click', () => show('race'));
 // race setup screen: steppers for Buddies and teammates, a choice of rival speed, and a preview of the teams
 function renderRaceSetup() {
   raceCfg.racers = Math.max(2, Math.min(4, raceCfg.racers));
+  raceCrew();
   raceCfg.mates = Math.max(0, Math.min(raceCfg.racers - 2, raceCfg.mates));
   $('rcRacers').textContent = raceCfg.racers;
   $('rcMates').textContent = raceCfg.mates;
@@ -2942,29 +3070,33 @@ const face = (() => {
     mat3 hr = mat3(cos(uYaw*hw),0.,-sin(uYaw*hw), 0.,1.,0., sin(uYaw*hw),0.,cos(uYaw*hw))
             * mat3(cos(uPitch*hw),sin(uPitch*hw),0., -sin(uPitch*hw),cos(uPitch*hw),0., 0.,0.,1.)
             * mat3(1.,0.,0., 0.,cos(uRoll*hw),sin(uRoll*hw), 0.,-sin(uRoll*hw),cos(uRoll*hw));`;
-  function init(src) {
-    const model = src.clone(true);
+  // one character for the menus: the chibi idle and head turn, with that body's own shoulders, hips and neck
+  function makeModel(ch, Uo, Bo, T) {
+    const P = ch.P, f = v => v.toFixed(3), model = ch.scene.clone(true);
     model.traverse(o => {
       if (!o.isMesh) return;
       o.material = o.material.clone();
       o.material.metalness = 0;
       o.material.onBeforeCompile = sh => {
-        Object.assign(sh.uniforms, U, B);
+        Object.assign(sh.uniforms, Uo, Bo);
+        const head = `
+    float hw = smoothstep(${f(P.neck - 0.04)}, ${f(P.neck + 0.06)}, position.y);
+    mat3 hr = mat3(cos(uYaw*hw),0.,-sin(uYaw*hw), 0.,1.,0., sin(uYaw*hw),0.,cos(uYaw*hw))
+            * mat3(cos(uPitch*hw),sin(uPitch*hw),0., -sin(uPitch*hw),cos(uPitch*hw),0., 0.,0.,1.)
+            * mat3(1.,0.,0., 0.,cos(uRoll*hw),sin(uRoll*hw), 0.,-sin(uRoll*hw),cos(uRoll*hw));`;
         sh.vertexShader = 'uniform float uYaw, uPitch, uRoll, uIdle, uLean, uArm, uWave, uWaveT;\nvarying vec3 vObjPos;\nvec2 rot2(vec2 p, float a) { return vec2(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a)); }\n' + sh.vertexShader
-          .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n' + headGlsl + '\nobjectNormal = hr * objectNormal;')
+          .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n' + head + '\nobjectNormal = hr * objectNormal;')
           .replace('#include <begin_vertex>', `#include <begin_vertex>
           vObjPos = position;
           {
-            // chibi idle (model space: height -0.5..0.5, facing +X, sides along Z). Arms hang a little out from the body
-            // and swing a beat behind the body's sway; one arm can wave. Then the upper body leans side to side from
-            // the hips, so the feet never leave the ground.
-            const float sho = 0.03, hip = -0.28;
+            // chibi idle: arms relaxed a little away from the body, swinging a beat behind the body's sway; the upper
+            // body leans side to side from the hips, so the feet stay on the ground
+            const float sho = ${f(P.sho)}, hip = ${f(P.hip)}, az = ${f(P.armZ)};
             vec3 q = transformed;
             float side = sign(q.z);
-            float wa = smoothstep(0.125, 0.16, abs(q.z)) * smoothstep(sho + 0.05, sho - 0.02, q.y) * step(-0.36, q.y);
-            float waveUp = uWave * step(0.0, side) * (2.3 + 0.35 * sin(uWaveT));
-            vec2 yz = rot2(vec2(q.y - sho, abs(q.z) - 0.14), (0.3 + side * uArm - waveUp) * wa);
-            q.y = yz.x + sho; q.z = side * (yz.y + 0.14);
+            float wa = smoothstep(az - 0.015, az + 0.02, abs(q.z)) * smoothstep(${f(P.top)}, ${f(P.top - 0.07)}, q.y) * step(${f(P.bot)}, q.y);
+            vec2 yz = rot2(vec2(q.y - sho, abs(q.z) - az), (${f(P.drop + 0.02)} + side * uArm) * wa);
+            q.y = yz.x + sho; q.z = side * (yz.y + az);
             float along = clamp((sho - q.y) / 0.36, 0.0, 1.0);
             q.xy = rot2(q.xy - vec2(0.0, sho), (0.1 * sin(uIdle * 1.5) * side + 0.08 * sin(uIdle * 3.0 - along * 2.0) * along) * wa) + vec2(0.0, sho);
             float wl = smoothstep(hip - 0.02, hip + 0.16, q.y);
@@ -2972,8 +3104,8 @@ const face = (() => {
             q.y = lz.x + hip; q.z = lz.y;
             transformed = q;
           }
-          transformed = hr * (transformed - vec3(0., 0.06, 0.)) + vec3(0., 0.06, 0.);`);
-        addOutfit(sh, false);
+          transformed = hr * (transformed - vec3(0., ${f(P.neck)}, 0.)) + vec3(0., ${f(P.neck)}, 0.);`);
+        if (ch.id === 'buddy') addOutfit(sh, false, T);
         sh.fragmentShader = 'uniform float uBlink, uEyeY, uEyeHalf, uEyeOn;\nuniform vec3 uSkin;\nvarying vec3 vObjPos;\n' + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
           {
             float lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
@@ -2983,25 +3115,50 @@ const face = (() => {
             diffuseColor.rgb = mix(diffuseColor.rgb, uSkin, eye * hide);
           }`);
       };
-      o.material.customProgramCacheKey = () => 'head';
+      o.material.customProgramCacheKey = () => 'head-' + ch.id + (T === TINT ? '' : 'crew');
     });
     const box = new THREE.Box3().setFromObject(model);
     const s = 1 / (box.max.y - box.min.y);
     model.scale.setScalar(s);
     model.position.set(-(box.min.x + box.max.x) / 2 * s, -box.min.y * s, -(box.min.z + box.max.z) / 2 * s);
-    group = new THREE.Group();
-    group.add(model);
+    const g = new THREE.Group(); g.add(model);
+    return g;
+  }
+  let shadow = null;
+  function init(ch) {
+    if (sway) sc.remove(sway);
+    group = makeModel(ch, U, B, TINT);
     sway = new THREE.Group(); // rocks side to side from the feet
     sway.add(group);
     sc.add(sway);
-    // a soft round pedestal to stand on, with a little contact shadow under the feet
-    const sh = document.createElement('canvas'); sh.width = sh.height = 128;
-    const sx = sh.getContext('2d'), sg = sx.createRadialGradient(64, 64, 0, 64, 64, 64);
-    sg.addColorStop(0, 'rgba(100,70,35,.55)'); sg.addColorStop(0.45, 'rgba(100,70,35,.25)'); sg.addColorStop(1, 'rgba(100,70,35,0)'); sx.fillStyle = sg; sx.fillRect(0, 0, 128, 128);
-    const shadow = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.42).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sh), transparent: true, depthWrite: false }));
-    shadow.position.y = 0.002;
-    sc.add(shadow);
-    findEyes(firstMesh(src));
+    if (!shadow) { // a little contact shadow under the feet
+      const sh = document.createElement('canvas'); sh.width = sh.height = 128;
+      const sx = sh.getContext('2d'), sg = sx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      sg.addColorStop(0, 'rgba(100,70,35,.55)'); sg.addColorStop(0.45, 'rgba(100,70,35,.25)'); sg.addColorStop(1, 'rgba(100,70,35,0)'); sx.fillStyle = sg; sx.fillRect(0, 0, 128, 128);
+      shadow = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.42).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sh), transparent: true, depthWrite: false }));
+      shadow.position.y = 0.002;
+      sc.add(shadow);
+    }
+    B.uEyeOn.value = 0;
+    findEyes(firstMesh(ch.scene));
+    if (B.uEyeHalf.value > 0.06) B.uEyeOn.value = 0; // no clear eyes found: no blink rather than a smudge
+  }
+  // friends in the lobby stand behind you, a little apart (Fortnite-style), each with its own little idle
+  const crew = [];
+  const SPOTS = [[-0.5, -0.45], [0.5, -0.45], [0, -0.85]];
+  function setCrew(list) {
+    for (const m of crew) { sc.remove(m.root); sc.remove(m.root.userData.sh); } crew.length = 0;
+    list.slice(0, 3).forEach((it, i) => {
+      if (!it || !it.ch) return;
+      const Uo = { uYaw: { value: 0 }, uPitch: { value: 0 }, uRoll: { value: 0 }, uIdle: { value: i * 1.7 }, uLean: { value: 0 }, uArm: { value: 0 }, uWave: { value: 0 }, uWaveT: { value: 0 } };
+      const Bo = { uBlink: { value: 0 }, uEyeY: { value: 0 }, uEyeHalf: { value: 0 }, uSkin: { value: new THREE.Color() }, uEyeOn: { value: 0 } };
+      const T = { uTint: { value: new THREE.Color(SKINS[it.skin || 0]) }, uTintOn: { value: it.skin ? 1 : 0 } };
+      const root = makeModel(it.ch, Uo, Bo, T);
+      root.position.set(SPOTS[i][0], 0, SPOTS[i][1]); root.scale.setScalar(0.92);
+      const sh2 = shadow.clone(); sh2.position.set(SPOTS[i][0], 0.002, SPOTS[i][1]); root.userData.sh = sh2; sc.add(sh2);
+      sc.add(root); crew.push({ root, Uo, off: i * 1.7 });
+    });
+    w = 0; // re-frame the camera
   }
   // locate the painted eyes: sample the texture across front-of-head triangles, collect the dark spots
   function findEyes(mesh) {
@@ -3062,9 +3219,10 @@ const face = (() => {
       r.setSize(w, h, false);
       cam.aspect = w / h;
       // the whole character on its pedestal, a little from above
-      const fit = Math.max(0.95 / 0.2126, 0.62 / (0.2126 * cam.aspect));
-      cam.position.set(0, 0.9, fit);
-      cam.lookAt(0, 0.62, 0); // a bit low in the frame, leaving the top for the logo
+      // with friends behind, pull back so the whole group fits
+      const wide = crew.length ? 1.55 : 1, fit = Math.max(0.95 / 0.2126, 0.62 * wide / (0.2126 * cam.aspect)) * (crew.length ? 1.12 : 1);
+      cam.position.set(0, 0.9 + (crew.length ? 0.25 : 0), fit);
+      cam.lookAt(0, crew.length ? 0.5 : 0.62, crew.length ? -0.35 : 0); // a bit low in the frame, leaving the top for the logo
       cam.updateProjectionMatrix();
     }
     let ty, tp, tr;
@@ -3079,6 +3237,8 @@ const face = (() => {
       tp = Math.sin(t * 0.8) * 0.06;
       tr = Math.sin(t * 0.6 + 1.3) * 0.15;
     }
+    const still = state === 'outfit'; // in the outfit screen the character stands still to be looked at
+    if (still) { ty = 0; tp = 0; tr = 0; }
     const k = Math.min(1, dt * 3);
     cur.yaw += (ty - cur.yaw) * k; cur.pitch += (tp - cur.pitch) * k; cur.roll += (tr - cur.roll) * k;
     U.uYaw.value = cur.yaw; U.uPitch.value = cur.pitch; U.uRoll.value = cur.roll;
@@ -3088,15 +3248,21 @@ const face = (() => {
     // feet stay planted: the upper body sways from the hips, the arms follow a beat later, a slow breath, and every
     // few seconds a happy little knee-bounce (squash and stretch from the floor up, never leaving the ground)
     // kept gentle so the model never looks bent out of shape
-    U.uLean.value = Math.sin(t * 1.5) * 0.035;
-    U.uArm.value = Math.sin(t * 1.5 - 0.7) * 0.035;
+    U.uLean.value = still ? 0 : Math.sin(t * 1.5) * 0.035;
+    U.uArm.value = still ? 0 : Math.sin(t * 1.5 - 0.7) * 0.035;
+    if (still) U.uIdle.value = 0;
     sway.rotation.z = 0; group.position.y = 0;
-    const sqz = 1 + Math.sin(t * 3) * 0.006;
+    const sqz = still ? 1 : 1 + Math.sin(t * 3) * 0.006;
     group.scale.set(1 / Math.sqrt(sqz), sqz, 1 / Math.sqrt(sqz));
+    for (const m of crew) { // the friends behind sway on their own beat and glance around
+      const tt = t + m.off;
+      m.Uo.uIdle.value = tt; m.Uo.uLean.value = Math.sin(tt * 1.5) * 0.035; m.Uo.uArm.value = Math.sin(tt * 1.5 - 0.7) * 0.035;
+      m.Uo.uYaw.value = Math.sin(tt * 0.5) * 0.35; m.root.rotation.y = -Math.PI / 2 + Math.sin(tt * 0.3) * 0.15;
+    }
     updateBlink(dt);
     r.render(sc, cam);
   }
-  return { init, render, blink: B };
+  return { init, render, blink: B, setCrew };
 })();
 
 // ---------- pillars per frame ----------
@@ -3482,8 +3648,7 @@ function frame() {
 }
 
 await load();
-setupPlayer();
-face.init(assets.char);
+{ const ch = await loadChar(charId).catch(() => loadChar('buddy')); charId = ch.id; document.body.dataset.char = charId; setupPlayer(ch); face.init(ch); }
 loadScenery(); // in the background; pieces appear as they arrive
 setSkin(skin);
 await stoneSet(levelBiome(nextLevel()));

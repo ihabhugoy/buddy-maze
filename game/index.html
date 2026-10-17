@@ -45,6 +45,8 @@
   /* color grading over the 3D view */
   .grade { position: fixed; inset: 0; pointer-events: none; }
   body[data-state="worlds"] .grade { display: none; } /* the map is drawn ungraded */
+  .phone .grade.tint, .phone .grade.sun { display: none; } /* phones: no blend layers over the 3D view (costly every frame) */
+  .phone .grade.vig { mix-blend-mode: normal; background: radial-gradient(130% 95% at 50% 42%, rgba(0,0,0,0) 60%, rgba(120,80,40,.12) 100%); }
   .grade.tint { background: linear-gradient(180deg, rgba(255,205,140,.20), rgba(255,170,110,.06) 60%, rgba(255,190,130,.12)); mix-blend-mode: soft-light; }
   .grade.sun { background: radial-gradient(120% 60% at 50% -8%, rgba(255,226,170,.4), rgba(255,226,170,0) 55%); mix-blend-mode: screen; }
   .grade.vig { background: radial-gradient(130% 95% at 50% 42%, rgba(0,0,0,0) 55%, rgba(120,80,40,.22) 100%); mix-blend-mode: multiply; }

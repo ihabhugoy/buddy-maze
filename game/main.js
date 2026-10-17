@@ -97,17 +97,21 @@ function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = 
 // phones get a lighter setup: a lower resolution cap and smaller shadows (the composer does its own antialiasing)
 const PHONE = matchMedia('(pointer: coarse)').matches;
 const PR_MAX = Math.min(devicePixelRatio, PHONE ? 1.5 : 2);
+if (PHONE) document.documentElement.classList.add('phone');
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.setPixelRatio(PR_MAX);
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = PHONE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 renderer.shadowMap.autoUpdate = false; // updated once per frame, not again for the reflection
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.localClippingEnabled = true;
 renderer.domElement.id = 'game';
+// if the phone's graphics chip resets, keep the page alive and reload it once the context is back (your progress is saved)
+renderer.domElement.addEventListener('webglcontextlost', e => { e.preventDefault(); }, false);
+renderer.domElement.addEventListener('webglcontextrestored', () => location.reload(), false);
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -129,12 +133,15 @@ const tiltShader = dir => ({
   fragmentShader: `uniform sampler2D tDiffuse; uniform float amt, r, band; varying vec2 vUv;
     void main() {
       float d = smoothstep(0.0, 0.55, max(0.0, abs(vUv.y - r) - band));
+      if (d <= 0.0) { gl_FragColor = texture2D(tDiffuse, vUv); return; } // the sharp band: one read
       vec2 o = ${dir} * amt * d;
-      vec4 s = texture2D(tDiffuse, vUv) * 0.1633;
+      ${PHONE ? `vec4 s = texture2D(tDiffuse, vUv) * 0.227;
+      s += (texture2D(tDiffuse, vUv - o * 1.385) + texture2D(tDiffuse, vUv + o * 1.385)) * 0.3162;
+      s += (texture2D(tDiffuse, vUv - o * 3.231) + texture2D(tDiffuse, vUv + o * 3.231)) * 0.0703;` : `vec4 s = texture2D(tDiffuse, vUv) * 0.1633;
       s += (texture2D(tDiffuse, vUv - o * 1.0) + texture2D(tDiffuse, vUv + o * 1.0)) * 0.1531;
       s += (texture2D(tDiffuse, vUv - o * 2.0) + texture2D(tDiffuse, vUv + o * 2.0)) * 0.12245;
       s += (texture2D(tDiffuse, vUv - o * 3.0) + texture2D(tDiffuse, vUv + o * 3.0)) * 0.0918;
-      s += (texture2D(tDiffuse, vUv - o * 4.0) + texture2D(tDiffuse, vUv + o * 4.0)) * 0.051;
+      s += (texture2D(tDiffuse, vUv - o * 4.0) + texture2D(tDiffuse, vUv + o * 4.0)) * 0.051;`}
       gl_FragColor = s;
     }`,
 });
@@ -188,6 +195,8 @@ const ground = new THREE.Mesh(
 );
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = GROUND_Y;
+// phones: no reflection (it draws the whole scene a second time every frame); the cream floor is simply opaque
+if (PHONE) { mirror.visible = false; ground.material.transparent = false; ground.material.opacity = 1; }
 scene.add(ground);
 
 // ---------- helpers ----------
@@ -1536,6 +1545,26 @@ function applyBiome(name) {
   sfx.setBiome(name);
   puffMat.opacity = B.dark ? 0.8 : 1;
 }
+// a finished level's own objects (portal stones, key, stone tops, ground) are freed from the GPU when the next one is
+// built; the stone sets' shared materials and textures stay
+function freeTree(o) {
+  const keep = new Set(); for (const set of Object.values(stoneSets)) if (set && set.wallMats) { set.wallMats.forEach(m => keep.add(m)); keep.add(set.floorMat); if (set.door) keep.add(set.door.mat); }
+  o.traverse(c => {
+    if (c.geometry && !c.geometry.userData.shared) c.geometry.dispose();
+    for (const m of c.material ? [].concat(c.material) : []) if (!keep.has(m)) { for (const k of ['map', 'alphaMap', 'emissiveMap']) if (m[k] && !m[k].userData.shared) m[k].dispose(); m.dispose(); }
+  });
+}
+// phones: the other worlds' stones leave the GPU while you play (three.js uploads them again by itself if the map shows
+// them later), so only the level's own world is held in graphics memory
+function trimGPU() {
+  if (!PHONE) return;
+  for (const [b, set] of Object.entries(stoneSets)) {
+    if (!set || !set.variants || set === curSet || b === 'cave') continue;
+    for (const m of [...(set.wallMats || []), set.floorMat, set.door && set.door.mat]) if (m) for (const k in m) if (m[k] && m[k].isTexture) m[k].dispose();
+    for (const v of set.variants) { if (v.raw) v.raw.dispose(); if (v.cap) v.cap.dispose(); }
+    if (set.door && set.door.raw) set.door.raw.dispose();
+  }
+}
 function buildLevel(level, race = null, opts = {}) {
   L = level; mode = race ? 'race' : 'levels';
   stage = opts.stage || 'surface';
@@ -1543,7 +1572,7 @@ function buildLevel(level, race = null, opts = {}) {
   const bName = race ? race.biome || 'woods' : stage === 'cave' ? 'cave' : world.biome;
   curSet = stoneSets[bName];
   applyBiome(bName);
-  if (floor) { scene.remove(...walls, ...caps, floor, floorShadow, key); for (const m of [...walls, ...caps, floor, floorShadow]) m.dispose(); }
+  if (floor) { scene.remove(...walls, ...caps, floor, floorShadow, key); for (const m of [...walls, ...caps, floor, floorShadow]) m.dispose(); for (const m of caps) m.geometry.dispose(); freeTree(key); }
   for (const m of doorMeshes.values()) scene.remove(m);
   doorMeshes.clear();
   const shape = race || isGateway(L) ? null : levelPlan(L).shape;
@@ -1619,13 +1648,14 @@ function buildLevel(level, race = null, opts = {}) {
   key.userData.grab = -1;
   if (keyAt) key.position.set(keyAt[0] - origin, 0.55, keyAt[1] - origin);
   scene.add(key);
-  if (portal) scene.remove(portal);
+  if (portal) { scene.remove(portal); freeTree(portal); }
   portal = makePortal(curSet, bName); // rebuilt each level from that level's stones
   portal.visible = !race && stage !== 'cave';
   portal.position.set(goal[0] - origin, 0, goal[1] - origin);
   portal.rotation.y = portalYaw(goal);
   portal.userData.on = hasKey ? 1 : 0;
   scene.add(portal);
+  trimGPU();
   $('keyHud').style.display = race ? 'none' : '';
   $('keyHud').classList.toggle('got', hasKey);
 
@@ -1799,7 +1829,7 @@ function leafLitter() {
   return (leafLitterC = c);
 }
 function buildMazeGrass(pattern, opacity = 0.85, spread = 2.4, dab = 0.22) {
-  if (mazeGrass) { scene.remove(mazeGrass); mazeGrass.material.map.dispose(); mazeGrass.material.alphaMap.dispose(); mazeGrass.material.dispose(); mazeGrass = null; }
+  if (mazeGrass) { scene.remove(mazeGrass); mazeGrass.geometry.dispose(); mazeGrass.material.map.dispose(); mazeGrass.material.alphaMap.dispose(); mazeGrass.material.dispose(); mazeGrass = null; }
   const { N } = maze, M = N + 10, PX = 512, k = PX / M, c = document.createElement('canvas');
   c.width = c.height = PX;
   const x = c.getContext('2d');
@@ -3868,7 +3898,8 @@ peekBtn.addEventListener('pointerleave', setPeek(false));
 
 let fitW = 0, fitH = 0;
 // the render resolution follows the frame rate: long frames lower it a step, a long smooth run raises it back
-let prNow = PR_MAX, slowT = 0, fastT = 0;
+let prNow = PHONE ? Math.min(PR_MAX, 1.25) : PR_MAX, slowT = 0, fastT = 0;
+if (prNow !== PR_MAX) renderer.setPixelRatio(prNow);
 function adaptRes(raw) {
   if (state !== 'play' || raw > 0.25) return; // (a hitch from loading or a hidden tab says nothing)
   if (raw > 1 / 42) { slowT += raw; fastT = 0; } else { fastT += raw; if (raw < 1 / 55) slowT = Math.max(0, slowT - raw); }

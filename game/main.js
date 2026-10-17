@@ -2,12 +2,12 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Reflector } from 'three/addons/objects/Reflector.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { createMap3D } from './map3d.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
-import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
 import { MeshoptSimplifier } from 'https://cdn.jsdelivr.net/npm/meshoptimizer@0.22.0/meshopt_simplifier.module.js';
 await MeshoptSimplifier.ready;
 // the stone models come at ~95k triangles: far too many for a phone. Keep ~12k (texture seams are kept intact).
@@ -38,19 +38,20 @@ const OLIVE = '#5d6b3f';
 // ---------- worlds & levels ----------
 const LEVELS_PER_WORLD = 25;
 const WORLDS = [
-  { name: 'Mossy Woods', biome: 'woods', icon: '🌿', color: '#6cc23a', land: '#dff1cc', map: 'assets/map/woods.webp', deco: ['🌳', '🌲', '🍄', '🌿', '🌼'], tint: [1, 1, 1], reveal: 2.3 },
-  { name: 'Sunny Dunes', biome: 'desert', icon: '🌵', color: '#f2a53a', land: '#f7ecd6', deco: ['🌵', '🐪', '☀️', '🏜️', '🦂'], tint: [1.07, 0.96, 0.8], reveal: 2.1 },
-  { name: 'Frost Peak', biome: 'snow', icon: '❄️', color: '#4fb3e8', land: '#e9f2fb', deco: ['❄️', '⛄', '🏔️', '🐧', '🌨️'], tint: [0.9, 0.97, 1.08], reveal: 1.9 },
-  { name: 'Autumn Grove', biome: 'autumn', icon: '🍂', color: '#e0893a', land: '#f8e9dc', deco: ['🍂', '🍁', '🌰', '🍄', '🦔'], tint: [1, 1, 1], reveal: 1.7 },
+  { name: 'Mossy Woods', biome: 'woods', icon: 'i-w-woods', color: '#6cc15a', card: '#cfe9b8', tint: [1, 1, 1], reveal: 2.3 },
+  { name: 'Sunny Dunes', biome: 'desert', icon: 'i-w-desert', color: '#f2a53a', card: '#f8dfae', tint: [1.07, 0.96, 0.8], reveal: 2.1 },
+  { name: 'Frost Peak', biome: 'snow', icon: 'i-w-snow', color: '#58b4e8', card: '#d3e9fa', tint: [0.9, 0.97, 1.08], reveal: 1.9 },
+  { name: 'Autumn Grove', biome: 'autumn', icon: 'i-w-autumn', color: '#e8823a', card: '#f8d4b4', tint: [1, 1, 1], reveal: 1.7 },
 ];
-const PILLARS = ['pillar.glb', 'pillar3.glb', 'pillar4.glb', 'pillar5.glb', 'pillar6.glb', 'pillar7.glb', 'pillar8.glb'];
+const PILLARS = ['pillar.glb', 'pillar3.glb', /* pillar4 has dark stains painted on its top */ 'pillar5.glb', 'pillar6.glb', 'pillar7.glb', 'pillar8.glb'];
 // Biomes: each has its own stones, its own door block (a stone with a cave mouth and a tree on top) and its own
 // light and color grade. The cave is the underground level the doors lead to: dark, lit by glowing moss.
 const nb = (a, b) => Array.from({ length: b - a + 1 }, (_, k) => `assets/biomes/n${String(a + k).padStart(2, '0')}.glb`);
 const BIOMES = {
   woods: { puffs: ['#9d9a92', '#b3afa6', '#8c897f', '#c4c0b6'], stones: PILLARS.map(f => 'assets/' + f), door: 'assets/biomes/n04.glb', bg: '#f5f1ea', floor: '#f4efe7', mirror: 0xd8d0c4,
     hemi: ['#fff3e2', '#d9bf9c', 0.75], fill: ['#ffc792', 1.25], sun: ['#ffdcae', 2.9], glow: { hue: 0.25, width: 0.11, amt: 1 }, dust: '#fff2cc' },
-  desert: { puffs: ['#e3c79a', '#d4b07c', '#efd9b4', '#c99e6a'], stones: nb(18, 23), door: 'assets/biomes/n04.glb', bg: '#f7efe3', floor: '#f6ecdc', mirror: 0xe0d2bd,
+  desert: { tint: 0.12, contrast: 0.9, matchStrength: 0.45, doorTint: 0.15, moss: { hue: 0.3, width: 0.14, sat: 0.14 }, // keep the sandstone's colored layers; only even out brightness; cactus stays green
+    puffs: ['#e3c79a', '#d4b07c', '#efd9b4', '#c99e6a'], stones: nb(18, 23), door: 'assets/biomes/n29.glb' /* cactus doorway */, bg: '#f7efe3', floor: '#f6ecdc', mirror: 0xe0d2bd,
     hemi: ['#fff4e0', '#e6c79c', 0.8], fill: ['#ffc58a', 1.2], sun: ['#ffd59a', 3.0], glow: { hue: 0.25, width: 0.11, amt: 0.8 }, dust: '#fff0d0' },
   snow: { rockGain: 1.15, contrast: 0.5, tint: 0.9, puffs: ['#ffffff', '#eef4fb', '#dde8f4', '#f7fbff'], stones: nb(12, 17), door: 'assets/biomes/n02.glb', bg: '#eef3f8', floor: '#f2f6fb', mirror: 0xd2dce8,
     hemi: ['#f4f8ff', '#c9d6e6', 0.85], fill: ['#cfe3ff', 1.0], sun: ['#fff6ea', 2.6], glow: { hue: 0.25, width: 0.11, amt: 0.6 }, dust: '#ffffff' },
@@ -58,11 +59,11 @@ const BIOMES = {
     hemi: ['#fff1de', '#d9b48c', 0.75], fill: ['#ffb978', 1.3], sun: ['#ffcf95', 2.8], glow: { hue: 0.07, width: 0.08, amt: 0.7, sat: 0.5 }, moss: { hue: 0.07, width: 0.08, sat: 0.55 }, dust: '#ffd9a0' },
   cave: { puffs: ['#5fd8ff', '#4a8dff', '#7fe8ff', '#3b6fd8'], stones: nb(24, 28), door: 'assets/biomes/n01.glb', bg: '#0f1a2a', floor: '#132236', mirror: 0x1a2c44, dark: true,
     rockGain: 1.65, tint: 0.85, stepGlow: true, moss: { hue: 0.44, width: 0.07, sat: 0.3 },
-    doorPlant: [255, 70, 185], doorGlow: { hue: 0.9, width: 0.12, amt: 4.5, sat: 0.35, cave: true },
+    glowHues: [0.36, 0.45, 0.3, 0.41, 0.33], // fluorescent greens to teal, one per stone (no purple or blue)
+    doorPlant: true,
     hemi: ['#6a8ed0', '#1c2a48', 1.1], fill: ['#58d0ff', 0.8], sun: ['#9cc4ff', 1.0], glow: { hue: 0.65, width: 0.5, amt: 0, sat: 0.45, cave: true }, dust: '#7df3ff' },
 };
 const TOTAL_LEVELS = WORLDS.length * LEVELS_PER_WORLD;
-const levelCells = L => 4 + Math.min(11, Math.floor(L / 8)); // grows one step every 8 levels: 9x9 up to 31x31 tiles
 const save = (() => {
   let data = { stars: {} };
   try { data = JSON.parse(localStorage.getItem('hidden-maze') || '') || data; } catch {}
@@ -72,7 +73,8 @@ const save = (() => {
     set(L, n) { data.stars[L] = Math.max(n, data.stars[L] || 0); try { localStorage.setItem('hidden-maze', JSON.stringify(data)); } catch {} },
   };
 })();
-const unlocked = L => L === 0 || save.stars(L - 1) > 0;
+const BETA_ALL_OPEN = true; // beta: every level is open while the game is being made
+const unlocked = L => BETA_ALL_OPEN || L === 0 || save.stars(L - 1) > 0;
 const nextLevel = () => { for (let L = 0; L < TOTAL_LEVELS; L++) if (!save.stars(L)) return L; return TOTAL_LEVELS - 1; };
 function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
@@ -101,9 +103,32 @@ const camera = new THREE.PerspectiveCamera(28, 1, 0.5, 200);
 // miniature look: tilt-shift blur above and below a sharp band around Buddy
 const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
 composer.addPass(new RenderPass(scene, camera));
-const tiltH = new ShaderPass(HorizontalTiltShiftShader), tiltV = new ShaderPass(VerticalTiltShiftShader);
-tiltH.uniforms.r.value = tiltV.uniforms.r.value = 0.42; // the sharp band, measured from the bottom of the screen
+// tilt-shift with a sharp band (not a single sharp line) centered on Buddy's height on screen each frame, so he is never
+// in the blur; the blur grows gently above and below the band. Two passes: across, then down.
+const tiltShader = dir => ({
+  uniforms: { tDiffuse: { value: null }, amt: { value: 0.004 }, r: { value: 0.45 }, band: { value: 0.16 } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float amt, r, band; varying vec2 vUv;
+    void main() {
+      float d = smoothstep(0.0, 0.55, max(0.0, abs(vUv.y - r) - band));
+      vec2 o = ${dir} * amt * d;
+      vec4 s = texture2D(tDiffuse, vUv) * 0.1633;
+      s += (texture2D(tDiffuse, vUv - o * 1.0) + texture2D(tDiffuse, vUv + o * 1.0)) * 0.1531;
+      s += (texture2D(tDiffuse, vUv - o * 2.0) + texture2D(tDiffuse, vUv + o * 2.0)) * 0.12245;
+      s += (texture2D(tDiffuse, vUv - o * 3.0) + texture2D(tDiffuse, vUv + o * 3.0)) * 0.0918;
+      s += (texture2D(tDiffuse, vUv - o * 4.0) + texture2D(tDiffuse, vUv + o * 4.0)) * 0.051;
+      gl_FragColor = s;
+    }`,
+});
+const tiltH = new ShaderPass(tiltShader('vec2(1.0, 0.0)')), tiltV = new ShaderPass(tiltShader('vec2(0.0, 1.0)'));
 composer.addPass(tiltH); composer.addPass(tiltV);
+const _focus = new THREE.Vector3();
+function updateFocus() { // the sharp band sits on Buddy (or, during the level intro, on what the camera looks at)
+  _focus.copy(intro.t >= 0 ? camTarget : player.position).setY(0.4).project(camera);
+  const y = THREE.MathUtils.clamp((_focus.y + 1) / 2, 0.15, 0.85);
+  tiltH.uniforms.r.value += (y - tiltH.uniforms.r.value) * 0.2;
+  tiltV.uniforms.r.value = tiltH.uniforms.r.value;
+}
 composer.addPass(new OutputPass());
 camera.layers.enable(1); // layer 1: scenery, seen by the camera but left out of the floor reflection
 
@@ -158,17 +183,32 @@ const easeOutBack = t => { const c = 1.9; return 1 + (c + 1) * Math.pow(t - 1, 3
 // recording, and a faint footstep is also layered under every stone sound. Pitch, volume and pan vary each play.
 const sfx = (() => {
   const steps = Array.from({ length: 21 }, (_, k) => 'f' + String(k + 1).padStart(2, '0')).filter(n => n !== 'f19').map(n => [n, 1]);
+  const nn = (p, a, b) => Array.from({ length: b - a + 1 }, (_, k) => [p + String(a + k).padStart(2, '0'), 1]);
   const POOLS = {
     rise: [['s03', 3], ['s09', 3], ['s01', 1], ['s02', 1], ['s04', 1], ['s05', 1]],
     land: [['s10', 3], ['s11', 3], ['s06', 1], ['s07', 1]],
     bump: [['bump', 1]],
     step: steps, layer: steps,
+    snow: nn('sn', 1, 20), sand: nn('sd', 1, 5), gravel: nn('g', 1, 10), pebble: nn('pb', 1, 13), leaf: nn('lf', 1, 6),
+    // soft UI sounds (the sharp ones in the pack are left out)
+    hover: [['ui_hover', 1]], pop: [['ui_pop', 1]], modal: [['ui_modal', 1]], toggle: [['ui_toggle', 1]],
+    whoosh: [['ui_whoosh', 1]], chime: [['ui_chime', 1]], nope: [['ui_error', 1]],
   };
-  const GAP = { rise: 0.09, land: 0.12, step: 0.08, layer: 0.05, bump: 0.25 };
+  const GAP = { rise: 0.09, land: 0.12, step: 0.08, layer: 0.05, bump: 0.25, snow: 0.07, sand: 0.08, gravel: 0.12, pebble: 0.12, leaf: 0.07,
+    hover: 0.06, pop: 0.05, modal: 0.2, toggle: 0.05, whoosh: 0.3, chime: 0.3, nope: 0.4 };
+  // each biome mixes its own layers into the basic sounds: [pool, volume, playback rate]
+  const MIX = {
+    desert: { step: [['step', 0.8], ['sand', 0.5, 1.15]], rise: [['rise', 0.85], ['pebble', 0.35]], land: [['land', 0.9], ['sand', 0.35, 0.9]] },
+    snow: { step: [['snow', 0.9], ['step', 0.22]], rise: [['rise', 0.75], ['snow', 0.45, 0.8], ['gravel', 0.2]], land: [['land', 0.75], ['snow', 0.5, 0.75]] },
+    autumn: { step: [['step', 0.75], ['leaf', 0.5]], rise: [['rise', 0.9], ['pebble', 0.2], ['leaf', 0.22, 0.8]], land: [['land', 0.9], ['leaf', 0.3, 0.85]] },
+    cave: { rise: [['rise', 0.8], ['pebble', 0.4, 0.85]], land: [['land', 0.85], ['gravel', 0.3, 0.8]] },
+  };
+  let mixBiome = 'woods';
+  const UI_KINDS = new Set(['hover', 'pop', 'modal', 'toggle', 'whoosh', 'chime', 'nope']);
   const NAMES = [...new Set(Object.values(POOLS).flat().map(([n]) => n))];
-  let ctx, master, musicGain, music, loading, duck = true;
+  let ctx, master, musicGain, music, loading, duck = true, ambGain, echo, soft, dim;
   // sound settings, saved on this device
-  const prefs = { music: 0.5, fx: 0.8, mute: false };
+  const prefs = { music: 0.5, fx: 0.8, mute: false, amb: 0.5, ambOn: true };
   try { Object.assign(prefs, JSON.parse(localStorage.getItem('hidden-maze-sound') || '{}')); } catch {}
   function apply() {
     if (!ctx) return;
@@ -176,6 +216,8 @@ const sfx = (() => {
     master.gain.setTargetAtTime(prefs.mute ? 0 : prefs.fx * 0.6, now, 0.05);
     // music stays subtle even at full, and drops lower in the menus
     musicGain.gain.setTargetAtTime(prefs.mute ? 0 : prefs.music * 0.22 * (duck ? 0.45 : 1), now, 0.8);
+    // ambience: barely there, like a quiet room tone (and softer still in the menus)
+    ambGain.gain.setTargetAtTime(prefs.mute || !prefs.ambOn ? 0 : prefs.amb * 0.16 * (duck ? 0.5 : 1), now, 1.2);
   }
   function set(k, v) {
     prefs[k] = v;
@@ -191,13 +233,40 @@ const sfx = (() => {
     musicGain = ctx.createGain();
     musicGain.gain.value = 0;
     musicGain.connect(ctx.destination);
-    const soft = ctx.createBiquadFilter(); // takes the edge off for a soft, satisfying tone
+    soft = ctx.createBiquadFilter(); // takes the edge off for a soft, satisfying tone (and muffles more in the cave)
     soft.type = 'lowpass'; soft.frequency.value = 6500;
-    master.connect(soft).connect(ctx.destination);
-    loading = Promise.all(NAMES.map(async n => {
+    dim = ctx.createGain(); // the cave turns everything down a little
+    master.connect(dim).connect(soft).connect(ctx.destination);
+    // the cave adds a soft echo to the stone sounds
+    echo = { send: ctx.createGain(), delay: ctx.createDelay(1), fb: ctx.createGain(), lp: ctx.createBiquadFilter() };
+    echo.send.gain.value = 0; echo.delay.delayTime.value = 0.23; echo.fb.gain.value = 0.42; echo.lp.type = 'lowpass'; echo.lp.frequency.value = 1400;
+    echo.send.connect(echo.delay).connect(echo.lp).connect(echo.fb).connect(echo.delay);
+    echo.lp.connect(soft);
+    // a second, longer tap so the echo sounds like a hollow space rather than a single slap
+    const d2 = ctx.createDelay(1), f2 = ctx.createGain(), l2 = ctx.createBiquadFilter();
+    d2.delayTime.value = 0.37; f2.gain.value = 0.3; l2.type = 'lowpass'; l2.frequency.value = 1000;
+    echo.send.connect(d2).connect(l2).connect(f2).connect(d2); l2.connect(soft);
+    ambGain = ctx.createGain(); ambGain.gain.value = 0; ambGain.connect(ctx.destination);
+    for (const n of Object.keys(AMB_FILES)) fetch(`assets/ambience/${n}.m4a`).then(r => r.arrayBuffer()).then(b => ctx.decodeAudioData(b)).then(buf => { ambBuf[n] = buf; setAmbience(ambWant); }).catch(() => {});
+    // dry leaves underfoot (autumn): made here, not loaded: a soft rustle under an envelope with little crackles
+    for (let k = 1; k <= 6; k++) {
+      const sr = ctx.sampleRate, n = Math.floor(sr * 0.24), b = ctx.createBuffer(1, n, sr), d = b.getChannelData(0);
+      let r = k * 7919 + 13; const rnd = () => (r = (r * 16807) % 2147483647) / 2147483647;
+      for (let i = 0; i < n; i++) { const t = i / n; d[i] = (rnd() * 2 - 1) * 0.22 * Math.min(1, t * 40) * Math.pow(1 - t, 2.4); }
+      for (let c = 0; c < 24; c++) {
+        const at = Math.floor(Math.pow(rnd(), 1.7) * n * 0.75), len = 30 + Math.floor(rnd() * 140), amp = (0.25 + rnd() * 0.75) * (1 - at / n);
+        for (let j = 0; j < len && at + j < n; j++) d[at + j] += (rnd() * 2 - 1) * amp * Math.exp(-j / (len * 0.22));
+      }
+      let prev = 0, peak = 0;
+      for (let i = 0; i < n; i++) { const v = d[i]; d[i] = v - prev * 0.9; prev = v; peak = Math.max(peak, Math.abs(d[i])); } // gentle high-pass: no rumble
+      for (let i = 0; i < n; i++) d[i] *= 0.6 / peak;
+      buffers['lf0' + k] = b;
+    }
+    loading = Promise.all(NAMES.filter(n => !n.startsWith('lf')).map(async n => {
       try { buffers[n] = await ctx.decodeAudioData(await (await fetch(`assets/sfx/${n}.m4a`)).arrayBuffer()); } catch {}
     }));
     apply();
+    wantMusic = true; // the music starts with the game (quietly under the menus), not only once you play
     fetch('assets/music/cozy.mp3').then(r => r.arrayBuffer()).then(b => ctx.decodeAudioData(b)).then(buf => { music = buf; startMusic(); }).catch(() => {});
   }
   // background music: starts the first time you play, then loops (60 s track)
@@ -222,8 +291,49 @@ const sfx = (() => {
     let r = pool.reduce((a, [, w]) => a + w, 0) * Math.random();
     for (const [n, w] of pool) if ((r -= w) < 0) return (last[kind] = n);
   }
+  // ambience per biome: a long quiet loop, filtered to suit the place; crossfades when the biome changes
+  const AMB_FILES = { wind: 1 };
+  const AMB = {
+    woods: ['wind', 'lowpass', 2200, 0.8], autumn: ['wind', 'lowpass', 4000, 1], snow: ['wind', 'highpass', 250, 1],
+    desert: ['wind', 'bandpass', 700, 0.9], cave: ['wind', 'lowpass', 420, 1.4], // desert: only a soft airy wind (no animals)
+  };
+  const ambBuf = {}; let ambWant = 'woods', ambNow = null, trickle = 0;
+  function setAmbience(name) {
+    ambWant = name;
+    const A = AMB[name] || AMB.woods;
+    if (!ctx || !ambBuf[A[0]] || (ambNow && ambNow.name === name)) return;
+    const now = ctx.currentTime;
+    if (ambNow) { const o = ambNow; o.g.gain.setTargetAtTime(0, now, 0.8); setTimeout(() => o.src.stop(), 4000); }
+    const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+    src.buffer = ambBuf[A[0]]; src.loop = true;
+    src.loopStart = 0; src.loopEnd = src.buffer.duration;
+    f.type = A[1]; f.frequency.value = A[2]; g.gain.value = 0;
+    src.connect(f).connect(g).connect(ambGain);
+    src.start(0, Math.random() * src.buffer.duration);
+    g.gain.setTargetAtTime(A[3], now, 1.2);
+    ambNow = { name, src, g };
+  }
+  function setBiome(name) {
+    mixBiome = name;
+    setAmbience(name);
+    if (!echo) return;
+    const cave = name === 'cave', now = ctx.currentTime;
+    echo.send.gain.setTargetAtTime(cave ? 0.6 : 0, now, 0.3);
+    dim.gain.setTargetAtTime(cave ? 0.68 : 1, now, 0.3);
+    soft.frequency.setTargetAtTime(cave ? 1700 : 6500, now, 0.3);
+  }
+  // now and then in the cave, a few pebbles trickle somewhere in the dark
+  function tick(dt) {
+    if (mixBiome !== 'cave' || !ctx) return;
+    if ((trickle -= dt) < 0) { trickle = 7 + Math.random() * 9; play1('pebble', 0.07, Math.random() * 1.2 - 0.6, { rate: 0.8 + Math.random() * 0.2 }); }
+  }
+  function play(kind, vol, pan = 0, o = {}) {
+    const mix = (MIX[mixBiome] || {})[kind];
+    if (!mix) return play1(kind, vol, pan, o);
+    for (const [pool, k, rate = 1] of mix) play1(pool, vol * k, pan, { ...o, rate: (o.rate || 1) * rate });
+  }
   // maxDur cuts long clips short with a quick fade (footsteps come every ~0.17 s)
-  function play(kind, vol, pan = 0, { rate = 1, maxDur = 0 } = {}) {
+  function play1(kind, vol, pan = 0, { rate = 1, maxDur = 0 } = {}) {
     if (!ctx || ctx.state !== 'running') return;
     const now = ctx.currentTime;
     if (now - (lastT[kind] || 0) < GAP[kind]) return;
@@ -231,7 +341,7 @@ const sfx = (() => {
     lastT[kind] = now;
     const src = ctx.createBufferSource();
     src.buffer = buffers[n];
-    src.playbackRate.value = rate * (0.9 + Math.random() * 0.18);
+    src.playbackRate.value = rate * (UI_KINDS.has(kind) ? 0.97 + Math.random() * 0.06 : 0.9 + Math.random() * 0.18);
     const g = ctx.createGain();
     g.gain.value = vol * (0.8 + Math.random() * 0.3);
     if (maxDur) g.gain.setTargetAtTime(0, now + maxDur * 0.6, maxDur * 0.2);
@@ -243,12 +353,14 @@ const sfx = (() => {
     }
     if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = pan; node = node.connect(p); }
     node.connect(master);
+    if (echo && !UI_KINDS.has(kind) && (mixBiome === 'cave' || (kind !== 'step' && kind !== 'snow' && kind !== 'sand'))) node.connect(echo.send); // in the cave, footsteps echo too
     src.start();
     if (maxDur) src.stop(now + maxDur + 0.15);
     // a faint footstep-texture layer under the stone sounds
-    if (kind === 'rise' || kind === 'land') play('layer', vol * 0.18, pan, { rate: 0.8, maxDur: 0.45 });
+    if (kind === 'rise' || kind === 'land') play1('layer', vol * 0.18, pan, { rate: 0.8, maxDur: 0.45 });
   }
-  return { init, play, set, prefs, setScene, get ready() { return !!ctx && ctx.state === 'running' && Object.keys(buffers).length; } };
+  const ui = (kind, vol = 0.5) => play1(kind, vol);
+  return { init, play, ui, set, prefs, setScene, setBiome, tick, get ready() { return !!ctx && ctx.state === 'running' && Object.keys(buffers).length; } };
 })();
 addEventListener('pointerdown', () => sfx.init());
 addEventListener('keydown', () => sfx.init());
@@ -256,12 +368,28 @@ addEventListener('keydown', () => sfx.init());
 const panOf = (x, z) => THREE.MathUtils.clamp(((x - st.tx) - (z - st.tz)) / 5, -0.6, 0.6);
 
 // ---------- puffs (Mario-style dust) ----------
+// soft round billboards (always facing the camera), not solid balls: solid spheres cut through the stones and read
+// as lumpy geometry. The picture is a cartoon cloud puff, lit from above with a soft edge.
 const MAX_PUFFS = 400;
-const puffMesh = new THREE.InstancedMesh(
-  new THREE.IcosahedronGeometry(1, 2),
-  new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.95 }),
-  MAX_PUFFS
-);
+const puffTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(56, 50, 4, 64, 64, 62);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.55, 'rgba(236,236,236,.95)'); g.addColorStop(0.8, 'rgba(214,214,214,.55)'); g.addColorStop(1, 'rgba(210,210,210,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+const puffMat = new THREE.MeshBasicMaterial({ map: puffTex, transparent: true, depthWrite: false, toneMapped: false });
+puffMat.onBeforeCompile = sh => {
+  sh.vertexShader = sh.vertexShader.replace('#include <project_vertex>', `
+    vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+    mvPosition.xy += position.xy * length(instanceMatrix[0].xyz) * 2.0;
+    gl_Position = projectionMatrix * mvPosition;`);
+};
+puffMat.customProgramCacheKey = () => 'puff-billboard';
+const puffMesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), puffMat, MAX_PUFFS);
+puffMesh.renderOrder = 5;
 puffMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 puffMesh.frustumCulled = false;
 puffMesh.count = 0;
@@ -304,13 +432,8 @@ function footPuffs(x, z, dx, dz, strength = 1) {
     );
   }
 }
-// dust color for a tile: in the cave, the glow color of that stone; elsewhere the biome's stone dust
-function dustAt(x, z) {
-  const vs = curSet && curSet.variants;
-  if (vs && vs[0].glowColor && maze) {
-    const i = Math.round(z + origin) * maze.N + Math.round(x + origin), v = vs[varIdx[i]];
-    if (v && Math.random() < 0.75) return v.glowColor;
-  }
+// dust is the color of the level's own stone (a few shades of it)
+function dustAt() {
   return STONE_DUST[Math.floor(Math.random() * STONE_DUST.length)];
 }
 function stonePuffs(x, z, big) {
@@ -332,30 +455,168 @@ function stonePuffs(x, z, big) {
   }
 }
 
+// the cave doors' haze: a soft violet-cyan glow behind the mushrooms
+const doorHaloMat = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(210,120,255,.55)'); g.addColorStop(0.45, 'rgba(90,200,255,.2)'); g.addColorStop(1, 'rgba(90,200,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  return new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
+})();
+// glowing spores drift up from the mushroom doors now and then
+const SPORES = ['#ff5fd2', '#5ff2ff', '#b47dff', '#7dff9a'];
+function doorSpores(dt) {
+  if (biome !== 'cave') return;
+  for (const m of doorMeshes.values()) if (Math.random() < dt * 5)
+    spawnPuff(m.position.x + rand(-0.25, 0.25), m.position.y + rand(0.3, 0.8), m.position.z + rand(-0.25, 0.25), rand(-0.1, 0.1), rand(0.25, 0.5), rand(-0.1, 0.1), rand(0.025, 0.05), SPORES[Math.floor(Math.random() * SPORES.length)], rand(1.2, 2));
+}
+
 // ---------- key ----------
 function makeKey() {
+  // a chunky little golden key lying flat, slowly turning, with a soft shadow under it (no glow)
   const g = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: '#f2c14e', metalness: 0.55, roughness: 0.3, emissive: '#ffae00', emissiveIntensity: 0.35 });
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.035, 10, 24), mat);
-  ring.position.y = 0.18;
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.34, 10), mat);
-  shaft.position.y = -0.05;
-  const t1 = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.04, 0.04), mat);
-  t1.position.set(0.055, -0.17, 0);
-  const t2 = t1.clone(); t2.position.y = -0.1; t2.scale.x = 0.7; t2.position.x = 0.045;
+  const mat = new THREE.MeshStandardMaterial({ color: '#f4c24a', metalness: 0.35, roughness: 0.32, emissive: '#ffae00', emissiveIntensity: 0.12 });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.036, 14, 32).rotateX(Math.PI / 2), mat);
+  ring.position.x = -0.13;
+  const shaft = new THREE.Mesh(new RoundedBoxGeometry(0.26, 0.05, 0.05, 2, 0.02), mat);
+  shaft.position.x = 0.07;
+  const t1 = new THREE.Mesh(new RoundedBoxGeometry(0.05, 0.05, 0.075, 2, 0.02), mat); t1.position.set(0.17, 0, 0.055);
+  const t2 = new THREE.Mesh(new RoundedBoxGeometry(0.04, 0.05, 0.055, 2, 0.018), mat); t2.position.set(0.105, 0, 0.045);
   g.add(ring, shaft, t1, t2);
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
-  const c = document.createElement('canvas'); c.width = c.height = 128;
-  const x = c.getContext('2d');
-  const grd = x.createRadialGradient(64, 64, 0, 64, 64, 64);
-  grd.addColorStop(0, 'rgba(255,230,150,0.9)'); grd.addColorStop(0.35, 'rgba(255,215,120,0.35)'); grd.addColorStop(1, 'rgba(255,215,120,0)');
-  x.fillStyle = grd; x.fillRect(0, 0, 128, 128);
-  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
-  glow.scale.setScalar(1.3);
+  g.rotation.x = 0.35; // tipped a little toward the camera so it reads as a key from above
+  const spin = new THREE.Group(); spin.add(g);
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d'), grd = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, 'rgba(90,60,20,.3)'); grd.addColorStop(1, 'rgba(90,60,20,0)'); x.fillStyle = grd; x.fillRect(0, 0, 64, 64);
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false }));
+  // a soft warm glow behind it, faint and slowly breathing
+  const gc = document.createElement('canvas'); gc.width = gc.height = 64;
+  const gx = gc.getContext('2d'), gg = gx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gg.addColorStop(0, 'rgba(255,226,150,.9)'); gg.addColorStop(0.4, 'rgba(255,210,120,.35)'); gg.addColorStop(1, 'rgba(255,210,120,0)');
+  gx.fillStyle = gg; gx.fillRect(0, 0, 64, 64);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(gc), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.3 }));
+  glow.scale.setScalar(0.95);
   const root = new THREE.Group();
-  root.add(g, glow);
-  root.userData.spin = g;
+  root.add(spin, shadow, glow);
+  root.userData.spin = spin; root.userData.shadow = shadow; root.userData.glow = glow;
   return root;
+}
+
+// ---------- portal ----------
+// The way out of each level, built from the level's own stones (so it matches the scans): a sunk plinth, two pillars
+// of two upright stones and a lintel of three stones laid on their side, all at their true proportions, with a calm
+// swirl inside in the biome's colors. It sleeps (dim, slow) until Buddy has the key, then wakes up and turns.
+const PORTAL_TINTS = { // soft, milky versions of each biome's colors (the swirl should feel calm, not neon)
+  woods: ['#dcefcf', '#fbf8ec', '#bfe0a8'], desert: ['#f8e6c2', '#fffaf0', '#efcf96'], snow: ['#e3f0fb', '#ffffff', '#c6def3'],
+  autumn: ['#f8dcc0', '#fff6ea', '#efb787'], cave: ['#c4efe2', '#f2fffa', '#94dcc8'],
+};
+function makePortal(set, biomeName) {
+  const root = new THREE.Group(), frame = new THREE.Group(), V = set.variants, box = new THREE.Box3();
+  // a stone at its true proportions (uniform scale), standing or laid on its side, placed by its measured box: its
+  // bottom at y0 (or its top at topAt), centered on x. Returns its top so the next stone can sit right on it.
+  const stone = (vi, geo, s, x, y0, { lying = false, turn = 0, topAt = null } = {}) => {
+    const m = new THREE.Mesh(geo(V[vi % V.length]), set.wallMats[vi % V.length]);
+    m.scale.setScalar(s);
+    m.rotation.set(0, turn * Math.PI / 2, lying ? Math.PI / 2 : 0);
+    m.updateMatrixWorld(true);
+    // measured from the vertices the stone actually uses (a stone's top shares the whole stone's vertex list)
+    const g = m.geometry, P = g.attributes.position, ix = g.index.array, vv = new THREE.Vector3();
+    box.makeEmpty();
+    for (let i = 0; i < ix.length; i += 7) box.expandByPoint(vv.fromBufferAttribute(P, ix[i]).applyMatrix4(m.matrixWorld));
+    if (topAt !== null) y0 = topAt - (box.max.y - box.min.y);
+    m.position.set(x - (box.min.x + box.max.x) / 2, y0 - box.min.y, -(box.min.z + box.max.z) / 2);
+    m.castShadow = true; frame.add(m);
+    return { top: y0 + box.max.y - box.min.y, w: box.max.x - box.min.x };
+  };
+  const raw = v => v.raw, cap = v => v.cap;
+  const H = v => { const b = new THREE.Box3().setFromBufferAttribute(v.raw.attributes.position); return b.max.y - b.min.y; }; // (the stored box is from before the stone was sized)
+  const base = stone(0, cap, 1.15, 0, 0, { topAt: 0.08 }).top; // plinth: a stone's top, sunk so only its top shows
+  const PX = 0.33, PS = 0.27;
+  let pillarTop = 0;
+  for (const [k, sgn] of [[0, -1], [1, 1]]) {
+    const lower = stone(1 + k, raw, PS, sgn * PX, base, { turn: k });
+    const upper = stone(3 + k, raw, PS * 0.97, sgn * PX, lower.top, { turn: k + 2 });
+    pillarTop = Math.max(pillarTop, upper.top);
+  }
+  // lintel: three stones laid on their side, end to end, spanning past the pillars' outer edges
+  const span = 2 * PX + 0.24 + 0.1;
+  for (const [k, x] of [[5, -span / 3], [6, 0], [2, span / 3]]) stone(k, raw, (span / 3) / H(V[k % V.length]), x, pillarTop - 0.01, { lying: true, turn: k % 2 * 2 });
+  root.add(frame);
+  const T = (PORTAL_TINTS[biomeName] || PORTAL_TINTS.woods).map(c => new THREE.Color(c));
+  const U = { uTime: { value: 0 }, uOn: { value: 0 }, uA: { value: T[0] }, uB: { value: T[1] }, uC: { value: T[2] }, uRock: { value: new THREE.Color().setRGB(...set.rockRef.map(v => v / 255), THREE.SRGBColorSpace) } };
+  const disc = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.72), new THREE.ShaderMaterial({
+    uniforms: U, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `varying vec2 vUv; uniform float uTime, uOn; uniform vec3 uA, uB, uC, uRock;
+      void main() {
+        vec2 sz = vec2(0.42, 0.72), q = abs(vUv - 0.5) * sz - (sz * 0.5 - 0.1);
+        float d = length(max(q, 0.0)) - 0.1, a = smoothstep(0.008, -0.008, d);
+        vec2 p = (vUv - vec2(0.5, 0.45)) * sz; float r = length(p), ang = atan(p.y, p.x);
+        float spin = uTime * (0.4 + 1.8 * uOn);
+        float s = 0.5 + 0.5 * sin(ang * 2.0 + r * 22.0 - spin * 2.0);
+        vec3 col = mix(uA, uC, s);
+        col = mix(col, uB, smoothstep(0.5, 1.0, sin(ang * 3.0 - r * 16.0 + spin * 1.4)) * 0.6);
+        col += uB * exp(-r * r * 70.0) * (0.3 + 0.7 * uOn);
+        vec3 sleep = uRock * (0.62 + 0.1 * s);
+        gl_FragColor = vec4(mix(sleep, col, uOn), a * (0.92 + 0.08 * uOn));
+      }`,
+  }));
+  disc.scale.y = (pillarTop - base) / 0.72; disc.position.y = (base + pillarTop) / 2; // fills the opening
+  disc.renderOrder = 3;
+  root.add(disc);
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,.75)'); g.addColorStop(0.5, 'rgba(255,255,255,.22)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), color: T[2], blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 }));
+  glow.position.y = 0.45; glow.scale.setScalar(1.5);
+  root.add(glow);
+  root.userData = { U, glow, on: 0, tint: T };
+  root.scale.setScalar(0.84); // fits inside its own tile, so it never pokes into the neighbouring walls
+  return root;
+}
+function updatePortal(dt, time) {
+  if (!portal || !portal.visible) return;
+  const P = portal.userData, want = hasKey ? 1 : 0;
+  P.on += (want - P.on) * Math.min(1, dt * 3);
+  P.U.uTime.value = time; P.U.uOn.value = P.on;
+  P.glow.material.opacity = P.on * (0.35 + 0.1 * Math.sin(time * 3));
+  // once awake, soft motes drift out of the swirl
+  if (P.on > 0.5 && Math.random() < dt * 6) {
+    const a = portal.rotation.y, side = rand(-0.15, 0.15);
+    spawnPuff(portal.position.x + Math.cos(a) * side, rand(0.2, 0.7), portal.position.z - Math.sin(a) * side, Math.sin(a) * 0.25, rand(0.15, 0.35), Math.cos(a) * 0.25, rand(0.02, 0.04), '#' + P.tint[Math.floor(Math.random() * 3)].getHexString(), 1.4);
+  }
+}
+// where the key waits: a dead end off the way from a to b, so you have to go and look for it. Picks the one whose
+// detour is closest to `detour` x the a-to-b distance (bigger later in the game).
+function keyTile(m, a, b, detour = 0.5) {
+  const bfs = ([sx, sz]) => {
+    const { N, g } = m, d = new Int32Array(N * N).fill(-1), q = [sz * N + sx]; d[q[0]] = 0;
+    for (let h = 0; h < q.length; h++) {
+      const i = q[h], x = i % N, z = (i / N) | 0;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const X = x + dx, Z = z + dz, j = Z * N + X;
+        if (X >= 0 && Z >= 0 && X < N && Z < N && !g[j] && d[j] < 0) { d[j] = d[i] + 1; q.push(j); }
+      }
+    }
+    return d;
+  };
+  const da = bfs(a), db = bfs(b), { N, g } = m, D = da[b[1] * N + b[0]];
+  let best = null, bestS = Infinity;
+  for (let i = 0; i < N * N; i++) {
+    if (g[i] || da[i] < 3 || db[i] < 3) continue;
+    const x = i % N, z = (i / N) | 0;
+    const open = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dz]) => { const X = x + dx, Z = z + dz; return X >= 0 && Z >= 0 && X < N && Z < N && !g[Z * N + X]; }).length;
+    const sc = Math.abs(da[i] + db[i] - D - detour * D) + (open === 1 ? 0 : 6); // dead ends first
+    if (sc < bestS) { bestS = sc; best = [x, z]; }
+  }
+  return best || [b[0], b[1]];
+}
+// which way the portal faces: toward its open neighbour (the tile you walk in from)
+function portalYaw([x, z]) {
+  for (const [dx, dz] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) if (!isWall(x + dx, z + dz)) return Math.atan2(dx, dz);
+  return Math.PI / 4;
 }
 
 // ---------- maze ----------
@@ -417,22 +678,85 @@ const SHAPES = {
     },
   },
 };
-// which shape a level uses: squares first, new shapes come in as the mazes get bigger
-function levelShape(L) {
-  if (L < 12) return null;
-  const pool = ['circle'];
-  if (L >= 18) pool.push('twin');
-  if (L >= 24) pool.push('heart');
-  if (L >= 30) pool.push('circles');
-  return pool[L % pool.length];
-}
+// More shapes, drawn in screen space: X to the right, Y up the screen (the maze grid shows as a diamond, so a shape
+// has to stay inside |X| + |Y| <= 1.41). Thin parts that don't connect are trimmed by the maze generator.
+const scr = (cx, cz, C) => { const u = uv(cx, C), v = uv(cz, C); return [(u - v) / Math.SQRT2, -(u + v) / Math.SQRT2]; };
+const shape2 = f => ({ inside: (cx, cz, C) => f(...scr(cx, cz, C)) });
+const disc = (X, Y, x, y, r) => (X - x) ** 2 + (Y - y) ** 2 <= r * r;
+// a line between two points, about one cell wide: bridges between rooms
+const link = (X, Y, [ax, ay], [bx, by], C) => {
+  const dx = bx - ax, dy = by - ay, t = Math.max(0, Math.min(1, ((X - ax) * dx + (Y - ay) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(X - (ax + dx * t), Y - (ay + dy * t)) < 1.3 / C;
+};
+Object.assign(SHAPES, {
+  gem: shape2((X, Y) => Math.abs(X) <= 0.72 && Math.abs(Y) <= 0.72),                                   // a square standing straight on screen
+  plus: shape2((X, Y) => (Math.abs(X) < 0.32 && Math.abs(Y) < 0.98) || (Math.abs(Y) < 0.32 && Math.abs(X) < 0.98)),
+  tree: shape2((X, Y) => (Y > -0.55 && Math.abs(X) <= (1.05 - Y) * 0.62 && Y < 1.02) || (Math.abs(X) < 0.2 && Y <= -0.55 && Y > -0.98)), // a pine
+  flower: shape2((X, Y) => disc(X, Y, 0, 0, 0.36) || [0, 1, 2, 3, 4].some(k => { const a = Math.PI / 2 + k * 1.2566; return disc(X, Y, Math.cos(a) * 0.6, Math.sin(a) * 0.6, 0.3); })),
+  triangle: shape2((X, Y) => Y >= -0.62 && Math.abs(X) <= (0.98 - Y) * 0.6),                          // a pyramid
+  hourglass: shape2((X, Y) => Math.abs(Y) <= 0.95 && Math.abs(X) <= 0.22 + 0.62 * Math.abs(Y)),
+  cactus: shape2((X, Y) => (Math.abs(X) < 0.27 && Y > -0.98 && Y < 0.95)
+    || (X < 0 && X > -0.78 && Y > -0.32 && Y < 0.04) || (X > -0.8 && X < -0.44 && Y > -0.32 && Y < 0.58)
+    || (X > 0 && X < 0.78 && Y > -0.06 && Y < 0.3) || (X > 0.44 && X < 0.8 && Y > -0.06 && Y < 0.6)),
+  crescent: shape2((X, Y) => disc(X, Y, 0, 0, 0.98) && !disc(X, Y, 0.42, 0.3, 0.66)),
+  ring: shape2((X, Y) => disc(X, Y, 0, 0, 0.98) && !disc(X, Y, 0, 0, 0.4)),                            // a frozen lake in the middle
+  snowflake: shape2((X, Y) => disc(X, Y, 0, 0, 0.98) && (disc(X, Y, 0, 0, 0.3) || Math.abs(X) < 0.17 || Math.abs(Y) < 0.17 || Math.abs(Math.abs(X) - Math.abs(Y)) < 0.2)),
+  frame: { inside: (cx, cz, C) => Math.max(Math.abs(uv(cx, C)), Math.abs(uv(cz, C))) >= 0.42 },
+  islands: shape2((X, Y) => { const R = [[0, 0.68], [0.68, 0], [0, -0.68], [-0.68, 0]], C2 = 14;
+    return R.some(([x, y]) => disc(X, Y, x, y, 0.42)) || R.some((r, k) => link(X, Y, r, R[(k + 1) % 4], C2)); }),
+  star: shape2((X, Y) => { const r = Math.hypot(X, Y), a = Math.atan2(Y, X) - Math.PI / 2; return r <= 0.42 + 0.56 * Math.pow(0.5 + 0.5 * Math.cos(5 * a), 1.6); }),
+  mushroom: shape2((X, Y) => (Y >= -0.05 && disc(X, Y, 0, -0.05, 0.98)) || (Math.abs(X) < 0.3 && Y < 0 && Y > -0.95)),
+  snake: shape2((X, Y) => Math.abs(X) < 0.98 && Math.abs(Y - 0.5 * Math.sin(X * 2.8)) < 0.4),
+  leaf: shape2((X, Y) => { const a = (X + Y) / Math.SQRT2, b = (Y - X) / Math.SQRT2; return disc(a, b, 0, 0.42, 0.97) && disc(a, b, 0, -0.42, 0.97); }), // pointed both ends, tilted
+});
+// ---------- level plan ----------
+// Each world is 5 chapters of 5 levels, in a saw-tooth: a gentle level to breathe, a mix of what you know, the
+// chapter's new shape, a door level, then a bigger challenge with the new shape. Maze size, how far you can see and
+// how far off the way the key hides all grow with the chapter and the world; the last level of a world is the biggest.
+const WORLD_SHAPES = {
+  woods: ['circle', 'gem', 'plus', 'tree', 'flower'],
+  desert: ['triangle', 'hourglass', 'cactus', 'crescent', 'twin'],
+  snow: ['ring', 'snowflake', 'frame', 'islands', 'star'],
+  autumn: ['mushroom', 'heart', 'snake', 'circles', 'leaf'],
+};
+const BASE_CELLS = [4, 5, 6, 7];
+const levelPlan = (() => {
+  const cache = {};
+  return L => cache[L] ||= (() => {
+    const w = Math.floor(L / LEVELS_PER_WORLD), k = L % LEVELS_PER_WORLD, c = Math.floor(k / 5), p = k % 5;
+    const world = WORLDS[w], shapes = WORLD_SHAPES[world.biome], rnd = mulberry32(L * 131 + 7);
+    let cells = BASE_CELLS[w] + c + (p === 4 ? 1 : 0) - (p === 0 && c > 0 ? 1 : 0);
+    if (w === 0 && c === 0) cells = [3, 4, 4, 5, 5][p]; // the very first levels are tiny
+    if (k === LEVELS_PER_WORLD - 1) cells += 1;          // the world's finale
+    let shape = null, gateway = false;
+    if (p === 3 && (w > 0 || c > 0)) gateway = true;
+    else if (p === 2 || p === 4) shape = shapes[c];
+    else if (p === 1 && (c > 0 || w > 0)) { const known = w > 0 ? shapes.slice(0, c + 1).concat(WORLD_SHAPES[WORLDS[w - 1].biome]) : shapes.slice(0, c); shape = known.length ? known[Math.floor(rnd() * known.length)] : null; }
+    if (shape && cells < 5) cells = 5;                    // shapes need room to read
+    const reveal = Math.max(1.4, world.reveal - 0.08 * c - (p === 4 ? 0.12 : 0) + (p === 0 ? 0.15 : 0));
+    const detour = p === 0 ? 0.15 : Math.min(0.85, 0.2 + 0.1 * c + 0.06 * w + (p === 4 ? 0.1 : 0));
+    return { cells, shape, gateway, reveal, detour, chapter: c };
+  })();
+})();
 function genShapedMaze(cells, rnd, shape) {
   const S = SHAPES[shape], C = cells, N = C * 2 + 1;
   const g = new Uint8Array(N * N).fill(1);
   const ok = (cx, cz) => cx >= 0 && cz >= 0 && cx < C && cz < C && S.inside(cx, cz, C);
   const cellsIn = [];
   for (let cz = 0; cz < C; cz++) for (let cx = 0; cx < C; cx++) if (ok(cx, cz)) cellsIn.push([cx, cz]);
-  const [sx, sz] = cellsIn[Math.floor(rnd() * cellsIn.length)];
+  // grow the maze in the shape's biggest connected part (thin bits that don't connect are left out)
+  const comp = new Int32Array(C * C).fill(-1), sizes = [];
+  for (const [x0, z0] of cellsIn) {
+    if (comp[z0 * C + x0] >= 0) continue;
+    const id = sizes.length, q = [[x0, z0]]; comp[z0 * C + x0] = id;
+    for (let h = 0; h < q.length; h++) for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const x = q[h][0] + dx, z = q[h][1] + dz;
+      if (ok(x, z) && comp[z * C + x] < 0) { comp[z * C + x] = id; q.push([x, z]); }
+    }
+    sizes.push(q.length);
+  }
+  const big = sizes.indexOf(Math.max(...sizes)), main = cellsIn.filter(([x, z]) => comp[z * C + x] === big);
+  const [sx, sz] = main[Math.floor(rnd() * main.length)];
   const stack = [[sx, sz]];
   g[(2 * sz + 1) * N + 2 * sx + 1] = 0;
   while (stack.length) {
@@ -454,9 +778,9 @@ function genShapedMaze(cells, rnd, shape) {
   }
   // a few loops inside the shape
   for (let k = 0; k < C; k++) {
-    const [cx, cz] = cellsIn[Math.floor(rnd() * cellsIn.length)];
+    const [cx, cz] = main[Math.floor(rnd() * main.length)];
     const [dx, dz] = [[1, 0], [0, 1]][Math.floor(rnd() * 2)];
-    if (ok(cx + dx, cz + dz)) g[(2 * cz + 1 + dz) * N + 2 * cx + 1 + dx] = 0;
+    if (ok(cx + dx, cz + dz) && comp[(cz + dz) * C + cx + dx] === big) g[(2 * cz + 1 + dz) * N + 2 * cx + 1 + dx] = 0;
   }
   // empty floor: tiles that are not next to any open path stay empty (the walls hug the shape)
   const empty = new Uint8Array(N * N);
@@ -516,12 +840,12 @@ function shortestPath({ N, g }, sx, sz, tx, tz) {
 
 // ---------- game state ----------
 const $ = id => document.getElementById(id);
-const ui = { level: $('level'), steps: $('steps'), time: $('time'), hint: $('hint') };
-let assets, walls = [], caps = [], floor, floorShadow, player, silhouette, key;
+const ui = { level: $('level'), steps: $('steps'), time: $('time') };
+let assets, walls = [], caps = [], floor, floorShadow, player, silhouette, key, portal, keyAt = null, hasKey = false;
 let maze, heights, vels, targets, shake, rotIdx, varIdx, twist, nudge, tint, origin, optimal, tileGlow;
 let L = 0, steps = 0, elapsed = 0, won = false, viewW = parseFloat(params.get('zoom') || '3'), peek = false;
 let state = 'loading';
-const st = { gx: 0, gz: 0, fx: 0, fz: 0, tx: 0, tz: 0, t: 1, moving: false, facing: 0, bumpT: -1, bdx: 0, bdz: 0 };
+const st = { gx: 0, gz: 0, fx: 0, fz: 0, tx: 0, tz: 0, t: 1, moving: false, facing: 0, bumpT: -1, bdx: 0, bdz: 0, idle: 0 };
 let heldDir = null, queued = null;
 
 // a model's texture goes to a canvas (shrunk to keep phone memory in check) so its colors can be adjusted
@@ -530,7 +854,10 @@ function canvasTexture(tex, size) {
   const k = Math.min(1, size / Math.max(img.width, img.height));
   const c = document.createElement('canvas');
   c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-  c.getContext('2d', { willReadFrequently: true }).drawImage(img, 0, 0, c.width, c.height);
+  const cx = c.getContext('2d', { willReadFrequently: true });
+  // opaque first: some scans have see-through specks, which drop any color painted into them and render black
+  cx.fillStyle = '#000'; cx.fillRect(0, 0, c.width, c.height);
+  cx.drawImage(img, 0, 0, c.width, c.height);
   const t = new THREE.CanvasTexture(c);
   t.flipY = tex.flipY; t.colorSpace = tex.colorSpace; t.wrapS = tex.wrapS; t.wrapT = tex.wrapT; t.anisotropy = 4;
   tex.dispose();
@@ -587,46 +914,86 @@ function tintMoss(tex, ref, palette = null) {
   ctx.putImageData(img, 0, 0);
   tex.needsUpdate = true;
 }
-// cave glow: which pixels are bioluminescent (bright and colorful, whatever the hue), and their original colors
+// cave glow: which pixels are bioluminescent. The scans paint them as specks and moss in many shades (teal, mint,
+// purple, sage), some quite dull, so anything that stands apart from the stone's own rock color and isn't darker
+// than the rock counts. Measured on the untouched texture, before the rock is recolored.
+const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 function captureGlow(tex) {
-  const c = tex.image, img = c.getContext('2d').getImageData(0, 0, c.width, c.height), px = img.data, mask = new Float32Array(px.length / 4);
-  const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const c = tex.image, px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, mask = new Float32Array(px.length / 4);
+  const ch = [[], [], []];
+  for (let i = 0; i < px.length; i += 16) if (Math.max(px[i], px[i + 1], px[i + 2]) > 20) for (let k = 0; k < 3; k++) ch[k].push(px[i + k]);
+  const rock = ch.map(a => { a.sort((m, n) => m - n); return a[a.length >> 1] || 0; });
+  const rockL = 0.3 * rock[0] + 0.59 * rock[1] + 0.11 * rock[2];
+  const hues = [];
   for (let i = 0, j = 0; i < px.length; i += 4, j++) {
-    const r = px[i], g = px[i + 1], b = px[i + 2], mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-    if (mx < 1) continue;
-    mask[j] = sm(95, 150, mx) * sm(0.3, 0.5, (mx - mn) / mx);
+    const r = px[i], g = px[i + 1], b = px[i + 2], l = 0.3 * r + 0.59 * g + 0.11 * b, [h, sat] = hueSat(r, g, b);
+    const w = smooth(28, 60, Math.hypot(r - rock[0], g - rock[1], b - rock[2])) * smooth(rockL * 0.7, rockL * 1.05, l) * smooth(0.14, 0.28, sat);
+    mask[j] = w;
+    if (w > 0.5 && (j & 7) === 0) hues.push(h);
   }
-  return { orig: new Uint8ClampedArray(px), mask };
+  return { mask, hues };
 }
-// put the glowing bits back in their own colors, and make the glow picture (just those bits) plus their average color
-function restoreGlow(tex, { orig, mask }) {
+// paint the glowing bits fluorescent: each stone gets its own glow hue (cyan, magenta, lime...), keeping a little of
+// the original hue variety, at full saturation. Makes the glow picture (just those bits) and the stone's glow color.
+function neonGlow(tex, { mask, hues }, hue, ref) {
+  const refL = 0.3 * ref[0] + 0.59 * ref[1] + 0.11 * ref[2];
   const c = tex.image, ctx = c.getContext('2d'), img = ctx.getImageData(0, 0, c.width, c.height), px = img.data;
   const gc = document.createElement('canvas'); gc.width = c.width; gc.height = c.height;
   const gctx = gc.getContext('2d'), gimg = gctx.createImageData(c.width, c.height), gp = gimg.data;
-  const sum = [0, 0, 0]; let n = 0;
+  // circular mean of the original glow hues: each pixel keeps its offset from it (squeezed), around the new hue
+  const sx = hues.reduce((a, h) => a + Math.cos(h * 6.283), 0), sy = hues.reduce((a, h) => a + Math.sin(h * 6.283), 0);
+  const mean = Math.atan2(sy, sx) / 6.283;
+  const col = new THREE.Color();
   for (let i = 0, j = 0; i < px.length; i += 4, j++) {
     const w = mask[j];
     gp[i + 3] = 255;
     if (w <= 0) continue;
-    for (let k = 0; k < 3; k++) { px[i + k] += (orig[i + k] - px[i + k]) * w; gp[i + k] = orig[i + k] * w; sum[k] += orig[i + k] * w; }
-    n += w;
+    const [h] = hueSat(px[i], px[i + 1], px[i + 2]);
+    let dh = h - mean; dh -= Math.round(dh);
+    col.setHSL((hue + dh * 0.25 + 1) % 1, 1, 0.6);
+    // the stone itself stays plain rock (the moss was already recolored to rock); only the glow picture gets the
+    // color, keeping the moss's own light and dark so the lit specks show detail
+    const det = Math.max(0.3, Math.min(1.4, (0.3 * px[i] + 0.59 * px[i + 1] + 0.11 * px[i + 2]) / 110));
+    for (let k = 0; k < 3; k++) gp[i + k] = col[['r', 'g', 'b'][k]] * 255 * w * det;
+    // unlit, the moss is just a lighter patch of the same rock
+    const L = Math.max(0.7, Math.min(1.25, (0.3 * px[i] + 0.59 * px[i + 1] + 0.11 * px[i + 2]) / refL));
+    for (let k = 0; k < 3; k++) px[i + k] += (ref[k] * L - px[i + k]) * w * 0.9;
   }
   ctx.putImageData(img, 0, 0); tex.needsUpdate = true;
   gctx.putImageData(gimg, 0, 0);
   const glowTex = new THREE.CanvasTexture(gc);
   glowTex.flipY = tex.flipY; glowTex.colorSpace = THREE.SRGBColorSpace;
-  const col = new THREE.Color().setRGB(...sum.map(v => n ? v / n / 255 : 0.5), THREE.SRGBColorSpace);
-  return { glowTex, glowColor: '#' + col.offsetHSL(0, 0.1, 0.12).getHexString() };
+  return { glowTex, glowColor: '#' + col.setHSL(hue, 1, 0.7).getHexString() };
 }
-// the glowing bits light up only on the tile Buddy steps on (per-tile aGlow, 0..1), with a faint light the rest of the time
+// the scans have baked white highlights (shiny blobs): in the dark cave they read as frost, so pull them to the rock
+function flattenHighlights(tex, ref) {
+  const refL = 0.3 * ref[0] + 0.59 * ref[1] + 0.11 * ref[2];
+  const c = tex.image, ctx = c.getContext('2d'), img = ctx.getImageData(0, 0, c.width, c.height), px = img.data;
+  for (let i = 0; i < px.length; i += 4) {
+    const r = px[i], g = px[i + 1], b = px[i + 2], l = 0.3 * r + 0.59 * g + 0.11 * b, [, sat] = hueSat(r, g, b);
+    const w = smooth(refL * 1.25, refL * 1.7, l) * (1 - smooth(0.2, 0.35, sat));
+    if (w <= 0) continue;
+    for (let k = 0; k < 3; k++) px[i + k] += (ref[k] * 1.1 - px[i + k]) * w;
+  }
+  ctx.putImageData(img, 0, 0); tex.needsUpdate = true;
+}
+// the glowing bits are always softly lit, and blaze up on the tile Buddy steps on (per-tile aGlow, 0..1);
+// a slow shimmer runs across them so the cave feels alive
+const GLOW_TIME = { value: 0 };
 function addStepGlow(mat, glowTex) {
   const base = mat.onBeforeCompile;
   mat.onBeforeCompile = (sh, rr) => {
     base(sh, rr);
     sh.uniforms.uGlowMap = { value: glowTex };
-    sh.vertexShader = 'attribute float aGlow;\nvarying float vGlow;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;');
-    sh.fragmentShader = 'uniform sampler2D uGlowMap;\nvarying float vGlow;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>',
-      '#include <emissivemap_fragment>\ntotalEmissiveRadiance += texture2D(uGlowMap, vMapUv).rgb * (0.12 + 2.6 * vGlow);');
+    sh.uniforms.uGlowTime = GLOW_TIME;
+    sh.vertexShader = 'attribute float aGlow;\nvarying float vGlow;\nvarying vec3 vGlowW;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGlowW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = 'uniform sampler2D uGlowMap;\nuniform float uGlowTime;\nvarying float vGlow;\nvarying vec3 vGlowW;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>',
+      `#include <emissivemap_fragment>
+      { // dark until stepped on; then the specks light up and pulse, each part a little out of step with the others
+        vec3 gl = texture2D(uGlowMap, vMapUv).rgb;
+        float pulse = 0.65 + 0.35 * sin(uGlowTime * 4.0 + vGlowW.x * 9.0 + vGlowW.z * 7.0 + dot(gl, vec3(6.0)));
+        totalEmissiveRadiance += gl * vGlow * 3.2 * pulse; }`);
   };
   const key = mat.customProgramCacheKey;
   mat.customProgramCacheKey = () => key() + 'step';
@@ -642,10 +1009,11 @@ function rockMedianL(tex) {
   L.sort((m, n) => m - n);
   return L[Math.floor(L.length * 0.6)] || 1;
 }
-function scaleRock(tex, k) {
+function scaleRock(tex, k, skip = null) {
   k = Math.max(0.6, Math.min(1.6, k));
   const c = tex.image, ctx = c.getContext('2d'), img = ctx.getImageData(0, 0, c.width, c.height), px = img.data;
   for (let i = 0; i < px.length; i += 4) {
+    if (skip && skip[i >> 2]) continue;
     const w = rockness(px[i], px[i + 1], px[i + 2]);
     if (w <= 0) continue;
     const f = 1 + (k - 1) * w;
@@ -655,14 +1023,20 @@ function scaleRock(tex, k) {
   tex.needsUpdate = true;
 }
 // pull every rock pixel toward one shared color, keeping only its light and dark: removes odd tints between stones
-function tintRock(tex, ref, k, contrast = 0.65, lift = true) {
+function tintRock(tex, ref, k, contrast = 0.65, lift = true, skip = null) {
   const refL = 0.299 * ref[0] + 0.587 * ref[1] + 0.114 * ref[2];
   const c = tex.image, ctx = c.getContext('2d'), img = ctx.getImageData(0, 0, c.width, c.height), px = img.data;
   for (let i = 0; i < px.length; i += 4) {
+    if (skip && skip[i >> 2]) continue;
     const r = px[i], g = px[i + 1], b = px[i + 2], L0 = (0.299 * r + 0.587 * g + 0.114 * b) / refL;
     // softer light and dark: everything is pulled toward the middle, and near-black spots are fully repainted
-    const L = lift ? Math.max(0.55, 1 + (L0 - 1) * contrast) : L0;
-    const w = lift ? Math.max(rockness(r, g, b) * k, Math.min(1, Math.max(0, (0.55 - L0) / 0.3))) : rockness(r, g, b) * k * Math.min(1, L0 / 0.45);
+    // (dark crust where moss meets rock, half green and half brown, slipped past both recolors: dark pixels are
+    // repainted whatever their hue)
+    // near-black is empty texture (holes, gaps between UV islands), not shading: it gets the plain rock tone, or it
+    // shows as muddy stains on the stone tops
+    const Lc = Math.max(0.62, 1 + (L0 - 1) * contrast), hole = Math.max(0, Math.min(1, (0.28 - L0) / 0.18));
+    const L = lift ? Lc + (0.95 - Lc) * hole : L0;
+    const w = lift ? Math.max(rockness(r, g, b) * k, Math.min(1, Math.max(0, (0.68 - L0) / 0.25))) : rockness(r, g, b) * k * Math.min(1, L0 / 0.45);
     if (w <= 0) continue;
     px[i] = Math.min(255, r + (ref[0] * L - r) * w);
     px[i + 1] = Math.min(255, g + (ref[1] * L - g) * w);
@@ -701,7 +1075,7 @@ function addGrassGlow(mat, scale, rim = false, G = BIOMES.woods.glow) {
         ${rim ? `// warm edge light where a rock side is turned away from the sun (backlit)
         float shade = 1.0 - max(dot(normal, uSunView), 0.0);
         float edge = pow(1.0 - max(dot(normal, normalize(vViewPosition)), 0.0), 3.0);
-        totalEmissiveRadiance += ${G.cave ? 'vec3(0.3, 0.62, 1.0) * edge * shade * 0.35' : 'vec3(1.0, 0.8, 0.52) * edge * shade * 0.75'};` : ''}
+        totalEmissiveRadiance += ${G.cave ? 'vec3(0.3, 0.62, 1.0) * edge * shade * 0.12' : 'vec3(1.0, 0.8, 0.52) * edge * shade * 0.75'};` : ''}
       }`);
   };
   mat.customProgramCacheKey = () => 'grass' + scale + rim + G.hue + G.width + G.amt + (G.sat ?? 0.25) + !!G.cave;
@@ -730,17 +1104,34 @@ function mossMean(tex) {
   return n > 50 ? sum.map(v => v / n) : null;
 }
 // shift a stone's moss and grass toward one shared green, leaving the rock untouched
-function matchMoss(tex, target) {
+function matchMoss(tex, target, skip = null) {
   const mean = mossMean(tex); if (!mean) return;
   const gain = mean.map((m, k) => Math.max(0.6, Math.min(1.6, target[k] / m)));
   const c = tex.image, ctx = c.getContext('2d'), img = ctx.getImageData(0, 0, c.width, c.height), px = img.data;
   for (let i = 0; i < px.length; i += 4) {
+    if (skip && skip[i >> 2]) continue;
     const r = px[i], g = px[i + 1], b = px[i + 2];
     const w = greenness(r, g, b);
     if (w <= 0) continue;
     px[i] = Math.min(255, r * (1 + (gain[0] - 1) * w));
     px[i + 1] = Math.min(255, g * (1 + (gain[1] - 1) * w));
     px[i + 2] = Math.min(255, b * (1 + (gain[2] - 1) * w));
+  }
+  ctx.putImageData(img, 0, 0);
+  tex.needsUpdate = true;
+}
+// some scans have dark, muddy moss (it read as a glitch on the stone tops): moss darker than the shared moss color
+// is brought up to it, keeping a little of its own light and dark
+function liftDarkMoss(tex, ref) {
+  const refL = 0.299 * ref[0] + 0.587 * ref[1] + 0.114 * ref[2];
+  const c = tex.image, ctx = c.getContext('2d'), img = ctx.getImageData(0, 0, c.width, c.height), px = img.data;
+  for (let i = 0; i < px.length; i += 4) {
+    const r = px[i], g = px[i + 1], b = px[i + 2], w = greenness(r, g, b);
+    if (w <= 0) continue;
+    const L = (0.299 * r + 0.587 * g + 0.114 * b) / refL;
+    if (L >= 0.8) continue;
+    const k = w * Math.min(1, (0.8 - L) / 0.35), Lt = 0.72 + 0.2 * L;
+    px[i] += (ref[0] * Lt - r) * k; px[i + 1] += (ref[1] * Lt - g) * k; px[i + 2] += (ref[2] * Lt - b) * k;
   }
   ctx.putImageData(img, 0, 0);
   tex.needsUpdate = true;
@@ -759,6 +1150,24 @@ function matchRock(tex, target, strength = 1) {
   }
   ctx.putImageData(img, 0, 0);
   tex.needsUpdate = true;
+}
+// which texture pixels belong to a door's plant (the tree / cactus above the stone): every triangle above the stone's
+// top is drawn into a mask by its UVs. Colors can't tell a tree's shaded leaves from rock, but height can.
+function plantMask(geo, tex) {
+  const W = tex.image.width, H = tex.image.height, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d'), P = geo.attributes.position, UV = geo.attributes.uv, ix = geo.index ? geo.index.array : null;
+  x.fillStyle = x.strokeStyle = '#fff'; x.lineWidth = 2; x.lineJoin = 'round';
+  const n = ix ? ix.length : P.count, flip = tex.flipY;
+  for (let t = 0; t < n; t += 3) {
+    const a = ix ? ix[t] : t, b = ix ? ix[t + 1] : t + 1, d = ix ? ix[t + 2] : t + 2;
+    if (Math.min(P.getY(a), P.getY(b), P.getY(d)) < 0.012) continue; // part of the stone
+    x.beginPath();
+    for (const v of [a, b, d]) { const u = UV.getX(v) * W, w = (flip ? 1 - UV.getY(v) : UV.getY(v)) * H; v === a ? x.moveTo(u, w) : x.lineTo(u, w); }
+    x.closePath(); x.fill(); x.stroke();
+  }
+  const px = x.getImageData(0, 0, W, H).data, m = new Uint8Array(W * H);
+  for (let i = 0; i < m.length; i++) m[i] = px[i * 4 + 3] > 100 ? 1 : 0;
+  return m;
 }
 // every stone is sized by its body (moss and grass sticking out are ignored) to exactly one tile wide,
 // with its flat top at y = 0 and tall enough to reach under the floor when raised
@@ -916,20 +1325,31 @@ function stoneSet(name) {
     MOSS = B.moss || { hue: B.glow.hue, width: Math.max(0.08, B.glow.width) };
     const means = variants.map(v => rockMean(v.mat.map));
     const rockRef = B.rockColor || means[0].map(v => v * (B.rockGain || 1)); // the first stone of each biome sets the color (unless the biome names one)
-    variants.forEach(v => { matchRock(v.mat.map, rockRef); tintRock(v.mat.map, rockRef, B.tint ?? 0.75, B.contrast ?? 0.65); });
+    variants.forEach(v => { matchRock(v.mat.map, rockRef, B.matchStrength ?? 1); tintRock(v.mat.map, rockRef, B.tint ?? 0.75, B.contrast ?? 0.65); });
     // then every stone gets the same typical brightness as the first (averages are thrown off by dark cracks)
     const midL = rockMedianL(variants[0].mat.map);
     variants.slice(1).forEach(v => scaleRock(v.mat.map, midL / rockMedianL(v.mat.map)));
     PROTECT_TRUNK = true; DOOR_MIN = B.dark ? 25 : 70;
-    tintRock(door.mat.map, rockRef, Math.max(0.85, B.tint ?? 0), 1, false); // doors keep their own shading and the dark cave mouth // the door's stone must read as the same rock
-    scaleRock(door.mat.map, 0.9 * midL / rockMedianL(door.mat.map));
+    // the door's stone must read as the same rock (doors keep their own shading and the dark cave mouth); the cave's
+    // mushroom door is left as it is, so its mushrooms keep their own colors
+    // only the stone part is recolored (the plant is found by height, see plantMask): it reads as the same rock as
+    // the walls, while the tree keeps its own colors and shading
+    const plant = B.doorPlant ? null : plantMask(door.raw, door.mat.map);
+    if (!B.doorPlant) {
+      tintRock(door.mat.map, rockRef, B.doorTint ?? 0.95, 1, false, plant);
+      PROTECT_TRUNK = false;
+      scaleRock(door.mat.map, midL / rockMedianL(door.mat.map), plant);
+    }
     PROTECT_TRUNK = false;
     const mosses = variants.map(v => mossMean(v.mat.map)).filter(Boolean);
     const mossRef = B.mossColor || (mosses.length ? [0, 1, 2].map(k => mosses.reduce((a, m) => a + m[k], 0) / mosses.length) : null);
-    if (mossRef && !B.stepGlow) variants.forEach(v => B.mossColor ? tintMoss(v.mat.map, mossRef, B.mossPalette) : matchMoss(v.mat.map, mossRef));
-    if (glows) variants.forEach((v, i) => Object.assign(v, restoreGlow(v.mat.map, glows[i])));
+    if (mossRef && !B.stepGlow) variants.forEach(v => { B.mossColor ? tintMoss(v.mat.map, mossRef, B.mossPalette) : matchMoss(v.mat.map, mossRef); liftDarkMoss(v.mat.map, mossRef); });
+    if (glows) variants.forEach((v, i) => {
+      flattenHighlights(v.mat.map, rockRef);
+      Object.assign(v, neonGlow(v.mat.map, glows[i], B.glowHues[i % B.glowHues.length], rockRef));
+    });
     // the door's plant: its own color when the biome names one (the cave's mushroom door glows pink), else the moss color
-    if (mossRef) B.doorPlant ? tintMoss(door.mat.map, B.doorPlant) : B.mossColor ? tintMoss(door.mat.map, mossRef) : matchMoss(door.mat.map, mossRef);
+    if (mossRef && !B.doorPlant) matchMoss(door.mat.map, mossRef, plant); // moss on the door's stone matches the walls; the tree is left alone
     MOSS = { hue: 0.27, width: 0.08 };
     variants.forEach(v => addGrassGlow(v.mat, 0.5, false, B.glow)); // the bake renders at half light
     const clip = [new THREE.Plane(new THREE.Vector3(0, 1, 0), -CFG.clipY)];
@@ -945,18 +1365,22 @@ function stoneSet(name) {
     }
     door.mat.clippingPlanes = clip; door.mat.clipShadows = true;
     addGrassGlow(door.mat, 1, true, B.doorGlow || B.glow);
-    // the cave's mushroom door: everything above the stone (the mushroom) turns pink and glows, so it stands out
+    // the cave's mushroom door: the mushrooms above the stone keep their own colors (teal, violet, pink) pushed to
+    // fluorescent, and glow; a soft wave of light runs up the stalks into the caps, which shine brightest
     if (B.doorPlant) {
-      const base = door.mat.onBeforeCompile, P = new THREE.Color(...B.doorPlant.map(v => v / 255));
+      const base = door.mat.onBeforeCompile;
       door.mat.onBeforeCompile = (sh, rr) => {
         base(sh, rr);
-        sh.uniforms.uPlant = { value: P };
+        sh.uniforms.uGlowTime = GLOW_TIME;
         sh.vertexShader = 'varying float vPlantY;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvPlantY = position.y;');
-        sh.fragmentShader = 'uniform vec3 uPlant;\nvarying float vPlantY;\n' + sh.fragmentShader
-          .replace('#include <map_fragment>', '#include <map_fragment>\n{ float pl = smoothstep(0.01, 0.08, vPlantY); float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)); diffuseColor.rgb = mix(diffuseColor.rgb, uPlant * (0.3 + 0.7 * l), pl); }')
-          .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += uPlant * uPlant * smoothstep(0.01, 0.08, vPlantY) * 0.6;');
+        sh.fragmentShader = 'uniform float uGlowTime;\nvarying float vPlantY;\nvec3 neonOf(vec3 c) { float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b)); vec3 h = (c - mn) / max(mx - mn, 1e-3); h.g *= 0.85; return h * 1.15 + 0.04; }\n' + sh.fragmentShader
+          .replace('#include <map_fragment>', '#include <map_fragment>\nfloat pl = smoothstep(0.01, 0.06, vPlantY); vec3 neon = neonOf(diffuseColor.rgb); diffuseColor.rgb = mix(diffuseColor.rgb, neon * 0.3, pl);')
+          .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+          { float up = smoothstep(0.05, 0.45, vPlantY);
+            float wave = 0.5 + 0.5 * sin(uGlowTime * 2.4 - vPlantY * 14.0);
+            totalEmissiveRadiance += neon * neon * neon * pl * (0.2 + 0.45 * up + 0.3 * wave) * (0.85 + 0.15 * sin(uGlowTime * 1.3)); }`);
       };
-      door.mat.customProgramCacheKey = () => 'door-plant';
+      door.mat.customProgramCacheKey = () => 'door-neon';
     }
     return (stoneSets[name] = { variants, wallMats, floorMat: bakeFloor(variants, B), door, rockRef, mossRef });
   })();
@@ -997,9 +1421,11 @@ function makeRaceMaze() {
   return { maze: m, entries, goal: [(N - 1) / 2, (N - 1) / 2] };
 }
 // ---------- door levels ----------
-// From level 6, every 4th level is split in two: no way across on the surface. A door block in your half leads down
+// Door levels (see the level plan) are split in two: no way across on the surface. A door block in your half leads down
 // to a small cave maze; a door there brings you back up in the key's half (like Mario's pipes).
-const isGateway = L => L >= 5 && L % 4 === 1;
+const levelCells = L => levelPlan(L).cells;
+const isGateway = L => L >= 0 && levelPlan(L).gateway;
+const keyDetour = L => levelPlan(L).detour;
 const levelBiome = L => WORLDS[Math.floor(L / LEVELS_PER_WORLD)].biome;
 // two separate mazes, one above and one below a solid middle row; door A below it, door B above it
 function genSplitMaze(C, rnd) {
@@ -1055,7 +1481,11 @@ function applyBiome(name) {
   document.body.dataset.biome = name;
   atmosphere.setDust(B.dust, B.dark);
   atmosphere.setWeather(name);
-  STONE_DUST = B.puffs;
+  // dust in this level's rock color, a little lighter (dust reads paler than the stone), in four shades
+  const rc = (curSet && curSet.rockRef) || [200, 190, 170];
+  STONE_DUST = [1.18, 1.08, 1.28, 0.98].map(k => '#' + new THREE.Color().setRGB(...rc.map(v => Math.min(255, v * k) / 255), THREE.SRGBColorSpace).getHexString());
+  sfx.setBiome(name);
+  puffMat.opacity = B.dark ? 0.8 : 1;
 }
 function buildLevel(level, race = null, opts = {}) {
   L = level; mode = race ? 'race' : 'levels';
@@ -1067,11 +1497,11 @@ function buildLevel(level, race = null, opts = {}) {
   if (floor) { scene.remove(...walls, ...caps, floor, floorShadow, key); for (const m of [...walls, ...caps, floor, floorShadow]) m.dispose(); }
   for (const m of doorMeshes.values()) scene.remove(m);
   doorMeshes.clear();
-  const shape = race || isGateway(L) ? null : levelShape(L);
+  const shape = race || isGateway(L) ? null : levelPlan(L).shape;
   const rnd = mulberry32(L * 9973 + 17);
   maze = race ? race.maze : stage === 'cave' ? genCaveMaze(L) : isGateway(L) ? genSplitMaze(levelCells(L), rnd) : shape ? genShapedMaze(levelCells(L), rnd, shape) : genMaze(levelCells(L), rnd);
   // within a world you see less of the maze around you as the levels go on
-  CFG.revealR = parseFloat(params.get('r') || (race ? world.reveal : world.reveal - 0.35 * (L % LEVELS_PER_WORLD) / (LEVELS_PER_WORLD - 1)));
+  CFG.revealR = parseFloat(params.get('r') || (race ? world.reveal : levelPlan(L).reveal));
   const { N } = maze, T = N * N;
   origin = (N - 1) / 2;
   heights = new Float32Array(T); vels = new Float32Array(T); targets = new Float32Array(T); shake = new Float32Array(T);
@@ -1117,32 +1547,52 @@ function buildLevel(level, race = null, opts = {}) {
     m.castShadow = true;
     m.rotation.y = curSet.door.yaw + Math.atan2(-(d.out[1] - d.z), d.out[0] - d.x); // cave mouth toward the side you arrive from
     m.userData = d;
+    if (bName === 'cave') { // the glowing mushrooms light the stones around them
+      const glow = new THREE.PointLight('#c77dff', 1.4, 3, 1.5);
+      glow.position.y = 0.7; m.add(glow);
+      const halo = new THREE.Sprite(doorHaloMat); // a soft magical haze around the mushrooms
+      halo.position.y = 0.55; halo.scale.setScalar(1.6); m.add(halo);
+    }
     scene.add(m);
     doorMeshes.set(d.z * N + d.x, m);
   }
   placeScenery();
   if (mazeGrass) mazeGrass.visible = false;
-  if (bName === 'woods') meadowReady.then(() => { if (maze && biome === 'woods') buildMazeGrass(meadow); });
-  if (bName === 'autumn') buildMazeGrass(leafLitter(), 0.95, 3.6, 0.3);
+  // every biome's own ground, faded out around the maze (grass, sand, snow, golden grass, dark cave rock)
+  buildMazeGrass(groundTexture(bName), bName === 'cave' ? 0.7 : bName === 'snow' ? 0.75 : 0.85);
   key = makeKey();
   start = opts.spawn || (race ? race.entries[0] : maze.start || [N - 2, N - 2]);
-  goal = race ? race.goal : stage === 'cave' ? [-9, -9] : maze.goal || [1, 1]; // no key in the cave
-  key.position.set(goal[0] - origin, 0.55, goal[1] - origin);
-  key.visible = stage !== 'cave';
+  goal = race ? race.goal : stage === 'cave' ? [-9, -9] : maze.goal || [1, 1]; // the portal (none in the cave)
+  if (!opts.keep) hasKey = false;
+  // the key: in a race it's the prize in the middle; on a door level it waits in the cave; elsewhere down a side path
+  keyAt = race ? goal : isGateway(L) ? (stage === 'cave' ? keyTile(maze, maze.doors[0].out, maze.doors[1].out, keyDetour(L)) : null) : keyTile(maze, start, goal, keyDetour(L));
+  key.visible = !!keyAt && !hasKey;
+  key.userData.grab = -1;
+  if (keyAt) key.position.set(keyAt[0] - origin, 0.55, keyAt[1] - origin);
   scene.add(key);
+  if (portal) scene.remove(portal);
+  portal = makePortal(curSet, bName); // rebuilt each level from that level's stones
+  portal.visible = !race && stage !== 'cave';
+  portal.position.set(goal[0] - origin, 0, goal[1] - origin);
+  portal.rotation.y = portalYaw(goal);
+  portal.userData.on = hasKey ? 1 : 0;
+  scene.add(portal);
+  $('keyHud').style.display = race ? 'none' : '';
+  $('keyHud').classList.toggle('got', hasKey);
 
   st.gx = st.tx = st.fx = start[0]; st.gz = st.tz = st.fz = start[1];
   st.t = 1; st.moving = false;
   if (!opts.keep) { st.facing = -Math.PI / 4; steps = 0; elapsed = 0; }
   won = false; heldDir = queued = null;
   if (opts.keep) { /* stats carry over through the doors */ }
-  else if (isGateway(L) && !race) { // best path: to door A, through the cave, then from door B to the key
-    const [a, b] = maze.doors, cave = genCaveMaze(L);
-    optimal = shortestPath(maze, start[0], start[1], a.out[0], a.out[1]) + shortestPath(cave, cave.doors[0].out[0], cave.doors[0].out[1], cave.doors[1].out[0], cave.doors[1].out[1]) + shortestPath(maze, b.out[0], b.out[1], goal[0], goal[1]) + 4;
-  } else optimal = shortestPath(maze, start[0], start[1], goal[0], goal[1]);
+  else if (isGateway(L) && !race) { // best path: to door A, through the cave by way of the key, then from door B to the portal
+    const [a, b] = maze.doors, cave = genCaveMaze(L), [ca, cb] = cave.doors, k = keyTile(cave, ca.out, cb.out, keyDetour(L));
+    optimal = shortestPath(maze, start[0], start[1], a.out[0], a.out[1]) + shortestPath(cave, ca.out[0], ca.out[1], k[0], k[1]) + shortestPath(cave, k[0], k[1], cb.out[0], cb.out[1]) + shortestPath(maze, b.out[0], b.out[1], goal[0], goal[1]) + 4;
+  } else optimal = race ? shortestPath(maze, start[0], start[1], goal[0], goal[1]) : shortestPath(maze, start[0], start[1], keyAt[0], keyAt[1]) + shortestPath(maze, keyAt[0], keyAt[1], goal[0], goal[1]);
   ui.level.textContent = race ? 'RACE' : `${Math.floor(L / LEVELS_PER_WORLD) + 1}-${L % LEVELS_PER_WORLD + 1}`;
   ui.steps.textContent = steps;
-  ui.hint.classList.toggle('on', !race && L === 0 && !opts.keep);
+  $('worldBadgeIco').setAttribute('href', '#' + (race ? 'i-flag' : stage === 'cave' ? 'i-w-cave' : world.icon));
+  coach.level(race ? -1 : L, stage, opts.keep);
   for (const r of rivals) scene.remove(r.root);
   keyDist = null;
   if (race) { // walking distance from every tile to the key, for the live ranking
@@ -1226,11 +1676,13 @@ async function loadScenery() {
       const s = 1 / Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z); // footprint 1 x 1, bottom at 0
       geo.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2).scale(s, s, s);
       const map = canvasTexture(pm.material.map, 512);
+      const orig = document.createElement('canvas'); orig.width = map.image.width; orig.height = map.image.height;
+      orig.getContext('2d').drawImage(map.image, 0, 0); // kept untouched: each biome recolors its own copy
       matchRock(map, assets.rockRef, 0.7);
       matchMoss(map, assets.mossRef);
       const mat = new THREE.MeshStandardMaterial({ map, roughness: 0.92, metalness: 0, clippingPlanes: groundClip });
       addGrassGlow(mat, 1);
-      sceneryModels[kind].push({ geo, mat, h: (bb.max.y - bb.min.y) * s });
+      sceneryModels[kind].push({ geo, mat, orig, mats: { woods: mat }, h: (bb.max.y - bb.min.y) * s });
       if (maze) placeScenery();
     } catch (e) { console.warn('scenery', url, e); }
   }
@@ -1239,7 +1691,7 @@ async function loadScenery() {
 const meadow = document.createElement('canvas'); meadow.width = meadow.height = 256;
 const meadowReady = new Promise(res => {
   const img = new Image();
-  img.onload = () => { meadow.getContext('2d').drawImage(img, 470, 640, 400, 400, 0, 0, 256, 256); res(); };
+  img.onload = () => { meadow.getContext('2d').drawImage(img, 470, 640, 400, 400, 0, 0, 256, 256); meadow.dataset.ok = '1'; res(); };
   img.src = 'assets/map/woods.webp';
 });
 // a round patch of grass under a structure: strongest at its base, fading out quickly to the white floor
@@ -1296,32 +1748,63 @@ function leafLitter() {
   return (leafLitterC = c);
 }
 function buildMazeGrass(pattern, opacity = 0.85, spread = 2.4, dab = 0.22) {
-  if (mazeGrass) { scene.remove(mazeGrass); mazeGrass.material.map.dispose(); mazeGrass.material.dispose(); mazeGrass = null; }
-  const { N } = maze, M = N + 8, PX = 512, k = PX / M, c = document.createElement('canvas');
+  if (mazeGrass) { scene.remove(mazeGrass); mazeGrass.material.map.dispose(); mazeGrass.material.alphaMap.dispose(); mazeGrass.material.dispose(); mazeGrass = null; }
+  const { N } = maze, M = N + 10, PX = 512, k = PX / M, c = document.createElement('canvas');
   c.width = c.height = PX;
   const x = c.getContext('2d');
-  // soft brush dabs on every tile of the maze build up the shape with feathered edges
+  x.fillStyle = '#000'; x.fillRect(0, 0, PX, PX);
+  // soft brush dabs on every tile of the maze build up the shape, feathering out past its edges
   for (let z = 0; z < N; z++) for (let gx = 0; gx < N; gx++) {
     if (maze.empty && maze.empty[z * N + gx]) continue;
-    const cx = (gx + 4.5) * k, cy = (z + 4.5) * k, r = spread * k;
+    const cx = (gx + 5.5) * k, cy = (z + 5.5) * k, r = spread * k;
     const g = x.createRadialGradient(cx, cy, 0, cx, cy, r);
     g.addColorStop(0, `rgba(255,255,255,${dab})`); g.addColorStop(1, 'rgba(255,255,255,0)');
     x.fillStyle = g; x.fillRect(cx - r, cy - r, r * 2, r * 2);
   }
-  x.globalCompositeOperation = 'source-in';
-  x.fillStyle = x.createPattern(pattern, 'repeat');
-  x.fillRect(0, 0, PX, PX);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
+  const mask = new THREE.CanvasTexture(c);
+  const tex = new THREE.CanvasTexture(pattern); tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(M / 3.2, M / 3.2); tex.anisotropy = 8; // fine, never blurry
   mazeGrass = new THREE.Mesh(new THREE.PlaneGeometry(M, M).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity, depthWrite: false, toneMapped: false }));
+    new THREE.MeshBasicMaterial({ map: tex, alphaMap: mask, transparent: true, opacity, depthWrite: false, toneMapped: false }));
   mazeGrass.position.set(0, GROUND_Y + 0.003, 0);
   mazeGrass.renderOrder = 1;
   mazeGrass.layers.set(1);
   scene.add(mazeGrass);
 }
+// the old ruins in each biome's own colors: the stone takes the biome's rock color, and the moss becomes snow on the
+// peaks, orange in the autumn grove and dry grass in the dunes
+const DECOR_MOSS = { desert: [196, 178, 108], snow: [238, 242, 249], autumn: [216, 130, 58] };
+function decorMat(m, b) {
+  if (m.mats[b]) return m.mats[b];
+  const set = stoneSets[b]; if (!set) return m.mat;
+  const c = document.createElement('canvas'); c.width = m.orig.width; c.height = m.orig.height;
+  c.getContext('2d', { willReadFrequently: true }).drawImage(m.orig, 0, 0);
+  const map = new THREE.CanvasTexture(c); map.flipY = m.mat.map.flipY; map.colorSpace = m.mat.map.colorSpace; map.anisotropy = 4;
+  const keep = MOSS; MOSS = { hue: 0.27, width: 0.1 }; // the scans' moss is green, whatever the biome
+  matchRock(map, set.rockRef, 0.85);
+  tintRock(map, set.rockRef, 0.6, 0.7);
+  if (DECOR_MOSS[b]) tintMoss(map, DECOR_MOSS[b]); else if (set.mossRef) matchMoss(map, set.mossRef);
+  MOSS = keep;
+  const mat = new THREE.MeshStandardMaterial({ map, roughness: 0.92, metalness: 0, clippingPlanes: groundClip });
+  addGrassGlow(mat, 1, false, b === 'snow' ? { hue: 0.6, width: 0.01, amt: 0 } : BIOMES[b].glow);
+  return (m.mats[b] = mat);
+}
+// the soft patch of ground under each ruin, in the biome's own ground
+const patchMats = {};
+function patchMat(b) {
+  if (patchMats[b]) return patchMats[b];
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const x = c.getContext('2d');
+  x.drawImage(groundTexture(b), 0, 0, 256, 256);
+  x.globalCompositeOperation = 'destination-in';
+  const g = x.createRadialGradient(128, 128, 0, 128, 128, 128);
+  g.addColorStop(0, 'rgba(0,0,0,.9)'); g.addColorStop(0.3, 'rgba(0,0,0,.55)'); g.addColorStop(0.65, 'rgba(0,0,0,.15)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  return (patchMats[b] = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false }));
+}
 function placeScenery() {
-  for (const m of sceneryGroup.children) if (m.material !== grassPatch.mat) m.material.dispose();
+  for (const m of sceneryGroup.children) if (!Object.values(patchMats).includes(m.material) && m.material !== grassPatch.mat) m.material.dispose();
   sceneryGroup.clear();
   if (!maze) return;
   const rnd = mulberry32(L * 31 + 7), half = maze.N / 2, spots = [];
@@ -1336,9 +1819,9 @@ function placeScenery() {
       if (Math.max(Math.abs(x), Math.abs(z)) - size / 2 < half + K.inner - size / 2) continue;
       if (spots.some(p => Math.hypot(p[0] - x, p[1] - z) < (p[2] + size) / 2 + K.gap * 0.3)) continue;
       spots.push([x, z, size]);
-      const m = models[Math.floor(rnd() * models.length)];
-      const mat = m.mat.clone();
-      mat.onBeforeCompile = m.mat.onBeforeCompile;
+      const m = models[Math.floor(rnd() * models.length)], base = decorMat(m, biome);
+      const mat = base.clone();
+      mat.onBeforeCompile = base.onBeforeCompile;
       addHaze(mat);
       const h = m.h * size, sink = K.sink[0] + rnd() * (K.sink[1] - K.sink[0]);
       mat.userData.haze.uHazeTop.value = h * (1 - sink) * 0.1; // the grass patch carries the fade now; just soften the very base
@@ -1348,7 +1831,7 @@ function placeScenery() {
       mesh.position.set(x, GROUND_Y - h * sink, z);
       mesh.layers.set(1);
       sceneryGroup.add(mesh);
-      const patch = new THREE.Mesh(grassPatch.geo, grassPatch.mat);
+      const patch = new THREE.Mesh(grassPatch.geo, patchMat(biome));
       patch.scale.setScalar(size * (1.4 + rnd() * 0.35)); // hugs the base
       patch.rotation.y = rnd() * Math.PI * 2;
       patch.position.set(x, GROUND_Y + 0.004, z);
@@ -1442,6 +1925,34 @@ function addWalk(mat, { outline = 0, outfit = false, U = walkU, T = TINT } = {})
   mat.customProgramCacheKey = () => 'walk' + outline + outfit;
 }
 
+// dizzy stars: three little stars circle Buddy's head after he bumps into a wall
+const dizzy = { t: -1, group: new THREE.Group() };
+{
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d');
+  x.translate(32, 32); x.beginPath();
+  for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2 - Math.PI / 2, r = i % 2 ? 11 : 26; x.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+  x.closePath(); x.lineJoin = 'round'; x.lineWidth = 7; x.strokeStyle = '#fff'; x.stroke(); x.fillStyle = '#ffcf3d'; x.fill();
+  const mat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false });
+  for (let i = 0; i < 3; i++) { const sp = new THREE.Sprite(mat); sp.scale.setScalar(0.13); dizzy.group.add(sp); }
+  dizzy.group.visible = false; dizzy.group.renderOrder = 30;
+}
+function updateDizzy(dt) {
+  const g = dizzy.group;
+  if (dizzy.t < 0) { g.visible = false; return; }
+  dizzy.t += dt;
+  const k = dizzy.t / 1.2;
+  if (k >= 1) { dizzy.t = -1; g.visible = false; return; }
+  g.visible = true;
+  g.position.set(player.position.x, player.position.y + CFG.charH + 0.2, player.position.z);
+  const pop = k < 0.15 ? easeOutBack(k / 0.15) : k > 0.8 ? 1 - (k - 0.8) / 0.2 : 1;
+  g.children.forEach((sp, i) => {
+    const a = dizzy.t * 7 + i * Math.PI * 2 / 3;
+    sp.position.set(Math.cos(a) * 0.24, Math.sin(a * 2) * 0.03, Math.sin(a) * 0.24);
+    sp.scale.setScalar(0.13 * Math.max(0.001, pop));
+    sp.material.rotation = dizzy.t * 4;
+  });
+}
 function setupPlayer() {
   player = new THREE.Group();
   const inner = assets.char.clone(true);
@@ -1466,8 +1977,49 @@ function setupPlayer() {
   silhouette.traverse(o => { if (o.isMesh) { o.material = silMat; o.castShadow = false; o.renderOrder = 10; } });
   body.add(silhouette);
   scene.add(player);
+  scene.add(dizzy.group);
 }
 
+// a short message over the game (throttled so walking into the same thing doesn't spam it)
+let toastT = 0;
+function toast(text) {
+  const now = performance.now(); if (now - toastT < 1500) return; toastT = now;
+  const el = $('toast'); el.firstChild.textContent = text;
+  el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
+}
+let enterT = 0;
+// the key leaves the 3D world as a little icon and arcs up into its slot in the HUD, which pops when it lands
+function flyKeyToHud() {
+  const p = key.position.clone().project(camera);
+  key.visible = false; key.scale.setScalar(1);
+  const x0 = (p.x + 1) / 2 * innerWidth, y0 = (1 - p.y) / 2 * innerHeight;
+  const slot = $('keyHud').getBoundingClientRect(), x1 = slot.left + slot.width / 2, y1 = slot.top + slot.height / 2;
+  const el = document.createElement('div'); el.className = 'keyfly';
+  el.innerHTML = '<svg class="ico"><use href="#i-key"/></svg>';
+  document.body.appendChild(el);
+  const mx = (x0 + x1) / 2 + 80, my = Math.min(y0, y1) - 90; // the arc's high point
+  const frames = [];
+  for (let i = 0; i <= 20; i++) {
+    const t = i / 20, e = t * t * (3 - 2 * t), u = 1 - e;
+    const x = u * u * x0 + 2 * u * e * mx + e * e * x1, y = u * u * y0 + 2 * u * e * my + e * e * y1;
+    frames.push({ transform: `translate(${x}px, ${y}px) translate(-50%, -50%) rotate(${-25 + 385 * e}deg) scale(${1.5 - 0.6 * e})`, opacity: t < 0.08 ? t / 0.08 : 1 });
+  }
+  el.animate(frames, { duration: 750, easing: 'linear' }).onfinish = () => {
+    el.remove();
+    $('keyHud').classList.add('got');
+    sfx.ui('toggle', 0.4);
+  };
+}
+const _pp = new THREE.Vector3();
+function collectKey() {
+  hasKey = true;
+  key.userData.grab = 0;
+  sfx.ui('chime', 0.45);
+  const p = key.position;
+  for (let i = 0; i < 14; i++) { const a = i / 14 * Math.PI * 2; spawnPuff(p.x, 0.5, p.z, Math.cos(a) * 1.2, rand(0.3, 1), Math.sin(a) * 1.2, rand(0.05, 0.08), i % 2 ? '#ffd04d' : '#ffffff', 0.55); }
+  toast('Got the key! Now find the portal');
+  coach.keyGot();
+}
 function tryMove(dx, dz) {
   if (won || state !== 'play' || warp.t >= 0) return false; // also stops the race once someone has the key
   if (intro.t >= 0) { skipIntro(); return false; }
@@ -1485,7 +2037,7 @@ function tryMove(dx, dz) {
   updateTargets(false);
   const p = worldPos(st.gx, st.gz);
   footPuffs(p.x, p.z, dx, dz);
-  if (steps === 1) ui.hint.classList.remove('on');
+  coach.step(steps);
   return true;
 }
 
@@ -1547,35 +2099,55 @@ function updateWarp(dt) {
 function updatePlayer(dt, time) {
   if (warp.t >= 0) return; // the door animation drives Buddy
   const body = player.userData.body;
+  if (won && mode !== 'race') { // hop into the portal: drift to its middle, spin and shrink away
+    const k = Math.min(1, (enterT += dt) / 0.7), e = k * k;
+    player.position.lerp(_pp.set(portal.position.x, 0.25 * Math.sin(Math.PI * k), portal.position.z), Math.min(1, dt * 8));
+    player.rotation.y += dt * (4 + 14 * e);
+    body.scale.setScalar(Math.max(0.001, 1 - e));
+    return;
+  }
   let x, z, y = 0, sq = 1;
   if (st.moving) {
     st.t = Math.min(1, st.t + dt / CFG.stepTime);
     const e = st.t;
     x = st.fx + (st.tx - st.fx) * e; z = st.fz + (st.tz - st.fz) * e;
-    y = Math.abs(Math.sin(walkU.uPhase.value)) * 0.05;
+    // springy steps: a hop each step, stretched at the top and squashed on landing
+    const ph = walkU.uPhase.value;
+    y = Math.abs(Math.sin(ph)) * 0.075;
+    sq = 1 - 0.06 * Math.cos(2 * ph);
+    st.idle = 0;
     if (st.t >= 1) {
       st.moving = false; st.gx = st.tx; st.gz = st.tz;
       sfx.play('step', 0.62, 0, { maxDur: 0.26 });
       const p = worldPos(st.gx, st.gz);
       footPuffs(p.x, p.z, st.tx - st.fx, st.tz - st.fz, 0.7);
-      if (st.gx === goal[0] && st.gz === goal[1]) return mode === 'race' ? raceEnd(null) : win();
+      if (mode !== 'race' && keyAt && !hasKey && st.gx === keyAt[0] && st.gz === keyAt[1]) collectKey();
+      if (st.gx === goal[0] && st.gz === goal[1]) {
+        if (mode === 'race') return raceEnd(null);
+        if (hasKey) return win();
+        toast('The portal is asleep. Find the key!'); sfx.ui('nope', 0.3);
+      }
       const next = queued || heldDir; queued = null;
       if (next) tryMove(next[0], next[1]);
     }
   } else {
     x = st.gx; z = st.gz;
-    sq = 1 + Math.sin(time * 3) * 0.015;
+    sq = 1 + Math.sin(time * 3) * 0.02; // breathing
+    if (st.bumpT < 0 && intro.t < 0 && !won) st.idle += dt;
   }
+  // after a while of waiting, he turns to you and waves now and then
+  const idleWave = false; // (no waving while waiting)
   // walk cycle: one full stride every two tiles; eases out when the character stops
   // intro wave: faces the camera and waves while the camera comes down, then turns back to the maze
-  walkU.uWave.value += ((intro.wave ? 1 : 0) - walkU.uWave.value) * Math.min(1, dt * 5);
+  walkU.uWave.value += ((intro.wave || idleWave ? 1 : 0) - walkU.uWave.value) * Math.min(1, dt * 5);
+  if (intro.wave || idleWave) y += Math.abs(Math.sin(time * 6.5)) * 0.045; // bouncing while waving
   walkU.uWaveT.value += dt * 9;
   const walking = st.moving || (heldDir && st.bumpT < 0);
   walkU.uAmp.value += ((walking ? 1 : 0) - walkU.uAmp.value) * Math.min(1, dt * 12);
   if (walkU.uAmp.value > 0.01) walkU.uPhase.value += dt * Math.PI / CFG.stepTime;
   else walkU.uPhase.value = 0;
   const amp = walkU.uAmp.value;
-  body.rotation.z = -0.12 * amp;                                   // lean forward
+  body.rotation.z = -0.12 * amp + (1 - amp) * Math.sin(time * 1.7) * 0.035; // lean forward when walking, a gentle sway when not
   body.rotation.x = Math.sin(walkU.uPhase.value) * 0.07 * amp;     // waddle
   // bumping into a wall: lunge, squash on impact, bounce back with a hop and flailing arms, then a dizzy wobble
   walkU.uHurt.value = walkU.uHurtWig.value = 0;
@@ -1585,6 +2157,7 @@ function updatePlayer(dt, time) {
     const t = st.bumpT, u = Math.max(0, t - HIT);
     if (prev < HIT && t >= HIT) {
       sfx.play('bump', 0.55);
+      dizzy.t = 0;
       const p = player.position, sx = -st.bdz, sz = st.bdx; // sideways along the wall face
       const fx = p.x + st.bdx * 0.42, fz = p.z + st.bdz * 0.42;
       for (const side of [-1, 0, 1]) { // three puffs off the wall face, same dust as the rising stones
@@ -1600,8 +2173,8 @@ function updatePlayer(dt, time) {
     walkU.uHurt.value = hurt;
     walkU.uHurtWig.value = Math.sin(u * 30) * hurt * 0.5;
     if (u > 0) {
-      y += u < 0.3 ? Math.sin(Math.PI * u / 0.3) * 0.08 : 0;
-      sq *= 1 - 0.2 * Math.exp(-u * 18) + (u < 0.3 ? Math.sin(Math.PI * u / 0.3) * 0.05 : 0);
+      y += u < 0.32 ? Math.sin(Math.PI * u / 0.32) * 0.15 : u < 0.5 ? Math.sin(Math.PI * (u - 0.32) / 0.18) * 0.04 : 0; // a hop and a little rebound
+      sq *= 1 - 0.3 * Math.exp(-u * 16) + (u < 0.32 ? Math.sin(Math.PI * u / 0.32) * 0.08 : 0);
       body.rotation.z += 0.3 * Math.exp(-u * 7);                      // lean back from the hit
       body.rotation.x += 0.22 * Math.sin(u * 28) * Math.exp(-u * 4);   // dizzy wobble
     }
@@ -1609,7 +2182,8 @@ function updatePlayer(dt, time) {
   }
   player.position.set(x - origin, y, z - origin);
   body.scale.set(1 / Math.sqrt(sq), sq, 1 / Math.sqrt(sq));
-  let d = st.facing - player.rotation.y;
+  updateDizzy(dt);
+  let d = (idleWave ? -Math.PI / 4 : st.facing) - player.rotation.y;
   d = Math.atan2(Math.sin(d), Math.cos(d));
   player.rotation.y += d * Math.min(1, dt * 18);
 }
@@ -1722,8 +2296,9 @@ function raceEnd(winner) {
   const teamWin = raceTeam && winner && winner.team;
   if (place === 0 || teamWin) { raceWins++; try { localStorage.setItem('hidden-maze-race-wins', raceWins); } catch {} }
   $('raceTitle').textContent = place === 0 ? (raceTeam ? 'Your team wins!' : 'You win!') : teamWin ? 'Your team wins!' : 'So close!';
-  $('raceStats').textContent = `${fmt(Math.round(elapsed))}`;
-  $('raceBadge').textContent = place === 0 || teamWin ? '🏆' : ['🥈', '🥉'][place - 1] || '💨';
+  $('raceStats').innerHTML = chip('i-clock', fmt(Math.round(elapsed))) + chip('i-steps', `${steps} steps`);
+  $('raceBadge').classList.toggle('gold', place === 0 || !!teamWin);
+  $('raceBadge').innerHTML = `<svg class="ico"><use href="#${place === 0 || teamWin ? 'i-trophy' : 'i-flag'}"/></svg>`;
   $('raceRank').innerHTML = ranking.map((e, i) => `<li class="${!e.who || e.who.team ? 'me' : ''}"><b>${ORD[i]}</b><i style="background:${e.who ? e.who.color : SKINS[skin]}"></i>` +
     `${e.who ? (e.who.team ? 'Teammate' : COLOR_NAMES[e.who.skinIdx] + ' Buddy') : 'You'}</li>`).join('');
   setTimeout(() => show('raceEnd'), 700);
@@ -1768,9 +2343,10 @@ function updateRaceUI() {
 function startRace() { raceSize = raceCfg.racers; raceTeam = raceCfg.mates > 0; buildLevel(-1, makeRaceMaze()); setupRaceUI(); show('play'); intro.t = 0; intro.warm = 3; intro.wave = false; lastCount = -1; }
 
 function win() {
-  won = true;
+  won = true; enterT = 0;
+  sfx.ui('whoosh', 0.45);
   heldDir = queued = null;
-  const p = key.position;
+  const p = portal.position.clone().setY(0.45);
   for (let i = 0; i < 18; i++) {
     const a = (i / 18) * Math.PI * 2;
     spawnPuff(p.x, 0.3, p.z, Math.cos(a) * 1.6, rand(0.5, 1.4), Math.sin(a) * 1.6, rand(0.06, 0.1), i % 2 ? '#f2c14e' : '#ffffff', 0.6);
@@ -1780,8 +2356,10 @@ function win() {
   const wasLocked = L + 1 < TOTAL_LEVELS && !unlocked(L + 1);
   save.set(L, stars);
   const newWorld = wasLocked && (L + 1) % LEVELS_PER_WORLD === 0 ? WORLDS[(L + 1) / LEVELS_PER_WORLD] : null;
-  $('winStats').textContent = `${steps} steps · ${fmt(Math.round(elapsed))} · best path ${optimal}`;
-  $('unlockText').textContent = newWorld ? `New world! ${newWorld.icon} ${newWorld.name}` : '';
+  $('winStats').innerHTML = chip('i-steps', `${steps} steps`) + chip('i-clock', fmt(Math.round(elapsed))) + chip('i-flag', `best ${optimal}`);
+  $('unlockText').innerHTML = newWorld ? `<svg class="ico"><use href="#${newWorld.icon}"/></svg>New world: ${newWorld.name}` : '';
+  confetti();
+  coach.done();
   $('unlockMsg').classList.toggle('on', !!newWorld);
   $('nextBtn').firstChild.textContent = L + 1 < TOTAL_LEVELS ? 'Next' : 'Map';
   const starEls = [...$('winStars').children];
@@ -1792,9 +2370,89 @@ function win() {
   }, 700);
 }
 const fmt = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+const chip = (icon, text) => `<span class="chip"><svg class="ico"><use href="#${icon}"/></svg>${text}</span>`;
+// a little burst of paper confetti behind the win card
+function confetti() {
+  const COL = ['#6cc15a', '#ffc64a', '#ff8c6b', '#6dbef0', '#f27ba6', '#9c84ee'];
+  $('confetti').innerHTML = Array.from({ length: 26 }, (_, i) => {
+    const a = (i / 26) * Math.PI * 2 + Math.random() * 0.3, d = 140 + Math.random() * 120;
+    return `<i style="--c:${COL[i % COL.length]};--x:${Math.cos(a) * d * 1.3}px;--y:${Math.sin(a) * d - 60}px;--r:${Math.random() * 720 - 360}deg;--w:${0.75 + Math.random() * 0.2}s"></i>`;
+  }).join('');
+}
+
+// ---------- the continue card's picture: the world's doorway, rendered once into an image ----------
+const previews = {};
+function doorPreview(b) {
+  return previews[b] ||= stoneSet(b).then(set => {
+    const S = 512, sc = new THREE.Scene();
+    addLights(sc, false, BIOMES[b]);
+    sc.traverse(o => { if (o.isLight) o.intensity *= 0.85; }); // (no tone mapping off-screen: a little less light)
+    sc.environment = scene.environment; sc.environmentIntensity = 0.3;
+    const m = new THREE.Mesh(set.door.raw, set.door.mat); m.rotation.y = set.door.yaw - 0.55; sc.add(m); // the stone is cut at the floor, like in the maze
+    const cam = new THREE.PerspectiveCamera(24, 1, 0.1, 30); cam.position.set(2.4, 2.1, 2.9); cam.lookAt(0, 0.38, 0);
+    const rt = new THREE.WebGLRenderTarget(S, S, { colorSpace: THREE.SRGBColorSpace });
+    renderer.setClearColor(0x000000, 0); renderer.setRenderTarget(rt); renderer.clear(); renderer.render(sc, cam);
+    const px = new Uint8Array(S * S * 4); renderer.readRenderTargetPixels(rt, 0, 0, S, S, px);
+    renderer.setRenderTarget(null); renderer.setClearColor(0x000000, 1); rt.dispose();
+    const c = document.createElement('canvas'); c.width = c.height = S;
+    const x = c.getContext('2d'), img = x.createImageData(S, S);
+    for (let y = 0; y < S; y++) img.data.set(px.subarray((S - 1 - y) * S * 4, (S - y) * S * 4), y * S * 4); // flip: GL rows go up
+    x.putImageData(img, 0, 0);
+    const out = document.createElement('canvas'); out.width = out.height = 256; // drawn down for smooth edges
+    out.getContext('2d').drawImage(c, 0, 0, 256, 256);
+    return out.toDataURL();
+  });
+}
+
+// ---------- first steps: a friendly guide on the first level (and the first door and cave) ----------
+const coach = (() => {
+  const el = $('coach');
+  let seen = {};
+  try { seen = JSON.parse(localStorage.getItem('hidden-maze-tut') || '{}'); } catch {}
+  const remember = id => { seen[id] = 1; try { localStorage.setItem('hidden-maze-tut', JSON.stringify(seen)); } catch {} };
+  const ico = id => `<svg class="ico"><use href="#${id}"/></svg>`;
+  const TIPS = {
+    move: { pic: '<div class="keys"><b>W</b><b>A</b><b>S</b><b>D</b></div>', title: 'Hello, explorer!', text: 'Walk with <kbd>W A S D</kbd> or the arrow keys. Hold a key to keep walking.' },
+    hidden: { pic: ico('i-eye'), title: 'The maze is hidden', text: 'Walls only rise around you, then sink back down. Remember the way you came!' },
+    key: { pic: ico('i-key'), title: 'Find the golden key', text: 'It waits at the end of a side path somewhere in the maze.' },
+    portal: { pic: ico('i-portal'), title: 'Now, the portal!', text: 'The stone portal woke up. Walk into it to finish the level.' },
+    door: { pic: ico('i-w-woods'), title: 'A tree doorway', text: 'This maze is in two halves. Step into the doorway to go underground.' },
+    cave: { pic: ico('i-w-cave'), title: 'Under the ground', text: 'The moss glows where you step. Find the key, then the other door back up.' },
+  };
+  const BASICS = ['move', 'hidden', 'key', 'portal'];
+  let cur = null, pending = null, basics = false, until = 0;
+  function show(id, secs = 0) {
+    cur = id; const T = TIPS[id];
+    $('coachPic').innerHTML = T.pic; $('coachTitle').textContent = T.title; $('coachText').innerHTML = T.text;
+    $('coachDots').innerHTML = basics ? BASICS.map(b => `<i class="${b === id ? 'on' : ''}"></i>`).join('') : '';
+    until = secs ? performance.now() + secs * 1000 : 0;
+    el.classList.remove('on'); void el.offsetWidth;
+  }
+  return {
+    level(L, stage, keep) {
+      if (keep) { if (stage === 'cave' && !seen.cave) { pending = 'cave'; remember('cave'); } else if (cur === 'door') cur = null; return; }
+      cur = pending = null; basics = false;
+      if (L === 0 && !seen.basics) { basics = true; pending = 'move'; }
+      else if (L >= 0 && isGateway(L) && !seen.door) { pending = 'door'; remember('door'); }
+    },
+    step(n) {
+      if (!basics) return;
+      if (cur === 'move' && n >= 4) show('hidden');
+      else if (cur === 'hidden' && n >= 14) show('key');
+    },
+    keyGot() { if (basics) show('portal'); },
+    done() { if (basics) remember('basics'); basics = false; cur = pending = null; },
+    tick() {
+      if (pending && state === 'play' && intro.t < 0 && warp.t < 0) { show(pending, pending === 'door' ? 9 : pending === 'cave' ? 8 : 0); pending = null; }
+      if (until && performance.now() > until) { cur = null; until = 0; }
+      el.classList.toggle('on', !!cur && state === 'play' && intro.t < 0 && warp.t < 0 && !won);
+    },
+  };
+})();
 
 // ---------- menus ----------
 function show(name) {
+  if (name !== state) { if (['pause', 'settings', 'race', 'win', 'raceEnd'].includes(name)) sfx.ui('modal', 0.4); else if (name === 'worlds' || name === 'outfit') sfx.ui('whoosh', 0.3); }
   state = name;
   document.body.dataset.state = name;
   for (const el of document.querySelectorAll('.screen')) el.classList.toggle('show', el.id === name);
@@ -1804,9 +2462,9 @@ function show(name) {
     $('playSub').textContent = `Level ${Math.floor(n / LEVELS_PER_WORLD) + 1}-${n % LEVELS_PER_WORLD + 1}`;
     $('starCount').textContent = Array.from({ length: TOTAL_LEVELS }, (_, k) => save.stars(k)).reduce((a, b) => a + b, 0);
     const wd = WORLDS[Math.floor(n / LEVELS_PER_WORLD)];
-    $('worldName').textContent = $('worldNameCard').textContent = wd.name;
-    $('contArt').innerHTML = `<span>${wd.icon}</span>`;
-    $('contArt').style.setProperty('--wc', { woods: '#a6dc8f', desert: '#ffd58a', snow: '#bfe0fb', autumn: '#ffb98a' }[wd.biome]);
+    $('worldNameCard').textContent = wd.name;
+    $('contArt').style.setProperty('--wc', wd.card);
+    doorPreview(wd.biome).then(url => { $('contArt').innerHTML = `<img alt="" src="${url}">`; });
   }
   if (name === 'title' || name === 'outfit') $(name).querySelector('.faceSlot').appendChild($('faceCanvas'));
   if ((name === 'settings' && settingsBack === 'title') || name === 'race') $('title').classList.add('show'); // these panels sit over the title
@@ -1822,58 +2480,80 @@ async function play(level) {
   buildLevel(level); show('play'); intro.t = 0; intro.warm = 3; intro.wave = false;
 }
 
-// adventure map: zones stacked bottom (world 1) to top. A world with a painted map shows it once, scaled to the
-// zone's height with the meadow in the middle, fading to white at the top and bottom. A dirt path winds through the
-// meadow with a worn dirt patch for each level.
+// adventure map: a 3D board of floating islands, one per world, left to right (see map3d.js)
 const starSvg = on => `<svg class="${on ? 'on' : ''}"><use href="#i-star"/></svg>`;
+let map3d = null;
 function renderMap() {
-  const map = $('map');
-  const W = map.clientWidth || innerWidth;
-  const STEP = 100, PAD_B = 140, PAD_T = 80;
-  const zoneH = PAD_B + (LEVELS_PER_WORLD - 1) * STEP + PAD_T;
-  const H = zoneH * WORLDS.length + 110;
-  const next = nextLevel();
-  const pos = L => { // gentle winding that stays inside the meadow
-    const w = Math.floor(L / LEVELS_PER_WORLD), k = L % LEVELS_PER_WORLD;
-    return [W / 2 + Math.sin(L * 0.75 + 0.4) * Math.min(W * 0.16, 230), H - w * zoneH - PAD_B - k * STEP];
-  };
-  let html = '';
-  WORLDS.forEach((w, i) => {
-    const locked = !unlocked(i * LEVELS_PER_WORLD);
-    let deco = '';
-    for (let d = 0; d < (w.map ? 0 : 9); d++) {
-      const r = mulberry32(i * 100 + d)();
-      const left = d % 2 ? 72 + r * 22 : 2 + r * 18;
-      deco += `<span class="deco" style="left:${left}%;top:${8 + d * 10 + r * 5}%;transform:rotate(${(r - 0.5) * 24}deg) scale(${0.8 + r * 0.6})">${w.deco[d % w.deco.length]}</span>`;
-    }
-    const art = w.map ? `<div class="mapimg" style="background-image:url(${w.map})"></div>` : '';
-    html += `<div class="zone ${locked ? 'locked' : ''}" style="top:${H - (i + 1) * zoneH}px;height:${zoneH}px;background:${w.map ? 'var(--white)' : w.land}">${art}${deco}
-      <div class="banner"><span class="pill">${w.icon} ${w.name}</span></div>
-      ${locked ? `<div class="lockveil"><span class="pill">🔒 Finish ${WORLDS[i - 1].name}</span></div>` : ''}</div>`;
-  });
-  let d = '';
-  for (let k = 0; k < TOTAL_LEVELS; k++) {
-    const [x, y] = pos(k);
-    if (!k) { d += `M${x} ${y + 70}L${x} ${y}`; continue; }
-    const [px, py] = pos(k - 1);
-    d += `C${px} ${py - STEP / 2} ${x} ${y + STEP / 2} ${x} ${y}`;
+  if (!map3d) {
+    map3d = createMap3D({ canvas: $('mapCanvas'), layer: $('mapNodes'), worlds: WORLDS, perWorld: LEVELS_PER_WORLD,
+      stars: save.stars, unlocked, next: nextLevel, starSvg, stoneSet, addLights, biomes: BIOMES,
+      patterns: { woods: groundTexture('woods'), autumn: groundTexture('autumn'), desert: groundTexture('desert'), snow: groundTexture('snow') },
+      decor: b => sceneryModels.arch.map(m => ({ geo: m.geo, mat: decorMat(m, b), h: m.h })) });
+    map3d.focusNext();
   }
-  // dirt path: soft dark edge, earth, lighter worn middle, a few pebbles
-  html += `<svg class="path" width="${W}" height="${H}"><defs><filter id="soft" x="-20%" y="-5%" width="140%" height="110%"><feGaussianBlur stdDeviation="3"/></filter></defs>
-    <path d="${d}" fill="none" stroke="#3e6b2c" stroke-opacity=".22" stroke-width="44" stroke-linecap="round" filter="url(#soft)"/>
-    <path d="${d}" fill="none" stroke="#e9e2c4" stroke-width="34" stroke-linecap="round" stroke-dasharray="26 8"/>
-    <path d="${d}" fill="none" stroke="#f6f1dc" stroke-width="22" stroke-linecap="round" stroke-dasharray="20 14" stroke-opacity=".8"/></svg>`;
-  for (let k = 0; k < TOTAL_LEVELS; k++) {
-    const [x, y] = pos(k), s = save.stars(k), open = unlocked(k);
-    html += `<button class="node ${!open ? 'locked' : k === next ? 'next' : ''}" data-level="${k}" style="left:${x}px;top:${y}px">
-      <span class="dot" style="--r:${(k * 37) % 360}deg">${open ? `<b>${k % LEVELS_PER_WORLD + 1}</b>` : '<svg class="ico"><use href="#i-lock"/></svg>'}</span>
-      ${open ? `<span class="stars">${starSvg(s > 0) + starSvg(s > 1) + starSvg(s > 2)}</span>` : ''}</button>`;
-  }
-  const [, ny] = pos(next);
-  map.innerHTML = `<div class="inner" style="height:${H}px">${html}</div>`;
+  map3d.refresh();
   const totalStars = Array.from({ length: TOTAL_LEVELS }, (_, k) => save.stars(k)).reduce((a, b) => a + b, 0);
-  $('mapTitle').textContent = `★ ${totalStars} / ${TOTAL_LEVELS * 3}`;
-  map.scrollTop = ny - map.clientHeight * 0.6;
+  $('mapTitle').textContent = `${totalStars} / ${TOTAL_LEVELS * 3}`;
+}
+// seamless ground textures (map, and the autumn floor in play): tileable noise, so no seams and no blotches
+function tileNoise(S, cells, seed) { // smooth value noise that wraps around at the edges
+  const rnd = mulberry32(seed), g = Array.from({ length: cells * cells }, rnd), out = new Float32Array(S * S);
+  const at = (x, y) => g[((y % cells) + cells) % cells * cells + ((x % cells) + cells) % cells];
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const fx = x / S * cells, fy = y / S * cells, ix = Math.floor(fx), iy = Math.floor(fy), tx = fx - ix, ty = fy - iy;
+    const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+    out[y * S + x] = (at(ix, iy) * (1 - sx) + at(ix + 1, iy) * sx) * (1 - sy) + (at(ix, iy + 1) * (1 - sx) + at(ix + 1, iy + 1) * sx) * sy;
+  }
+  return out;
+}
+const groundCache = {};
+function groundTexture(kind) {
+  if (groundCache[kind]) return groundCache[kind];
+  const S = 512, c = document.createElement('canvas'); c.width = c.height = S;
+  const x = c.getContext('2d');
+  if (kind === 'woods' || kind === 'autumn') { // soft grass: gentle light and dark drifts, then fine blades (green, or golden for autumn)
+    const n1 = tileNoise(S, 5, 41), n2 = tileNoise(S, 20, 53), img = x.createImageData(S, S), px = img.data;
+    const base = kind === 'autumn' ? [216, 184, 108] : [160, 196, 104], warm = kind === 'autumn' ? [226, 160, 84] : [182, 204, 110];
+    for (let i = 0; i < S * S; i++) {
+      const v = 0.07 * (n1[i] - 0.5) + 0.05 * (n2[i] - 0.5), t = Math.max(0, Math.min(1, n1[i] * 1.6 - 0.3));
+      for (let k = 0; k < 3; k++) px[i * 4 + k] = (base[k] * (1 - t * 0.5) + warm[k] * t * 0.5) * (1 + v);
+      px[i * 4 + 3] = 255;
+    }
+    x.putImageData(img, 0, 0);
+    const rnd = mulberry32(kind === 'autumn' ? 77 : 66);
+    const blades = kind === 'autumn' ? ['rgba(240,205,130,.5)', 'rgba(190,140,70,.35)', 'rgba(230,170,90,.45)'] : ['rgba(200,228,140,.5)', 'rgba(110,160,70,.35)', 'rgba(170,210,110,.45)'];
+    x.lineCap = 'round';
+    for (let n = 0; n < 2600; n++) {
+      const bx = rnd() * S, by = rnd() * S, len = 3 + rnd() * 5, a = -Math.PI / 2 + (rnd() - 0.5) * 0.9;
+      x.strokeStyle = blades[n % 3]; x.lineWidth = 1 + rnd() * 0.8;
+      for (const [ox, oy] of [[0, 0], [S, 0], [-S, 0], [0, S], [0, -S]]) { // drawn wrapped, so the tile has no seam
+        x.beginPath(); x.moveTo(bx + ox, by + oy); x.lineTo(bx + ox + Math.cos(a) * len, by + oy + Math.sin(a) * len); x.stroke();
+      }
+    }
+    return (groundCache[kind] = c);
+  }
+  const img = x.createImageData(S, S), px = img.data;
+  const n1 = tileNoise(S, 6, 11), n2 = tileNoise(S, 24, 23), n3 = tileNoise(S, 96, 37);
+  const rnd = mulberry32(kind === 'desert' ? 5 : kind === 'cave' ? 13 : 9);
+  for (let y = 0; y < S; y++) for (let xx = 0; xx < S; xx++) {
+    const i = y * S + xx, k = i * 4;
+    let base, v;
+    if (kind === 'desert') { // warm sand with soft wind ripples and a fine grain
+      const rip = Math.sin((y / S * 22 + n1[i] * 3.2 + n2[i] * 0.6) * Math.PI * 2);
+      v = 0.035 * rip + 0.05 * (n1[i] - 0.5) + 0.05 * (n3[i] - 0.5) + (rnd() - 0.5) * 0.035;
+      base = [236, 212, 164];
+    } else if (kind === 'cave') { // dark slate with faint cool mottling
+      v = 0.1 * (n1[i] - 0.5) + 0.08 * (n2[i] - 0.5) + 0.06 * (n3[i] - 0.5);
+      base = [30, 44, 64];
+    } else { // snow: pale, a cool shading in the hollows, and a little sparkle
+      v = 0.03 * (n1[i] - 0.5) + 0.03 * (n2[i] - 0.5) + (rnd() < 0.004 ? 0.06 : 0);
+      base = [244, 247, 251];
+      const cool = (0.5 - n1[i]) * 10; base = [base[0] - cool * 1.4, base[1] - cool * 0.6, base[2]];
+    }
+    px[k] = Math.min(255, base[0] * (1 + v)); px[k + 1] = Math.min(255, base[1] * (1 + v)); px[k + 2] = Math.min(255, base[2] * (1 + v)); px[k + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  return (groundCache[kind] = c);
 }
 $('map').addEventListener('click', e => {
   const b = e.target.closest('[data-level]'); if (!b) return;
@@ -1887,6 +2567,23 @@ document.addEventListener('click', e => {
 $('playBtn').addEventListener('click', () => show('worlds')); // adventure opens the map
 $('contBtn').addEventListener('click', e => { e.stopPropagation(); play(nextLevel()); });
 $('contCard').addEventListener('click', () => play(nextLevel()));
+// soft UI sounds: a little pop on every button, a breath of a hover on menu items
+document.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.classList.contains('toggle') || b.closest('#skins')) return sfx.ui('toggle', 0.45);
+  if (b.classList.contains('locked')) return sfx.ui('nope', 0.35);
+  sfx.ui('pop', 0.45);
+}, true);
+document.addEventListener('pointerover', e => {
+  const b = e.target.closest('.mitem, .pitem, .btn, .round, .node, .cont'); if (!b || b.contains(e.relatedTarget)) return;
+  sfx.ui('hover', 0.22);
+});
+// the 3D menu panels sway a little toward the mouse
+addEventListener('pointermove', e => {
+  const r = document.documentElement.style;
+  r.setProperty('--mx', (e.clientX / innerWidth * 2 - 1).toFixed(3));
+  r.setProperty('--my', (e.clientY / innerHeight * 2 - 1).toFixed(3));
+});
 // title menu: the hovered item is the selected one; arrow keys / W S move it, Enter or Space picks it
 const menuItems = [...document.querySelectorAll('#sideMenu .mitem')];
 const selectItem = el => menuItems.forEach(m => m.classList.toggle('sel', m === el));
@@ -1905,13 +2602,16 @@ function openSettings(from) {
   const sync = el => el.style.setProperty('--v', el.value + '%');
   $('musicVol').value = Math.round(sfx.prefs.music * 100); sync($('musicVol'));
   $('fxVol').value = Math.round(sfx.prefs.fx * 100); sync($('fxVol'));
+  $('ambVol').value = Math.round(sfx.prefs.amb * 100); sync($('ambVol'));
+  $('ambBtn').classList.toggle('on', sfx.prefs.ambOn);
   $('muteBtn').classList.toggle('on', sfx.prefs.mute);
   show('settings');
 }
-for (const [id, key] of [['musicVol', 'music'], ['fxVol', 'fx']]) {
+for (const [id, key] of [['musicVol', 'music'], ['fxVol', 'fx'], ['ambVol', 'amb']]) {
   $(id).addEventListener('input', e => { e.target.style.setProperty('--v', e.target.value + '%'); sfx.set(key, e.target.value / 100); });
 }
 $('fxVol').addEventListener('change', () => sfx.play('step', 0.62, 0, { maxDur: 0.26 })); // preview the effects level
+$('ambBtn').addEventListener('click', () => { sfx.set('ambOn', !sfx.prefs.ambOn); $('ambBtn').classList.toggle('on', sfx.prefs.ambOn); });
 $('muteBtn').addEventListener('click', () => { sfx.set('mute', !sfx.prefs.mute); $('muteBtn').classList.toggle('on', sfx.prefs.mute); });
 $('settingsBtn').addEventListener('click', () => openSettings('title'));
 $('pauseSoundBtn').addEventListener('click', () => openSettings('pause'));
@@ -1950,7 +2650,9 @@ $('nextBtn').addEventListener('click', () => {
 // logo: letters bent along an arch in the hood color (set by setSkin), with an ink outline behind
 {
   const el = $('logoA'), letters = [...el.textContent], mid = (letters.length - 1) / 2;
-  el.textContent = letters.join(''); // the word bobs as one piece
+  // the word bobs as one piece; each letter sits on a gentle arch, tilted outward
+  el.innerHTML = letters.map((ch, i) => `<span style="transform:translateY(${(0.035 * (i - mid) ** 2).toFixed(3)}em) rotate(${((i - mid) * 2.5).toFixed(1)}deg)"><i style="--i:${i}">${ch}</i></span>`).join('')
+    + '<svg class="sprout"><use href="#i-sprout"/></svg>';
 }
 
 // ---------- title: the character's face peeking up, looking at the cursor or tilting its head ----------
@@ -1972,7 +2674,7 @@ const face = (() => {
   const B = { uBlink: { value: 0 }, uEyeY: { value: 0 }, uEyeHalf: { value: 0 }, uSkin: { value: new THREE.Color() }, uEyeOn: { value: 0 } };
   let blinkIn = 1.5, blinkT = -1, doubleBlink = false;
   const cam = new THREE.PerspectiveCamera(24, 1, 0.1, 20);
-  const U = { uYaw: { value: 0 }, uPitch: { value: 0 }, uRoll: { value: 0 }, uIdle: { value: 0 } };
+  const U = { uYaw: { value: 0 }, uPitch: { value: 0 }, uRoll: { value: 0 }, uIdle: { value: 0 }, uLean: { value: 0 }, uArm: { value: 0 }, uWave: { value: 0 }, uWaveT: { value: 0 } };
   const cur = { yaw: 0, pitch: 0, roll: 0 };
   let group, sway, mouse = null, lastMouse = -1e9, w = 0, h = 0;
   // head turn in the model's own space: pivot at the neck, everything above it rotates (model faces +X)
@@ -1989,20 +2691,26 @@ const face = (() => {
       o.material.metalness = 0;
       o.material.onBeforeCompile = sh => {
         Object.assign(sh.uniforms, U, B);
-        sh.vertexShader = 'uniform float uYaw, uPitch, uRoll, uIdle;\nvarying vec3 vObjPos;\nvec2 rot2(vec2 p, float a) { return vec2(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a)); }\n' + sh.vertexShader
+        sh.vertexShader = 'uniform float uYaw, uPitch, uRoll, uIdle, uLean, uArm, uWave, uWaveT;\nvarying vec3 vObjPos;\nvec2 rot2(vec2 p, float a) { return vec2(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a)); }\n' + sh.vertexShader
           .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n' + headGlsl + '\nobjectNormal = hr * objectNormal;')
           .replace('#include <begin_vertex>', `#include <begin_vertex>
           vObjPos = position;
           {
-            // waiting idle: arms down from the A-pose, swinging gently forward and back, opposite to each other
-            const float sho = 0.03;
+            // chibi idle (model space: height -0.5..0.5, facing +X, sides along Z). Arms hang a little out from the body
+            // and swing a beat behind the body's sway; one arm can wave. Then the upper body leans side to side from
+            // the hips, so the feet never leave the ground.
+            const float sho = 0.03, hip = -0.28;
             vec3 q = transformed;
             float side = sign(q.z);
             float wa = smoothstep(0.125, 0.16, abs(q.z)) * smoothstep(sho + 0.05, sho - 0.02, q.y) * step(-0.36, q.y);
-            vec2 yz = rot2(vec2(q.y - sho, abs(q.z) - 0.14), (0.3 + 0.06 * sin(uIdle * 3.2 + side)) * wa);
+            float waveUp = uWave * step(0.0, side) * (2.3 + 0.35 * sin(uWaveT));
+            vec2 yz = rot2(vec2(q.y - sho, abs(q.z) - 0.14), (0.3 + side * uArm - waveUp) * wa);
             q.y = yz.x + sho; q.z = side * (yz.y + 0.14);
             float along = clamp((sho - q.y) / 0.36, 0.0, 1.0);
-            q.xy = rot2(q.xy - vec2(0.0, sho), (0.32 * sin(uIdle * 3.2) * side + 0.12 * sin(uIdle * 6.4 - along * 2.0) * along) * wa) + vec2(0.0, sho);
+            q.xy = rot2(q.xy - vec2(0.0, sho), (0.1 * sin(uIdle * 1.5) * side + 0.08 * sin(uIdle * 3.0 - along * 2.0) * along) * wa) + vec2(0.0, sho);
+            float wl = smoothstep(hip - 0.02, hip + 0.16, q.y);
+            vec2 lz = rot2(vec2(q.y - hip, q.z), uLean * wl);
+            q.y = lz.x + hip; q.z = lz.y;
             transformed = q;
           }
           transformed = hr * (transformed - vec3(0., 0.06, 0.)) + vec3(0., 0.06, 0.);`);
@@ -2030,8 +2738,8 @@ const face = (() => {
     // a soft round pedestal to stand on, with a little contact shadow under the feet
     const sh = document.createElement('canvas'); sh.width = sh.height = 128;
     const sx = sh.getContext('2d'), sg = sx.createRadialGradient(64, 64, 0, 64, 64, 64);
-    sg.addColorStop(0, 'rgba(110,80,40,.35)'); sg.addColorStop(1, 'rgba(110,80,40,0)'); sx.fillStyle = sg; sx.fillRect(0, 0, 128, 128);
-    const shadow = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sh), transparent: true, depthWrite: false }));
+    sg.addColorStop(0, 'rgba(100,70,35,.55)'); sg.addColorStop(0.45, 'rgba(100,70,35,.25)'); sg.addColorStop(1, 'rgba(100,70,35,0)'); sx.fillStyle = sg; sx.fillRect(0, 0, 128, 128);
+    const shadow = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.42).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sh), transparent: true, depthWrite: false }));
     shadow.position.y = 0.002;
     sc.add(shadow);
     findEyes(firstMesh(src));
@@ -2118,8 +2826,14 @@ const face = (() => {
     group.rotation.y = -Math.PI / 2 + cur.yaw * 0.2; // the model faces +X; turn it to face the camera
     // cute waiting sway: rock from foot to foot with a tiny bounce on each side
     U.uIdle.value = t;
-    sway.rotation.z = Math.sin(t * 1.6) * 0.06;
-    group.position.y = Math.abs(Math.sin(t * 1.6)) * 0.018;
+    // feet stay planted: the upper body sways from the hips, the arms follow a beat later, a slow breath, and every
+    // few seconds a happy little knee-bounce (squash and stretch from the floor up, never leaving the ground)
+    // kept gentle so the model never looks bent out of shape
+    U.uLean.value = Math.sin(t * 1.5) * 0.035;
+    U.uArm.value = Math.sin(t * 1.5 - 0.7) * 0.035;
+    sway.rotation.z = 0; group.position.y = 0;
+    const sqz = 1 + Math.sin(t * 3) * 0.006;
+    group.scale.set(1 / Math.sqrt(sqz), sqz, 1 / Math.sqrt(sqz));
     updateBlink(dt);
     r.render(sc, cam);
   }
@@ -2127,6 +2841,7 @@ const face = (() => {
 })();
 
 // ---------- pillars per frame ----------
+const TRAIL_GLOW = 0; // stepped tiles fade all the way back to dark
 function updatePillars(dt, time) {
   const T = heights.length, { N } = maze;
   const k = 220, damp = Math.exp(-15 * dt);
@@ -2139,7 +2854,8 @@ function updatePillars(dt, time) {
   const stepGlow = curSet.variants[0].glowTex, under = st.gz * N + st.gx;
   for (let i = 0; i < T; i++) {
     if (empty && empty[i]) continue; // outside the shape: just the white floor
-    if (stepGlow) tileGlow[i] = i === under ? Math.min(1, tileGlow[i] + dt * 5) : tileGlow[i] * Math.exp(-dt * 0.7); // lights up underfoot, dims quietly after
+    // lights up underfoot, then fades back to dark over a couple of seconds
+    if (stepGlow) tileGlow[i] = i === under ? Math.min(1, tileGlow[i] + dt * 6) : tileGlow[i] > TRAIL_GLOW ? TRAIL_GLOW + (tileGlow[i] - TRAIL_GLOW) * Math.exp(-dt * 1.1) : tileGlow[i];
     vels[i] += (targets[i] - heights[i]) * k * dt;
     vels[i] *= damp;
     heights[i] += vels[i] * dt;
@@ -2186,7 +2902,7 @@ function updatePillars(dt, time) {
 const camTarget = new THREE.Vector3();
 const CAM_DIR = new THREE.Vector3(1, Math.tan(THREE.MathUtils.degToRad(54)) * Math.SQRT2, 1).normalize();
 const AHEAD = new THREE.Vector3(-0.9, 0, -0.9); // keep more maze visible above the character
-// level intro: start close on the key, pull out to the whole maze, then glide down to the character.
+// level intro: start close on the portal, pull out to the whole maze, then glide down to the character.
 // Every move eases in and out, and the zoom changes at an even rate (interpolated in log space).
 const intro = { t: -1, warm: 0, wave: false };
 const INTRO = [1.2, 3.4, 3.9, 6.4]; // key hold | out to wide | wide hold | down to the character
@@ -2203,7 +2919,8 @@ function introShot(dt) {
   if (intro.warm > 0) { intro.warm--; dt = 0; } // let the first heavy frames of a new level pass before moving
   intro.t += Math.min(dt, 1 / 30);
   const t = intro.t, wideW = maze.N * 1.3;
-  const keyP = _ka.set(key.position.x, 0, key.position.z), wide = _kb.set(0, 0, 0);
+  const focus = portal && portal.visible ? portal.position : key.position; // the portal (where you're headed)
+  const keyP = _ka.set(focus.x, 0, focus.z), wide = _kb.set(0, 0, 0);
   const playerP = player.position.clone().setY(0).add(AHEAD);
   const u = (a, b) => Math.min(1, Math.max(0, (t - a) / (b - a)));
   let W;
@@ -2454,7 +3171,7 @@ function fitView() {
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
   composer.setSize(w, h);
-  tiltH.uniforms.h.value = 4.2 / w; tiltV.uniforms.v.value = 4.2 / h; // shallow focus: only the band around Buddy is sharp
+  tiltH.uniforms.amt.value = 3.2 / w; tiltV.uniforms.amt.value = 3.2 / h; // blur step size in screen texels
   const pr = renderer.getPixelRatio() * 0.5;
   mirror.getRenderTarget().setSize(Math.round(w * pr), Math.round(h * pr));
 }
@@ -2468,16 +3185,34 @@ function frame() {
   updateRivals(dt, time);
   updateWarp(dt);
   updatePillars(dt, time);
+  doorSpores(dt);
+  coach.tick();
+  sfx.tick(dt);
   updatePuffs(dt);
   atmosphere.update(dt, time);
   SUNU.uSunView.value.copy(SUN_OFFSET).normalize().transformDirection(camera.matrixWorldInverse);
-  key.userData.spin.rotation.y += dt * 1.8;
-  key.position.y = 0.55 + Math.sin(time * 2.2) * 0.06 + (won ? Math.min(1.5, (key.userData.wt = (key.userData.wt || 0) + dt) * 2) : 0);
+  GLOW_TIME.value = time;
+  key.userData.spin.rotation.y += dt * (key.userData.grab >= 0 ? 14 : 1.6);
+  key.userData.glow.material.opacity = 0.5 + 0.12 * Math.sin(time * 2.4);
+  if (key.userData.grab >= 0) { // grabbed: hops up over Buddy's head with a little bounce, then flies to its HUD slot
+    const k = Math.min(1, (key.userData.grab += dt) / 0.5);
+    key.position.x += (player.position.x - key.position.x) * Math.min(1, dt * 9);
+    key.position.z += (player.position.z - key.position.z) * Math.min(1, dt * 9);
+    key.position.y = 0.55 + Math.sin(Math.PI * Math.min(1, k * 1.2)) * 0.5 + k * 0.6;
+    key.scale.setScalar(1 + 0.35 * Math.sin(Math.PI * k));
+    key.userData.shadow.visible = false;
+    if (k >= 1) { key.userData.grab = -1; flyKeyToHud(); }
+  } else {
+    key.position.y = 0.42 + Math.sin(time * 2.2) * 0.05 + (won ? Math.min(1.5, (key.userData.wt = (key.userData.wt || 0) + dt) * 2) : 0);
+    key.userData.shadow.position.y = 0.02 - key.position.y; key.userData.shadow.visible = true;
+  }
+  updatePortal(dt, time);
   if (state === 'play' && !won && intro.t < 0) { elapsed += dt; ui.time.textContent = fmt(Math.floor(elapsed)); }
   updateCamera(dt);
+  updateFocus();
   updateRaceUI();
   if (state === 'title' || state === 'outfit' || state === 'race' || (state === 'settings' && settingsBack === 'title')) face.render(dt, time); // menus are opaque; skip the maze behind them
-  else if (state === 'worlds') {} // the map is opaque too
+  else if (state === 'worlds') map3d && map3d.render(dt, time); // the map has its own little 3D board
   else {
     renderer.shadowMap.needsUpdate = true;
     composer.render();
@@ -2493,6 +3228,6 @@ setSkin(skin);
 await stoneSet(levelBiome(nextLevel()));
 buildLevel(nextLevel());
 show('title');
-$('loading').remove();
+$('loading').style.opacity = 0; setTimeout(() => $('loading').remove(), 450);
 frame();
-window.__game = { st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; } };
+window.__game = { st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };

@@ -57,6 +57,23 @@ Then open http://localhost:8770.
   - Right: a "Continue" card (purple ribbon, world icon, level, Play button that starts the next level).
   - Top right: star and world counters.
 - **Adventure:** opens the **map**. It must not start a level directly.
+- **3D menus:** the title's side menu, the Continue card and the Outfit panel stand tilted like open doors around Buddy
+  (`--tilt` in CSS, perspective on the screen) and sway with the mouse (`--mx`, `--my`). The logo letters sit on a gentle arch.
+- **Adventure map** (`map3d.js`): horizontal, in the game's own look (no quilt, no Buddy): the warm white floor, each
+  world a soft patch of its ground fading into the white (meadow / sand / snow / leaves, mirror-tiled), the path made
+  of that world's real scanned stones (next level's stone risen like a wall), the world's door block at the start,
+  risen stone groups and (woods) the arches. Worlds build when you scroll near (each loads its stone set).
+  Level badges are small HTML chips (white / gold done / green next). Wheel, drag, A / D.
+- **Portal** (`makePortal`): built from the level's own stones at their true proportions (uniform scale), measured
+  from the vertices they use so they stack flush: a sunk stone-top plinth, two pillars of two upright stones, a lintel
+  of three stones laid on their side; a calm swirl in milky biome tints (`PORTAL_TINTS`).
+- **Key** (`makeKey`): lies flat and turns, soft shadow, no glow. Pickup: hops over Buddy's head, then flies as an
+  icon up into the HUD key slot (`flyKeyToHud`).
+- **Beta:** `BETA_ALL_OPEN = true` opens every level. Set it to false for release.
+- **Ground textures** (`groundTexture`): seamless procedural grass (woods green / autumn golden), sand with wind ripples,
+  snow. Used on the map (finely tiled + fade mask) and as the autumn floor in play (the leaf litter was disliked).
+- **Desert stones** keep their natural colored layers (`tint 0.12`, `matchStrength 0.45`); the cactus door stays green.
+  The map places big cacti (the door model, stone sunk) and the woods' arches far back with a hazy lower half.
 - **Pause:** a cream card with a list (Resume green, Restart, Map, Sound, Main menu).
 - **Cards and buttons:** soft white cards; candy buttons (green / yellow / blue) with a darker bottom lip. No ink outlines, no gradients on buttons.
 
@@ -89,23 +106,43 @@ Mouse or touch swipes also map by screen direction.
 
 ---
 
+### UI design system (index.html, rewritten 2026-10-17)
+- Warm storybook palette as CSS tokens (`--cream`, `--card`, `--edge`, `--lip`, `--ink` cocoa, `--leaf`, `--honey`,
+  `--sky`, `--coral`, `--berry`, `--lilac`). Cards: cream with a lip and a dashed stitched seam (`.card::before`).
+  Titles: Bagel Fat One with a white sticker outline (`.sticker`). Chips with icon badges (`.chip` + `.cbadge`).
+- No emoji anywhere: custom SVG symbols (`i-w-woods/desert/snow/autumn/cave`, `i-steps`, `i-clock`, `i-portal`,
+  `i-trophy`, `i-music`, `i-sparkle`, `i-wind`, `i-mute`, `i-eye`, `i-sprout`...).
+- Secondary motion: menu motes, per-letter logo bob + swaying sprout, icon wiggles, staggered entrances, confetti and
+  bouncing stars on the win card, twinkling key chip.
+- Continue card shows a real render of the world's doorway (`doorPreview`, rendered once into an image).
+- First-steps guide (`coach`): level 1-1 walks through move / hidden maze / key / portal; the first door level and
+  first cave get one tip each. Seen tips are stored in `hidden-maze-tut`.
+- Narrow windows (aspect < 5:4) tuck the title panels into the corners; short windows get compact cards.
+
+### Animation rules (owner's)
+- Buddy never jumps or waves on his own (no idle hops, no idle wave). The intro wave stays.
+- Title Buddy: feet planted, upper body sways gently from the hips, arms relaxed and away from the body (clipping
+  otherwise), small amplitudes so the mesh never looks bent.
+- In play: springy steps (stretch at the top, squash on landing), breathing, a gentle sway when still; bumping a wall
+  gives a squash, a hop and dizzy stars.
+
 ## 3. Game structure
 
-### Levels
-- 4 worlds × 25 levels = 100 (`WORLDS`, `LEVELS_PER_WORLD = 25`).
-
-| World | Biome |
-|---|---|
-| Mossy Woods | woods |
-| Sunny Dunes | desert |
-| Frost Peak | snow |
-| Autumn Grove | autumn |
-
-- **Difficulty:**
-  - Maze size grows every 8 levels, from 9×9 to 31×31 tiles (`levelCells`).
-  - Within a world the reveal radius shrinks (`world.reveal - 0.35 * progress`).
-- **Shaped mazes** from level 12 on: circle, twin squares with bridges, heart, three circles (`SHAPES`, `levelShape`, `genShapedMaze`). An empty tile is `maze.empty[i] = 1`.
-- **Stars:** 1–3, based on steps vs the optimal path. Saved in `localStorage`, key `hidden-maze`.
+### Levels (`levelPlan(L)` in main.js)
+- 4 worlds × 25 levels = 100. Each world is **5 chapters of 5 levels**, a saw-tooth curve:
+  1. breather (square, easier reveal, key near the way);
+  2. a mix of shapes you already know;
+  3. the chapter's new shape;
+  4. a door level (from world 1 chapter 2 on);
+  5. a challenge: the new shape, bigger, less reveal.
+- Size: `BASE_CELLS[world] + chapter` (+1 on challenges and the world finale). Level 1-1 is 3×3 cells.
+- Reveal radius, key detour (how far off the way the key hides) also grow with chapter and world.
+- Themed shapes per world (`WORLD_SHAPES`): woods circle/gem/plus/tree/flower; desert triangle/hourglass/cactus/crescent/twin;
+  snow ring/snowflake/frame/islands/star; autumn mushroom/heart/snake/circles/leaf. Shapes are drawn in screen space
+  (`shape2`, X right, Y up); the maze grows in the shape's biggest connected part, thin bits are trimmed.
+- **Goal:** find the **key** (on a side path, `keyTile`), then walk into the **portal** (`makePortal`) at the far end. The
+  portal sleeps (dim) until you hold the key. HUD shows a key chip; a toast says "Find the key" if you reach it early.
+- **Stars:** 1–3, based on steps vs the optimal path (start → key → portal). Saved in `localStorage`, key `hidden-maze`.
 
 ### Gateway / door levels (`isGateway = L >= 5 && L % 4 === 1`)
 - **Surface:** the maze is two separate halves with an **open gap** between them (`genSplitMaze`). Buddy starts in the lower half; the key is in the upper half.
@@ -113,7 +150,7 @@ Mouse or touch swipes also map by screen direction.
 - **Coming back up:** cave door B leads back up to door B in the key's half, like Mario pipes.
 - **Transition:** fade to dark while the camera lifts (`startWarp` / `warpSwap` / `updateWarp`, `#fader`).
 - **Door facing:** each door's cave mouth faces the tile you step out to. It's detected automatically (`prepDoor`, per-side depth grid) and rotated with `door.yaw`.
-- **Cave goal:** `[-9, -9]`, i.e. no key in the cave.
+- **The key of a door level waits in the cave** (between the two cave doors); the portal is on the surface in the far half.
 
 ### Race mode
 - 2–4 Buddies on a fair, mirrored maze (`genFairRaceMaze`); the key is in the middle.
@@ -135,7 +172,8 @@ Each biome has:
 | n01 | cave door (mushroom on a stone; shown pink and glowing) |
 | n02 | snow door (snowy pine) |
 | n03 | autumn door (orange tree) |
-| n04 | green-tree door, used for **woods and desert** (see TODO) |
+| n04 | green-tree door (woods) |
+| n29 | cactus doorway (desert) |
 | n05–n11 | autumn stones (**n08 excluded**: face marks and crooked) |
 | n12–n17 | snow stones |
 | n18–n23 | desert stones |
@@ -161,14 +199,16 @@ Each biome has:
    - Far tiles use a **baked top-view atlas** (`bakeFloor`), so tiles are never squashed.
 5. **Wall motion:** walls rise and sink by **position only** (spring on height). There is a subtle tremble; no rotation, no squash.
 
-### Cave specifics (latest work)
-- **Look:** dark blue, matte floor (no sun spot), blue rim light.
-- **Glowing parts keep their original colors** (cyan, teal, purple):
-  - `captureGlow` / `restoreGlow` build a glow mask (bright and saturated pixels) and a `glowTex` per stone.
-  - **They only glow where Buddy steps** (`addStepGlow`, per-tile instanced `aGlow`, `tileGlow[]`): they light up underfoot and dim slowly after; otherwise only a faint glow.
-- **Puffs** in the cave use each stone's glow color (`dustAt`).
-- **Mushroom door:** pink and glowing via a shader (`doorPlant`).
-- **Particles:** fewer spores in mixed colors.
+### Cave specifics
+- **Unlit, the cave stones look like plain rock**: the glowing moss is repainted as rock (`neonGlow`), baked white
+  highlights are flattened (`flattenHighlights`).
+- **Only the tile Buddy steps on lights up**: its moss specks glow fluorescent green-to-teal (`glowHues`, one per stone),
+  pulsing a little, then fade back to dark (`TRAIL_GLOW = 0`). Glow mask = anything that differs from the stone's own
+  rock color and isn't darker (`captureGlow`).
+- **Mushroom door:** keeps its own mushroom colors pushed to neon, a light wave runs up the stalks (`door-neon` shader),
+  a violet haze sprite, a point light, and spores drifting up (`doorSpores`).
+- Texture canvases are filled opaque first (`canvasTexture`): see-through specks rendered as black dots.
+- Dust puffs are soft billboards now (`puffMat`), additive (glowing) in the cave.
 
 ### Other systems
 - **Weather per biome** (`atmosphere.setWeather`):
@@ -183,6 +223,13 @@ Each biome has:
 - **Post-processing:** EffectComposer with tilt-shift (`tiltH` / `tiltV`, strength `4.2 / w`) and OutputPass.
 - **Camera:** close / medium / wide button (`CAM_STEPS = [4.4, 6.2, 8.6]` tiles of view height), plus a hold-to-zoom-out "peek" button.
 - **Audio** (Web Audio): pooled sound effects with pitch / pan variation, music ducking in menus, settings saved in `hidden-maze-sound`.
+  - Music starts with the first click (quietly under the menus).
+  - Per-biome mixes (`MIX`): snow = snow crunch steps (`sn01-20`) + faint footsteps, rise = rock + snow + gravel; desert adds
+    sand (`sd`) and pebbles (`pb`); the cave adds pebbles/gravel, a soft echo, and rare distant pebble trickles.
+  - Ambience (`AMB`, `assets/ambience/`): wind/leaves (woods, autumn, snow, cave filtered deep) and desert night. Very
+    quiet; Sound settings has an Ambience slider + on/off.
+  - Soft UI sounds (`ui_*`, from the Cozy UI pack; sharp ones left out; the owner disliked the confirm sound, removed).
+    The pack's license forbids publishing the raw files (don't push them to a public repo).
 - **Outfit:** 9 colors recolor the olive parts of Buddy (`SKINS`, `setSkin`, shader `addOutfit`).
 - **Title character:** a second WebGL renderer (`face`) for the menu Buddy: idle sway and arm swing (`uIdle`), head-follow, blink.
 
@@ -195,11 +242,8 @@ Each biome has:
 
 ## 4. Open TODO
 
-1. **Desert doorway:** the owner will send a **cactus doorway GLB**. Then:
-   - add it as `assets/biomes/n29.glb` (or similar);
-   - set `BIOMES.desert.door` to it;
-   - check that the stone color matches the desert (door tint runs automatically) and that the cactus stays green (it's protected as "moss" if green; check);
-   - check that the mouth faces the exit (`prepDoor` reach values).
-2. **Cave glow check:** verify the glow mask catches all luminous bits (owner said some weren't); thresholds are in `captureGlow`.
-3. **Map art:** only Mossy Woods has a painted map; the other worlds use a flat color plus emoji decoration.
-4. **Optional cleanup:** remove the debug `?nosimp` switch and `__game.cave` once no longer needed.
+1. **Puzzles:** the owner plans to add puzzles later (the key stays for now).
+2. **Map polish:** islands could use more props and per-world landmarks; locked worlds aren't greyed out yet.
+3. **Portal look:** the cream frame can blend into light stones; maybe a pastel accent per world.
+4. **Old saves:** star records are by level index, and the levels changed (sizes and shapes), so old stars may not match.
+5. **Optional cleanup:** remove the debug `?nosimp` switch and the `__game` test hooks once no longer needed.

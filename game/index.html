@@ -7,7 +7,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Buddy">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <title>Buddy · Remember the way</title>
 <meta name="description" content="A cozy little maze game. The walls only rise near you: remember the way, find the key, reach the portal.">
 <meta property="og:title" content="Buddy · Remember the way">
@@ -189,7 +189,7 @@
   .mitem.big.sel .mi { background: rgba(255,255,255,.3); box-shadow: none; }
   .mitem.big:active { transform: translateY(3px) scale(.98); box-shadow: inset 0 -2px 0 rgba(0,0,0,.16); }
   .topbtns { position: absolute !important; z-index: 3; right: 28px; top: calc(24px + env(safe-area-inset-top)); display: flex; gap: 10px; }
-  .topbtns .round { color: var(--ink-soft); }
+  .topbtns .round { color: var(--ink-soft); position: relative; }
   #title .counters { right: auto; left: 28px; }
   .counters { top: calc(24px + env(safe-area-inset-top)); }
   .motes.near { z-index: 2 !important; }
@@ -460,6 +460,18 @@
     .coach .pic { width: 48px; height: 48px; border-radius: 15px; } .coach .pic .ico { width: 28px; height: 28px; }
     .coach h4 { font-size: 18px; } .coach p { font-size: 14px; }
   }
+  /* get the app: save the files on the phone, add to the home screen */
+  .installcard { width: min(470px, 94vw) !important; text-align: left; }
+  .installcard h2, .installcard .ribbon { display: block; text-align: center; width: max-content; margin-left: auto; margin-right: auto; }
+  .installcard .tip > div { flex: 1; }
+  .installcard .tip .btn.small { flex: none; padding: 9px 16px 11px; }
+  .installcard .kw { display: inline; font-weight: 900; color: var(--ink); white-space: nowrap; }
+  .installcard .kw .ico { width: 17px; height: 17px; vertical-align: -3px; color: var(--sky-lip); }
+  .bar { height: 10px; border-radius: 99px; background: var(--edge); margin-top: 8px; overflow: hidden; display: none; }
+  .bar.on { display: block; } .bar i { display: block; height: 100%; width: 0; border-radius: 99px; background: var(--leaf); transition: width .2s; }
+  .btn.sky { background: var(--sky); box-shadow: inset 0 -5px 0 var(--sky-lip); color: #fff; }
+  .round .dot { position: absolute; right: 6px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--coral); box-shadow: 0 0 0 2px #fff; }
+  .round .dot.off { display: none; }
   /* how to play */
   .helpcard { width: min(470px, 94vw) !important; text-align: left; }
   .helpcard h2, .helpcard .ribbon { display: block; text-align: center; width: max-content; margin-left: auto; margin-right: auto; }
@@ -581,6 +593,8 @@
   <symbol id="i-w-cave" viewBox="0 0 24 24"><path d="M12 3c5 0 8 2.8 8 6.8 0 1.6-1 2.7-2.6 2.7H14v6a2 2 0 0 1-4 0v-6H6.6C5 12.5 4 11.4 4 9.8 4 5.8 7 3 12 3zm-3 4a1.2 1.2 0 1 0 0 2.4A1.2 1.2 0 0 0 9 7zm5.5-.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/></symbol>
   <symbol id="i-portal" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M4 21V9.5a8 8 0 0 1 16 0V21h-3V10a5 5 0 0 0-10 0v11zm8-12a3 3 0 0 1 3 3v8H9v-8a3 3 0 0 1 3-3z"/></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M12 5c4.6 0 8.2 3 9.7 6.3a1.6 1.6 0 0 1 0 1.4C20.2 16 16.6 19 12 19s-8.2-3-9.7-6.3a1.6 1.6 0 0 1 0-1.4C3.8 8 7.4 5 12 5zm0 3.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3.2a1.6 1.6 0 0 1 1.6 1.6v8.3l2.5-2.5a1.6 1.6 0 1 1 2.3 2.3l-5.3 5.2a1.6 1.6 0 0 1-2.2 0L5.6 12.9a1.6 1.6 0 1 1 2.3-2.3l2.5 2.5V4.8A1.6 1.6 0 0 1 12 3.2zM4.5 18.6h15a1.4 1.4 0 0 1 0 2.8h-15a1.4 1.4 0 0 1 0-2.8z"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 2.6l4.2 4.1-1.8 1.8-1.1-1.1v7.2h-2.6V7.4L9.6 8.5 7.8 6.7zM6 10.6h3v2.4H7.4v6.4h9.2V13H15v-2.4h3a1.4 1.4 0 0 1 1.4 1.4v8.4a1.4 1.4 0 0 1-1.4 1.4H6a1.4 1.4 0 0 1-1.4-1.4V12A1.4 1.4 0 0 1 6 10.6z"/></symbol>
   <symbol id="i-help" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M12 2.5a9.5 9.5 0 1 1 0 19 9.5 9.5 0 0 1 0-19zM12 16a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6zm.1-9.6c-2.1 0-3.6 1.2-3.8 3a1 1 0 0 0 2 .3c.1-.8.8-1.3 1.8-1.3s1.7.6 1.7 1.4c0 .7-.4 1-1.2 1.6-.9.6-1.6 1.3-1.6 2.6a1 1 0 0 0 2 0c0-.5.2-.7.9-1.2 1-.7 1.9-1.5 1.9-3 0-2-1.6-3.4-3.7-3.4z"/></symbol>
   <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.5c-.3 0-.6-.1-.8-.3C6.9 16.7 3 13.4 3 9.2 3 6.3 5.2 4 8 4c1.6 0 3 .8 4 2 1-1.2 2.4-2 4-2 2.8 0 5 2.3 5 5.2 0 4.2-3.9 7.5-8.2 11-.2.2-.5.3-.8.3z"/></symbol>
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M10.6 13.4a1 1 0 0 1 0-1.4l3.5-3.5a1 1 0 1 1 1.4 1.4L12 13.4a1 1 0 0 1-1.4 0zM7.8 19.6a4.4 4.4 0 0 1-3.1-7.5l2.1-2.1a1 1 0 1 1 1.4 1.4l-2.1 2.1a2.4 2.4 0 0 0 3.4 3.4l2.1-2.1a1 1 0 0 1 1.4 1.4l-2.1 2.1a4.4 4.4 0 0 1-3.1 1.3zm8.8-5.2a1 1 0 0 1-.7-1.7l2.1-2.1a2.4 2.4 0 0 0-3.4-3.4l-2.1 2.1a1 1 0 0 1-1.4-1.4l2.1-2.1a4.4 4.4 0 0 1 6.2 6.2l-2.1 2.1a1 1 0 0 1-.7.3z"/></symbol>
@@ -618,6 +632,7 @@
   </div>
   <div class="logo"><span class="word" id="logoA">Buddy</span><br><div class="sub">Remember the way</div></div>
   <div class="topbtns">
+    <button class="round" id="installBtn" aria-label="Get the app"><svg class="ico"><use href="#i-download"/></svg><i class="dot" id="installDot"></i></button>
     <button class="round" id="helpBtn" aria-label="Help"><svg class="ico"><use href="#i-help"/></svg></button>
     <button class="round" id="settingsBtn" aria-label="Settings"><svg class="ico"><use href="#i-sound"/></svg></button>
   </div>
@@ -750,6 +765,17 @@
     <div class="setting"><i class="mi" style="--c:var(--coral)"><svg class="ico"><use href="#i-mute"/></svg></i><label>Mute all</label><button class="toggle" id="muteBtn" aria-label="Mute all"></button></div>
     <div class="setting"><i class="mi" style="--c:var(--leaf-ink)"><svg class="ico"><use href="#i-zoom"/></svg></i><label>Fullscreen <small>F</small></label><button class="toggle" id="fullBtn" aria-label="Fullscreen"></button></div>
     <button class="btn yellow" id="settingsDone" style="width:100%;margin-top:6px"><svg class="ico"><use href="#i-check"/></svg>Done</button>
+  </div>
+</section>
+
+<section class="screen modal" id="install">
+  <div class="card pop installcard">
+    <h2 class="sticker">Get the app</h2>
+    <div class="ribbon">Plays smooth on any phone</div>
+    <div class="tip"><i class="mi" style="--c:var(--leaf-ink)"><svg class="ico"><use href="#i-download"/></svg></i><div><b>Save the game on this phone</b><span id="saveText">All four worlds at once. Then Buddy opens fast and plays even without internet.</span>
+      <div class="bar" id="saveBar"><i></i></div></div><button class="btn green small" id="saveBtn">Save</button></div>
+    <div class="tip"><i class="mi" style="--c:var(--sky-lip)"><svg class="ico"><use href="#i-share"/></svg></i><div><b>Add to your Home Screen</b><span id="homeText">Buddy gets its own icon and opens full screen, like an app.</span></div><button class="btn sky small" id="homeBtn">Add</button></div>
+    <button class="btn yellow" id="installDone" style="width:100%;margin-top:4px"><svg class="ico"><use href="#i-check"/></svg>Done</button>
   </div>
 </section>
 

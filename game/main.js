@@ -3355,6 +3355,54 @@ $('settingsBtn').addEventListener('click', () => openSettings('title'));
 // how to play: from the title or the pause menu, back to where you came from
 let helpBack = 'title';
 $('helpBtn').addEventListener('click', () => { helpBack = 'title'; show('help'); });
+// ---------- get the app: save every file on the phone (plays fast and offline), add to the home screen ----------
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+const SAVE_CACHE = 'buddy-files-v1';
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const installed = () => matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches || navigator.standalone === true;
+let installPrompt = null, savedOK = false;
+try { savedOK = localStorage.getItem('buddy-saved') === '1'; } catch {}
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; refreshInstall(); });
+addEventListener('appinstalled', () => { installPrompt = null; refreshInstall(); });
+function refreshInstall() {
+  $('installDot').classList.toggle('off', savedOK && (installed() || isIOS === false && !installPrompt));
+  if (savedOK) { $('saveText').textContent = 'Saved on this phone: Buddy opens fast and plays even without internet.'; $('saveBtn').textContent = 'Saved'; $('saveBtn').disabled = true; }
+  if (installed()) { $('homeText').textContent = 'Buddy is on your Home Screen. Have fun!'; $('homeBtn').style.display = 'none'; }
+  else if (isIOS) { $('homeText').innerHTML = 'In Safari, tap <span class="kw">Share <svg class="ico"><use href="#i-share"/></svg></span> then <span class="kw">Add to Home Screen</span>.'; $('homeBtn').style.display = 'none'; }
+  else if (installPrompt) { $('homeText').textContent = 'Buddy gets its own icon and opens full screen, like an app.'; $('homeBtn').style.display = ''; }
+  else { $('homeText').textContent = 'In your browser menu, choose "Add to Home screen" or "Install app".'; $('homeBtn').style.display = 'none'; }
+}
+$('installBtn').addEventListener('click', () => { refreshInstall(); show('install'); });
+$('installDone').addEventListener('click', () => show('title'));
+$('homeBtn').addEventListener('click', async () => { if (!installPrompt) return; installPrompt.prompt(); try { await installPrompt.userChoice; } catch {} installPrompt = null; refreshInstall(); });
+$('saveBtn').addEventListener('click', async () => {
+  if (!('caches' in window)) return toast('This browser cannot save games for offline play');
+  const btn = $('saveBtn'), bar = $('saveBar'), fill = bar.firstElementChild;
+  btn.disabled = true; btn.textContent = 'Saving…'; bar.classList.add('on');
+  try {
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); // (ask the phone to keep it)
+    const list = await (await fetch('assets-list.json', { cache: 'no-store' })).json();
+    // every game file, plus the libraries and fonts this page already uses (three.js, fonts) from their own hosts
+    const urls = new Set(['./', ...list.files.map(f => f[0])]);
+    for (const e of performance.getEntriesByType('resource')) if (/cdn\.jsdelivr\.net|fonts\.(googleapis|gstatic)\.com/.test(e.name)) urls.add(e.name);
+    const all = [...urls], cache = await caches.open(SAVE_CACHE), size = Object.fromEntries(list.files);
+    let done = 0, bytes = 0;
+    const total = list.total, next = async () => {
+      while (all.length) {
+        const u = all.shift();
+        try { const res = await fetch(u, { cache: 'reload', mode: /^https?:/.test(u) && !u.startsWith(location.origin) ? 'cors' : 'same-origin' }); if (res.ok) await cache.put(u, res); } catch {}
+        done++; bytes += size[u] || 0;
+        fill.style.width = Math.min(100, Math.round(bytes / total * 100)) + '%';
+        $('saveText').textContent = 'Saving… ' + Math.round(bytes / 1e6) + ' / ' + Math.round(total / 1e6) + ' MB';
+      }
+    };
+    await Promise.all([next(), next(), next(), next()]);
+    savedOK = true; try { localStorage.setItem('buddy-saved', '1'); } catch {}
+    sfx.ui('chime', 0.4);
+  } catch { $('saveText').textContent = 'Could not save right now. Check the connection and try again.'; btn.disabled = false; btn.textContent = 'Save'; }
+  bar.classList.remove('on'); refreshInstall();
+});
+refreshInstall();
 $('pauseHelpBtn').addEventListener('click', () => { helpBack = 'pause'; show('help'); });
 $('helpDone').addEventListener('click', () => show(helpBack));
 // fullscreen: the F key, or the toggle in settings
@@ -4098,7 +4146,7 @@ function frame(now = performance.now()) {
   updateCamera(dt);
   updateFocus();
   updateRaceUI();
-  if (state === 'title' || state === 'outfit' || state === 'race' || state === 'friend' || (state === 'settings' && settingsBack === 'title') || (state === 'help' && helpBack === 'title')) face.render(dt, time); // menus are opaque; skip the maze behind them
+  if (state === 'title' || state === 'outfit' || state === 'race' || state === 'friend' || (state === 'settings' && settingsBack === 'title') || (state === 'help' && helpBack === 'title') || state === 'install') face.render(dt, time); // menus are opaque; skip the maze behind them
   else if (state === 'worlds') map3d && map3d.render(dt, time); // the map has its own little 3D board
   else {
     renderer.shadowMap.needsUpdate = true;
@@ -4125,7 +4173,7 @@ if (params.has('memdebug')) window.__step = (n = 1) => { manualStep = true; for 
   document.addEventListener('visibilitychange', () => bb.save());
   // last visit ended without a goodbye: show what it was doing
   const P = bbPrev;
-  if (P && !P.clean && Date.now() - P.t < 3 * 864e5) {
+  if (P && !P.clean && !P.hidden && P.state === 'play' && Date.now() - P.t < 3 * 864e5) { // (only a close while you were playing)
     const os = (P.ua.match(/OS (\d+[_\d]*) like Mac/) || [])[1], dev = /iPhone/.test(P.ua) ? 'iPhone' : /iPad/.test(P.ua) ? 'iPad' : /Android/.test(P.ua) ? 'Android' : 'Computer';
     const lines = [
       `Screen: ${P.state}${P.state === 'play' ? ` (${P.mode === 'race' ? 'race' : 'level ' + (P.level + 1)}, ${P.biome})` : ''} · played ${Math.round((P.t - P.start) / 60000)} min`,

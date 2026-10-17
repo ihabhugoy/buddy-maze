@@ -247,3 +247,8 @@ Each biome has:
 3. **Portal look:** the cream frame can blend into light stones; maybe a pastel accent per world.
 4. **Old saves:** star records are by level index, and the levels changed (sizes and shapes), so old stars may not match.
 5. **Optional cleanup:** remove the debug `?nosimp` switch and the `__game` test hooks once no longer needed.
+
+## Online
+
+- Netlify (main): https://buddy-maze.netlify.app (deploy: `netlify deploy --prod --dir game --site 6edc3228-2263-424c-a079-7b943b571002`)
+- GitHub Pages (backup): https://ihabhugoy.github.io/buddy-maze/

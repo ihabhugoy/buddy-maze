@@ -2032,14 +2032,23 @@ function poseArms(geos) {
   }
   // each arm swings down as one rigid piece (never bent, so it keeps its own shape), and a little forward if that lets
   // it hang lower, until it rests against the body: it may press into the soft tummy a little, never sink in
+  // (the forearm also bends in at a soft elbow, half way down: the upper arm leans out a little and the paw comes back
+  // in to rest by the tummy, the relaxed bow of a plush toy's arm)
+  const BEND = 0.7, ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   const NV = V.map(v => v.slice()), rot = (S, a, f, v) => {
     const du = S.s * v[2] - S.uP, dy = v[1] - S.yP;
-    const u = S.uP + du * Math.cos(a) + dy * Math.sin(a), dy2 = -du * Math.sin(a) + dy * Math.cos(a);
-    return [u, S.yP + v[0] * Math.sin(f) + dy2 * Math.cos(f), v[0] * Math.cos(f) - dy2 * Math.sin(f), du];
+    let u = S.uP + du * Math.cos(a) + dy * Math.sin(a), dy2 = -du * Math.sin(a) + dy * Math.cos(a);
+    const el = S.len * 0.5, b = BEND * ss(el - 0.04, el + 0.04, du) * Math.min(1, a / 0.7);
+    if (b) {
+      const ey = -S.h * 0.45, eu = S.uP + el * Math.cos(a) + ey * Math.sin(a), ed = -el * Math.sin(a) + ey * Math.cos(a);
+      const pu = u - eu, pd = dy2 - ed;
+      u = eu + pu * Math.cos(b) + pd * Math.sin(b); dy2 = ed - pu * Math.sin(b) + pd * Math.cos(b);
+    }
+    return [u, S.yP + v[0] * Math.sin(f) + dy2 * Math.cos(f), v[0] * Math.cos(f) - dy2 * Math.sin(f), du, b];
   };
   const pose = S => {
     const arm = []; V.forEach((v, i) => { if (W[i] * S.s > 0.99) arm.push(i); });
-    for (let a = 1.32; a >= 0.7; a -= 0.02) for (let f = 0; f <= 0.42; f += 0.06) {
+    for (let a = 1.1; a >= 0.6; a -= 0.02) for (let f = 0; f <= 0.42; f += 0.06) {
       let pen = 0;
       for (const i of arm) {
         const [u, y, x, du] = rot(S, a, f, V[i]); if (du < S.len * 0.45) continue; // (the armpit end may tuck into the body)
@@ -2054,7 +2063,7 @@ function poseArms(geos) {
   const P0 = pose(sides[0]), P1 = pose(sides[1]), ang = Math.min(P0[0], P1[0]), fwd = Math.max(P0[0] <= P1[0] ? P0[1] : P1[1], 0); // both arms alike
   for (const S of sides) {
     S.ang = ang; S.fwd = fwd;
-    V.forEach((v, i) => { const w = W[i] * S.s; if (w > 0) { const r = rot(S, ang * w, fwd * w, v); NV[i][0] = r[2]; NV[i][1] = r[1]; NV[i][2] = S.s * r[0]; } });
+    S.bend = []; V.forEach((v, i) => { const w = W[i] * S.s; if (w > 0) { const r = rot(S, ang * w, fwd * w, v); NV[i][0] = r[2]; NV[i][1] = r[1]; NV[i][2] = S.s * r[0]; S.bend[i] = r[4] * w; } });
   }
   const sd = sides[0], sw = sides[1];
   geos.forEach((g, gi) => {
@@ -2062,7 +2071,7 @@ function poseArms(geos) {
     for (let i = 0; i < P.count; i++) {
       const id = vid[gi][i], w = W[id]; A[i] = w; if (!w) continue;
       P.setXYZ(i, NV[id][0], NV[id][1], NV[id][2]);
-      if (N) { const s = Math.sign(w), S = sides[w > 0 ? 0 : 1], a = S.ang * Math.abs(w), f = S.fwd * Math.abs(w), nu = s * N.getZ(i), ny = N.getY(i), nx = N.getX(i), ny2 = -nu * Math.sin(a) + ny * Math.cos(a); N.setXYZ(i, nx * Math.cos(f) - ny2 * Math.sin(f), nx * Math.sin(f) + ny2 * Math.cos(f), s * (nu * Math.cos(a) + ny * Math.sin(a))); }
+      if (N) { const s = Math.sign(w), S = sides[w > 0 ? 0 : 1], a = S.ang * Math.abs(w) + (S.bend[id] || 0), f = S.fwd * Math.abs(w), nu = s * N.getZ(i), ny = N.getY(i), nx = N.getX(i), ny2 = -nu * Math.sin(a) + ny * Math.cos(a); N.setXYZ(i, nx * Math.cos(f) - ny2 * Math.sin(f), nx * Math.sin(f) + ny2 * Math.cos(f), s * (nu * Math.cos(a) + ny * Math.sin(a))); }
     }
     P.needsUpdate = true; if (N) N.needsUpdate = true;
     g.setAttribute('aArm', new THREE.BufferAttribute(A, 1));
@@ -3311,8 +3320,12 @@ const face = (() => {
             vec3 q = transformed;
             float side = sign(q.z);
             float wa = smoothstep(az - 0.015, az + 0.02, abs(q.z)) * smoothstep(${f(P.top)}, ${f(P.top - 0.07)}, q.y) * step(${f(P.bot)}, q.y);
-            vec2 yz = rot2(vec2(q.y - sho, abs(q.z) - az), (${f(P.drop + 0.02)} + side * uArm) * wa);
+            vec2 yz = rot2(vec2(q.y - sho, abs(q.z) - az), (${f(P.drop + 0.02)} - ${P.baked ? '0.0' : '0.16'} + side * uArm) * wa);
             q.y = yz.x + sho; q.z = side * (yz.y + az);
+            ${P.baked ? '' : `// a soft elbow half way down: the forearm curves back in, the relaxed bow of a plush toy's arm
+            float elY = sho - 0.15, we = smoothstep(sho - 0.11, sho - 0.2, q.y) * wa;
+            vec2 eb = rot2(vec2(q.y - elY, abs(q.z) - az - 0.035), 0.3 * we);
+            q.y = eb.x + elY; q.z = side * (eb.y + az + 0.035);`}
             float along = clamp((sho - q.y) / 0.36, 0.0, 1.0);
             q.xy = rot2(q.xy - vec2(0.0, sho), (0.1 * sin(uIdle * 1.5) * side + 0.08 * sin(uIdle * 3.0 - along * 2.0) * along) * wa) + vec2(0.0, sho);
             float wl = smoothstep(hip - 0.02, hip + 0.16, q.y);

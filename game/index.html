@@ -36,7 +36,7 @@
       0 4.5px 0 #fff, 2px 4px #fff, -2px 4px #fff, 0 7px 0 rgba(110, 72, 30, .18);
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; height: 100%; background: var(--paper); overflow: hidden; overscroll-behavior: none; }
+  html, body { margin: 0; height: 100%; background: #f4e6cc; overflow: hidden; overscroll-behavior: none; }
   body { font-family: "Nunito", ui-rounded, "SF Pro Rounded", system-ui, sans-serif; font-weight: 800; color: var(--ink); user-select: none; -webkit-user-select: none; }
   canvas#game { display: block; touch-action: none; position: fixed; inset: 0; width: 100vw; height: 100dvh; }
   button { font: inherit; color: inherit; border: none; background: none; cursor: pointer; padding: 0; }
@@ -172,7 +172,28 @@
   .mitem.sel { background: var(--card); color: var(--ink); transform: translateX(6px); box-shadow: inset 0 -4px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); }
   .mitem.sel .mi { background: var(--c, var(--leaf)); color: #fff; transform: rotate(-6deg) scale(1.06); box-shadow: inset 0 -3px 0 rgba(0,0,0,.14); }
   .mitem.sel .go { opacity: 1; animation: nudge .9s ease-in-out infinite; }
-  #playBtn { --c: var(--leaf); } #raceBtn { --c: var(--coral); } #outfitBtn { --c: var(--berry); } #settingsBtn { --c: var(--sky); } #helpBtn { --c: var(--honey-lip); }
+  #playBtn { --c: var(--leaf); } #raceBtn { --c: var(--coral); } #outfitBtn { --c: var(--lilac); } #settingsBtn { --c: var(--sky); } #helpBtn { --c: var(--honey-lip); }
+  /* Adventure and Friends are the two big buttons; help and settings sit as round buttons in the top corner */
+  .mitem span { display: flex; flex-direction: column; line-height: 1.05; text-align: left; }
+  .mitem small { font-size: .52em; letter-spacing: .07em; opacity: .8; margin-top: 4px; }
+  .mitem.big { font-size: 23px; padding: 12px 16px 15px 12px; margin-bottom: 4px; color: #fff; background: var(--c); text-shadow: 0 2px 0 rgba(0,0,0,.12); box-shadow: inset 0 -6px 0 rgba(0,0,0,.16), var(--shadow-s); }
+  .mitem.big .mi { width: 48px; height: 48px; border-radius: 16px; background: rgba(255,255,255,.25); color: #fff; }
+  .mitem.big .mi .ico { width: 26px; height: 26px; }
+  .mitem.big .go { color: #fff; }
+  .mitem.big:hover, .mitem.big.sel { color: #fff; background: var(--c); transform: translateY(-2px) scale(1.02); box-shadow: inset 0 -6px 0 rgba(0,0,0,.16), var(--shadow-l); }
+  .mitem.big.sel .mi { background: rgba(255,255,255,.3); box-shadow: none; }
+  .mitem.big:active { transform: translateY(3px) scale(.98); box-shadow: inset 0 -2px 0 rgba(0,0,0,.16); }
+  .topbtns { position: absolute !important; z-index: 3; right: 28px; top: calc(24px + env(safe-area-inset-top)); display: flex; gap: 10px; }
+  .topbtns .round { color: var(--ink-soft); }
+  #title .counters { right: auto; left: 28px; }
+  .counters { top: calc(24px + env(safe-area-inset-top)); }
+  .motes.near { z-index: 2 !important; }
+  .motes.near i { --s: 34px; background: radial-gradient(circle, rgba(255,250,235,.75) 0, rgba(255,240,205,.32) 38%, rgba(255,240,205,0) 70%); }
+  .motes.near i:nth-child(1) { left: 6%; --s: 40px; --d: 21s; --w: -6s; --dx: 30px; }
+  .motes.near i:nth-child(2) { left: 30%; --s: 28px; --d: 17s; --w: -12s; --dx: -30px; }
+  .motes.near i:nth-child(3) { left: 58%; --s: 46px; --d: 24s; --w: -3s; --dx: 20px; }
+  .motes.near i:nth-child(4) { left: 80%; --s: 32px; --d: 19s; --w: -15s; --dx: -40px; }
+  .motes.near i:nth-child(5) { left: 92%; --s: 38px; --d: 22s; --w: -9s; }
   /* the continue card: a soft tall card with a ribbon and a little 3D picture of the world's doorway */
   .cont { --tilt: rotateY(calc(-20deg + var(--mx, 0) * 5deg)) rotateX(calc(var(--my, 0) * -4deg)); transform-origin: 100% 50%;
     position: absolute !important; right: 5vw; top: 60%; transform: translateY(-50%) var(--tilt); width: clamp(210px, 19vw, 250px); border-radius: 30px; background: var(--card); padding: 10px; z-index: 2; text-align: center; cursor: pointer;
@@ -236,7 +257,7 @@
   .mbanner.locked .chip { color: var(--ink-soft); }
 
   /* ---------- in-game HUD ---------- */
-  .hud { position: fixed; left: 0; right: 0; top: 0; padding: 20px 26px 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; opacity: 0; pointer-events: none; transition: opacity .3s; }
+  .hud { position: fixed; left: 0; right: 0; top: 0; padding: calc(20px + env(safe-area-inset-top)) calc(26px + env(safe-area-inset-right)) 0 calc(26px + env(safe-area-inset-left)); display: flex; justify-content: space-between; align-items: center; gap: 12px; opacity: 0; pointer-events: none; transition: opacity .3s; }
   .hud .left, .hud .right { display: flex; align-items: center; gap: 10px; }
   .hud .chip { height: 46px; font-size: 18px; }
   .hud .stats { gap: 14px; padding: 6px 18px 7px; }
@@ -246,8 +267,8 @@
   .hud .stats i { width: 2px; height: 20px; border-radius: 2px; background: var(--edge); }
   body[data-biome="desert"] #worldBadge { background: #f2a53a; } body[data-biome="snow"] #worldBadge { background: #58b4e8; }
   body[data-biome="autumn"] #worldBadge { background: #e8823a; } body[data-biome="cave"] #worldBadge { background: #4fb8b0; }
-  .peek { position: fixed; right: 26px; bottom: 26px; opacity: 0; pointer-events: none; transition: opacity .3s, transform .18s var(--bounce); }
-  .camzoom { bottom: 92px; }
+  .peek { position: fixed; right: calc(26px + env(safe-area-inset-right)); bottom: calc(26px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); opacity: 0; pointer-events: none; transition: opacity .3s, transform .18s var(--bounce); }
+  .camzoom { bottom: calc(92px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); }
   .camzoom span { position: absolute; right: -6px; top: -6px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: var(--honey); color: var(--honey-ink); font-size: 12px; font-weight: 900; line-height: 22px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,.15); }
   body[data-state="play"] .hud, body[data-state="play"] .peek { opacity: 1; pointer-events: auto; }
   body[data-state="play"] .hud .chip { pointer-events: none; }
@@ -366,7 +387,7 @@
 
   /* ---------- pages (outfit, race, friends): your character in the middle, panels on each side ---------- */
   .page { padding: 0; perspective: 1100px; }
-  .pagehead { position: absolute !important; left: 24px; top: 20px; display: flex; align-items: center; gap: 14px; z-index: 3; }
+  .pagehead { position: absolute !important; left: calc(24px + env(safe-area-inset-left)); top: calc(20px + env(safe-area-inset-top)); display: flex; align-items: center; gap: 14px; z-index: 3; }
   .pagehead h2 { margin: 0; font-size: 44px; }
   .page .card { position: absolute !important; top: 54%; width: clamp(290px, 30vw, 390px); max-height: 80vh; overflow-y: auto; scrollbar-width: none; text-align: left; z-index: 2; padding: 22px 20px 20px; }
   .page .card::-webkit-scrollbar { display: none; }
@@ -397,23 +418,43 @@
     .page { overflow-y: auto; padding-top: 46vh; justify-content: flex-start; }
     .page .faceSlot { position: fixed !important; height: 50vh; }
     .pagehead h2 { font-size: 34px; }
-    /* title on a phone: logo on top, Buddy in the middle, menu as a row of big buttons at the bottom */
-    .side-menu { top: auto; left: 8px; right: 8px; bottom: 10px; width: auto; align-content: center; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 10px; transform: none !important; border-radius: 26px; }
-    .side-menu::before { inset: 6px; border-radius: 20px; }
-    .mitem { flex: 0 0 auto; flex-direction: column; gap: 4px; padding: 6px 4px; font-size: 11px; letter-spacing: .02em; width: 64px; text-align: center; transform: none !important; }
-    .mitem .go { display: none; } .mitem .mi { width: 38px; height: 38px; }
+    /* title on a phone: round buttons in the top corners, logo under them, the character in the middle, and the menu
+       as chunky buttons at the bottom (Race and Outfit stacked beside a tall Friends, a wide Adventure underneath) */
+    .side-menu { top: auto; left: 12px; right: 12px; bottom: calc(14px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); width: auto; padding: 0; gap: 10px; background: none; box-shadow: none; transform: none !important; border-radius: 0;
+      display: grid; grid-template-columns: 1fr 1fr; grid-template-areas: "race friends" "outfit friends" "play play"; animation: fadeup .55s .1s var(--spring) backwards; }
+    .side-menu::before { display: none; }
+    .mitem { transform: none !important; margin: 0; min-width: 0; background: var(--card); color: var(--ink); font-size: 16px; padding: 9px 10px 12px 9px; gap: 10px; border-radius: 22px; box-shadow: inset 0 -5px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); }
+    .mitem.sel:not(.big) { background: var(--card); box-shadow: inset 0 -5px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); }
+    .mitem .mi, .mitem.sel .mi { width: 38px; height: 38px; background: var(--c); color: #fff; transform: none; }
+    .mitem .go { display: none; }
+    #raceBtn { grid-area: race; } #outfitBtn { grid-area: outfit; } #friendMenuBtn { grid-area: friends; } #playBtn { grid-area: play; }
+    #friendMenuBtn { flex-direction: column; justify-content: center; gap: 8px; font-size: 21px; }
+    #friendMenuBtn span { align-items: center; text-align: center; }
+    #playBtn { justify-content: center; font-size: 24px; padding: 13px 16px 17px; }
+    .mitem.big .mi, .mitem.big.sel .mi { background: rgba(255,255,255,.25); }
     .cont { display: none; }
-    #title .faceSlot { height: 72vh; }
+    .topbtns { top: calc(12px + env(safe-area-inset-top)); right: 12px; gap: 8px; } .topbtns .round { width: 46px; height: 46px; border-radius: 16px; }
+    #title .counters { left: 12px; top: calc(12px + env(safe-area-inset-top)); }
+    #title .logo { top: calc(58px + env(safe-area-inset-top)); }
+    #title .faceSlot { top: calc(104px + 14vw + env(safe-area-inset-top)); bottom: calc(240px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); height: auto; }
   }
   @media (max-height: 520px) and (min-aspect-ratio: 5/4) { /* phones held sideways */
     .logo .word { font-size: 58px; } .logo .sub { font-size: 11px; margin-top: 8px; padding: 4px 12px 6px; }
     .side-menu { width: 200px; padding: 10px; gap: 2px; top: 58%; } .mitem { font-size: 14px; padding: 5px 10px 6px 6px; } .mitem .mi { width: 30px; height: 30px; }
     .cont { width: 170px; } .cont .art { height: 90px; } .cont h3 { font-size: 18px; margin-top: 6px; } .cont p { margin-bottom: 6px; }
     .page .card { max-height: 86vh; padding: 14px; width: 270px; } .pagehead h2 { font-size: 30px; } .rc-row { padding: 5px 8px 5px 12px; font-size: 14px; }
-    .hud .chip { height: 38px; font-size: 15px; } .round { width: 44px; height: 44px; border-radius: 15px; } .peek { right: 14px; bottom: 14px; } .camzoom { bottom: 66px; }
+    .hud .chip { height: 38px; font-size: 15px; } .round { width: 44px; height: 44px; border-radius: 15px; } .peek { right: calc(14px + env(safe-area-inset-right)); bottom: calc(14px + var(--badge-h, 0px)); } .camzoom { bottom: calc(66px + var(--badge-h, 0px)); }
     .coach .card { max-width: 46vw; padding: 10px 14px 12px 10px; } .coach .pic { width: 46px; height: 46px; } .coach h4 { font-size: 17px; } .coach p { font-size: 13px; }
   }
 
+  @media (max-aspect-ratio: 5/4) {
+    .coach { left: 12px; right: 12px; bottom: auto; top: calc(70px + env(safe-area-inset-top)); transform: translateY(-14px) scale(.96); transform-origin: 50% 0; }
+    .coach.on { transform: none; }
+    .coach .card { max-width: none; padding: 10px 14px 12px 10px; gap: 12px; border-radius: 22px; }
+    .coach .card::before { inset: 6px; border-radius: 17px; }
+    .coach .pic { width: 48px; height: 48px; border-radius: 15px; } .coach .pic .ico { width: 28px; height: 28px; }
+    .coach h4 { font-size: 18px; } .coach p { font-size: 14px; }
+  }
   /* how to play */
   .helpcard { width: min(470px, 94vw) !important; text-align: left; }
   .helpcard h2, .helpcard .ribbon { display: block; text-align: center; width: max-content; margin-left: auto; margin-right: auto; }
@@ -492,7 +533,7 @@
     .medal { width: 66px; height: 66px; margin-top: -52px; } .medal .ico { width: 36px; height: 36px; }
     .rc-row { margin-bottom: 7px; padding: 6px 10px 6px 14px; } .card p { margin-bottom: 12px; font-size: 15px; }
   }
-  @media (max-width: 640px) { .hud { padding: 14px 14px 0; } .hud .chip { height: 42px; font-size: 16px; } .hud .stats { gap: 8px; padding: 6px 12px; } }
+  @media (max-width: 640px) { .hud { padding: calc(12px + env(safe-area-inset-top)) 12px 0; } .hud .chip { height: 42px; font-size: 16px; } .hud .stats { gap: 8px; padding: 6px 12px; } }
 </style>
 <script type="importmap">
 { "imports": {
@@ -566,17 +607,20 @@
 <section class="screen warm" id="title">
   <div class="motes"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
   <div class="faceSlot"><canvas id="faceCanvas"></canvas></div>
+  <div class="motes near"><i></i><i></i><i></i><i></i><i></i></div>
   <div class="counters">
     <span class="chip"><i class="cbadge honey"><svg class="ico"><use href="#i-star"/></svg></i><b id="starCount">0</b></span>
   </div>
   <div class="logo"><span class="word" id="logoA">Buddy</span><br><div class="sub">Remember the way</div></div>
+  <div class="topbtns">
+    <button class="round" id="helpBtn" aria-label="Help"><svg class="ico"><use href="#i-help"/></svg></button>
+    <button class="round" id="settingsBtn" aria-label="Settings"><svg class="ico"><use href="#i-sound"/></svg></button>
+  </div>
   <nav class="side-menu" id="sideMenu">
-    <button class="mitem sel" id="playBtn"><i class="mi"><svg class="ico"><use href="#i-map"/></svg></i>Adventure<svg class="ico go"><use href="#i-next"/></svg></button>
-    <button class="mitem" id="friendMenuBtn"><i class="mi"><svg class="ico"><use href="#i-heart"/></svg></i>Friends<svg class="ico go"><use href="#i-next"/></svg></button>
-    <button class="mitem" id="raceBtn"><i class="mi"><svg class="ico"><use href="#i-flag"/></svg></i>Race<svg class="ico go"><use href="#i-next"/></svg></button>
-    <button class="mitem" id="outfitBtn"><i class="mi"><svg class="ico"><use href="#i-shirt"/></svg></i>Outfit<svg class="ico go"><use href="#i-next"/></svg></button>
-    <button class="mitem" id="settingsBtn"><i class="mi"><svg class="ico"><use href="#i-sound"/></svg></i>Settings<svg class="ico go"><use href="#i-next"/></svg></button>
-    <button class="mitem" id="helpBtn"><i class="mi"><svg class="ico"><use href="#i-help"/></svg></i>Help<svg class="ico go"><use href="#i-next"/></svg></button>
+    <button class="mitem big sel" id="playBtn"><i class="mi"><svg class="ico"><use href="#i-map"/></svg></i><span>Adventure<small id="playSub2">Level 1-1</small></span><svg class="ico go"><use href="#i-next"/></svg></button>
+    <button class="mitem big" id="friendMenuBtn"><i class="mi"><svg class="ico"><use href="#i-heart"/></svg></i><span>Friends<small>Play together</small></span><svg class="ico go"><use href="#i-next"/></svg></button>
+    <button class="mitem" id="raceBtn"><i class="mi"><svg class="ico"><use href="#i-flag"/></svg></i><span>Race</span><svg class="ico go"><use href="#i-next"/></svg></button>
+    <button class="mitem" id="outfitBtn"><i class="mi"><svg class="ico"><use href="#i-shirt"/></svg></i><span>Outfit</span><svg class="ico go"><use href="#i-next"/></svg></button>
   </nav>
   <div class="cont" id="contCard">
     <div class="tag">Continue</div>

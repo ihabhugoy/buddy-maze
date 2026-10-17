@@ -8,8 +8,23 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { MeshoptSimplifier } from 'https://cdn.jsdelivr.net/npm/meshoptimizer@0.22.0/meshopt_simplifier.module.js';
 await MeshoptSimplifier.ready;
+// the models ship meshopt-compressed (quantized, a fraction of the download); the game reshapes geometry in place, so
+// every attribute is widened back to plain floats on load
+function floatify(g) {
+  for (const k in g.attributes) {
+    const a = g.attributes[k]; if (a.array instanceof Float32Array && !a.normalized && !a.isInterleavedBufferAttribute) continue;
+    const n = a.itemSize, f = new Float32Array(a.count * n), get = [a.getX, a.getY, a.getZ, a.getW];
+    for (let i = 0; i < a.count; i++) for (let c = 0; c < n; c++) f[i * n + c] = get[c].call(a, i);
+    g.setAttribute(k, new THREE.BufferAttribute(f, n));
+  }
+}
+class GLB extends GLTFLoader {
+  constructor() { super(); this.setMeshoptDecoder(MeshoptDecoder); }
+  loadAsync(url) { return super.loadAsync(url).then(g => { g.scene.traverse(o => { if (o.isMesh) floatify(o.geometry); }); return g; }); }
+}
 // the stone models come at ~95k triangles: far too many for a phone. Keep ~12k (texture seams are kept intact).
 function simplifyGeo(geo, ratio = 0.15, err = 0.02) {
   const P = geo.attributes.position, pos = new Float32Array(P.count * 3);
@@ -79,8 +94,11 @@ const nextLevel = () => { for (let L = 0; L < TOTAL_LEVELS; L++) if (!save.stars
 function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
 // ---------- renderer / scene ----------
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+// phones get a lighter setup: a lower resolution cap and smaller shadows (the composer does its own antialiasing)
+const PHONE = matchMedia('(pointer: coarse)').matches;
+const PR_MAX = Math.min(devicePixelRatio, PHONE ? 1.5 : 2);
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+renderer.setPixelRatio(PR_MAX);
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -146,7 +164,7 @@ function addLights(target, withShadow, B = BIOMES.woods) {
   sun.userData = { hemi, fill };
   if (withShadow) {
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(PHONE ? 1024 : 2048, PHONE ? 1024 : 2048);
     Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12, near: 1, far: 50 });
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.02;
@@ -1225,7 +1243,7 @@ function prepPillar(gltf) {
   const SY = Math.max(S, 1.4 / (top - bb.min.y));
   raw.translate(-(x0 + x1) / 2, -top, -(z0 + z1) / 2);
   raw.scale(S, SY, S);
-  if (!params.has("nosimp")) simplifyGeo(raw);
+  if (!params.has("nosimp") && raw.index.count > 150000) simplifyGeo(raw); // (the shipped models are already simplified)
   const mat = new THREE.MeshStandardMaterial({ map: canvasTexture(pm.material.map, 1024), roughness: 0.92, metalness: 0 });
   return { raw, mat };
 }
@@ -1335,7 +1353,7 @@ const stoneSets = {};
 const stoneSetLoads = {};
 function stoneSet(name) {
   return stoneSetLoads[name] ||= (async () => {
-    const B = BIOMES[name], loader = new GLTFLoader();
+    const B = BIOMES[name], loader = new GLB();
     const [doorG, ...pgs] = await Promise.all([loader.loadAsync(B.door), ...B.stones.map(f => loader.loadAsync(f))]);
     const variants = pgs.map(prepPillar);
     const door = prepDoor(doorG);
@@ -1408,7 +1426,7 @@ function stoneSet(name) {
 }
 
 async function load() {
-  const loader = new GLTFLoader();
+  const loader = new GLB();
   const cg = { scene: (await loadChar('buddy')).scene };
   charCache.buddyLoaded = await loadChar('buddy');
   const woods = await stoneSet('woods');
@@ -1695,7 +1713,7 @@ function addHaze(mat) {
   mat.customProgramCacheKey = () => 'scenery-haze';
 }
 async function loadScenery() {
-  const loader = new GLTFLoader();
+  const loader = new GLB();
   for (const [n, kind] of SCENERY) {
     const url = `assets/decor/d${String(n).padStart(2, '0')}.glb`;
     try {
@@ -1939,7 +1957,7 @@ try { charId = localStorage.getItem('hidden-maze-char') || 'buddy'; } catch {}
 const charCache = {};
 function loadChar(id) {
   const C = CHARS.find(c => c.id === id) || CHARS[0];
-  return charCache[C.id] ||= new GLTFLoader().loadAsync(C.file).then(g => {
+  return charCache[C.id] ||= new GLB().loadAsync(C.file).then(g => {
     if (C.id === 'buddy') return { id: 'buddy', scene: g.scene, P: BUDDY_P };
     g.scene.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(g.scene), h = box.max.y - box.min.y;
@@ -1953,7 +1971,9 @@ function loadChar(id) {
       root.add(new THREE.Mesh(geo, mat));
       const P = geo.attributes.position; for (let i = 0; i < P.count; i++) pts.push(P.getX(i), P.getY(i), P.getZ(i));
     });
-    return { id: C.id, scene: root, P: measureBody(pts) };
+    const P = measureBody(pts);
+    Object.assign(P, poseArms(root.children.map(m => m.geometry)));
+    return { id: C.id, scene: root, P };
   });
 }
 // smooth shading for low-poly models: every vertex takes the average normal of all the corners at its position
@@ -1971,6 +1991,84 @@ function smoothNormals(geo) {
   for (let i = 0; i < P.count; i++) { const s = sum.get(key(i)); if (s) { s.clone().normalize().toArray(N, i * 3); } }
   g.setAttribute('normal', new THREE.BufferAttribute(N, 3));
   return g;
+}
+// The animals come T-posed. Each arm is found by growing outward from its paw over the mesh (so the head is never
+// caught), then lowered once as a rigid piece turning at the top of the shoulder: it keeps its own thickness, the
+// armpit folds away inside the body, and it hangs as low as it can without sinking into the belly.
+function poseArms(geos) {
+  const key = (x, y, z) => `${Math.round(x * 2e3)},${Math.round(y * 2e3)},${Math.round(z * 2e3)}`;
+  const V = [], ids = new Map(), vid = [], adj = [];
+  geos.forEach((g, gi) => {
+    const P = g.attributes.position; vid[gi] = new Int32Array(P.count);
+    for (let i = 0; i < P.count; i++) {
+      const k = key(P.getX(i), P.getY(i), P.getZ(i));
+      let id = ids.get(k); if (id === undefined) { id = V.length; ids.set(k, id); V.push([P.getX(i), P.getY(i), P.getZ(i)]); adj.push(new Set()); }
+      vid[gi][i] = id;
+    }
+    const ix = g.index ? g.index.array : null, n = ix ? ix.length : P.count;
+    for (let t = 0; t < n; t += 3) {
+      const a = vid[gi][ix ? ix[t] : t], b = vid[gi][ix ? ix[t + 1] : t + 1], c = vid[gi][ix ? ix[t + 2] : t + 2];
+      adj[a].add(b).add(c); adj[b].add(a).add(c); adj[c].add(a).add(b);
+    }
+  });
+  const W = new Float32Array(V.length), sides = [];
+  for (const s of [1, -1]) {
+    let maxU = 0; for (const v of V) if (v[1] < 0.12) maxU = Math.max(maxU, s * v[2]);
+    let yLo = 1, yHi = -1; // the forearm and paw
+    for (const v of V) if (v[1] < 0.12 && s * v[2] > maxU * 0.75) { yLo = Math.min(yLo, v[1]); yHi = Math.max(yHi, v[1]); }
+    let zR = 0; // the arm meets the body as wide as the belly is just under the armpit
+    for (const v of V) if (v[1] > yLo - 0.05 && v[1] < yLo - 0.01 && Math.abs(v[0]) < 0.12) zR = Math.max(zR, s * v[2]);
+    const yTop = yHi + 0.05, inArm = new Uint8Array(V.length), stack = [];
+    V.forEach((v, i) => { if (s * v[2] > maxU * 0.9 && v[1] < 0.12) { inArm[i] = 1; stack.push(i); } });
+    while (stack.length) for (const j of adj[stack.pop()]) if (!inArm[j] && s * V[j][2] > zR && V[j][1] < yTop) { inArm[j] = 1; stack.push(j); }
+    let rootTop = yLo; V.forEach((v, i) => { if (inArm[i] && s * v[2] < zR + 0.05) rootTop = Math.max(rootTop, v[1]); });
+    const h = Math.max(0.04, rootTop - yLo), yP = rootTop - h * 0.15, uP = zR - h * 0.2;
+    V.forEach((v, i) => { if (inArm[i]) W[i] = s * Math.min(1, Math.max(0, (s * v[2] - zR) / 0.008)); });
+    // the body's width at each height (beside the arm), so the arm can lie along it
+    const T0 = new Float32Array(60 * 20).fill(-1), T = new Float32Array(60 * 20).fill(-1); // (height, depth) bins
+    V.forEach((v, i) => { if (!inArm[i] && v[1] < yLo + 0.02) { const b = Math.floor((v[1] + 0.6) * 50), xb = Math.floor((v[0] + 0.4) * 25); if (b >= 0 && b < 60 && xb >= 0 && xb < 20) T0[b * 20 + xb] = Math.max(T0[b * 20 + xb], s * v[2]); } });
+    for (let b = 0; b < 60; b++) for (let xb = 0; xb < 20; xb++) { let m = -1; for (let db = -1; db <= 1; db++) for (let dx = -1; dx <= 1; dx++) { const bb = b + db, xx = xb + dx; if (bb >= 0 && bb < 60 && xx >= 0 && xx < 20) m = Math.max(m, T0[bb * 20 + xx]); } T[b * 20 + xb] = m; }
+    sides.push({ s, yP, uP, T, h, len: maxU - zR });
+  }
+  // each arm swings down as one rigid piece (never bent, so it keeps its own shape), and a little forward if that lets
+  // it hang lower, until it rests against the body: it may press into the soft tummy a little, never sink in
+  const NV = V.map(v => v.slice()), rot = (S, a, f, v) => {
+    const du = S.s * v[2] - S.uP, dy = v[1] - S.yP;
+    const u = S.uP + du * Math.cos(a) + dy * Math.sin(a), dy2 = -du * Math.sin(a) + dy * Math.cos(a);
+    return [u, S.yP + v[0] * Math.sin(f) + dy2 * Math.cos(f), v[0] * Math.cos(f) - dy2 * Math.sin(f), du];
+  };
+  const pose = S => {
+    const arm = []; V.forEach((v, i) => { if (W[i] * S.s > 0.99) arm.push(i); });
+    for (let a = 1.32; a >= 0.7; a -= 0.02) for (let f = 0; f <= 0.42; f += 0.06) {
+      let pen = 0;
+      for (const i of arm) {
+        const [u, y, x, du] = rot(S, a, f, V[i]); if (du < S.len * 0.45) continue; // (the armpit end may tuck into the body)
+        const b = Math.floor((y + 0.6) * 50), xb = Math.floor((x + 0.4) * 25);
+        if (b >= 0 && b < 60 && xb >= 0 && xb < 20 ) { const t = S.T[b * 20 + xb]; if (t > 0) pen = Math.max(pen, t - u); }
+        if (pen > S.h * 0.3) break;
+      }
+      if (pen <= S.h * 0.3) return [a, f];
+    }
+    return [0.7, 0];
+  };
+  const P0 = pose(sides[0]), P1 = pose(sides[1]), ang = Math.min(P0[0], P1[0]), fwd = Math.max(P0[0] <= P1[0] ? P0[1] : P1[1], 0); // both arms alike
+  for (const S of sides) {
+    S.ang = ang; S.fwd = fwd;
+    V.forEach((v, i) => { const w = W[i] * S.s; if (w > 0) { const r = rot(S, ang * w, fwd * w, v); NV[i][0] = r[2]; NV[i][1] = r[1]; NV[i][2] = S.s * r[0]; } });
+  }
+  const sd = sides[0], sw = sides[1];
+  geos.forEach((g, gi) => {
+    const P = g.attributes.position, N = g.attributes.normal, A = new Float32Array(P.count);
+    for (let i = 0; i < P.count; i++) {
+      const id = vid[gi][i], w = W[id]; A[i] = w; if (!w) continue;
+      P.setXYZ(i, NV[id][0], NV[id][1], NV[id][2]);
+      if (N) { const s = Math.sign(w), S = sides[w > 0 ? 0 : 1], a = S.ang * Math.abs(w), f = S.fwd * Math.abs(w), nu = s * N.getZ(i), ny = N.getY(i), nx = N.getX(i), ny2 = -nu * Math.sin(a) + ny * Math.cos(a); N.setXYZ(i, nx * Math.cos(f) - ny2 * Math.sin(f), nx * Math.sin(f) + ny2 * Math.cos(f), s * (nu * Math.cos(a) + ny * Math.sin(a))); }
+    }
+    P.needsUpdate = true; if (N) N.needsUpdate = true;
+    g.setAttribute('aArm', new THREE.BufferAttribute(A, 1));
+    g.computeBoundingBox(); g.computeBoundingSphere();
+  });
+  return { baked: 1, drop: 0, sho: (sd.yP + sw.yP) / 2, armZ: (sd.uP + sw.uP) / 2, len: Math.max(0.15, (sd.len + sw.len) / 2), ang: (sd.ang + sw.ang) / 2 };
 }
 // where a T-posed body's parts are: arms are the parts furthest out sideways, the torso just under them, and the hip
 // is where the legs meet (the lowest point on the middle line, front half, so a tail doesn't count)
@@ -1999,7 +2097,7 @@ function addWalk(mat, { outline = 0, outfit = false, U = walkU, T = TINT, P = BU
   mat.onBeforeCompile = sh => {
     if (outfit) addOutfit(sh, true, T);
     Object.assign(sh.uniforms, U);
-    sh.vertexShader = 'uniform float uPhase;\nuniform float uAmp;\nuniform float uHurt;\nuniform float uHurtWig;\nuniform float uWave;\nuniform float uWaveT;\nvec2 rot2(vec2 p, float a) { return vec2(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a)); }\n' +
+    sh.vertexShader = (P.baked ? 'attribute float aArm;\n' : '') + 'uniform float uPhase;\nuniform float uAmp;\nuniform float uHurt;\nuniform float uHurtWig;\nuniform float uWave;\nuniform float uWaveT;\nvec2 rot2(vec2 p, float a) { return vec2(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a)); }\n' +
       sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
       {
         float sw = sin(uPhase) * uAmp;
@@ -2013,13 +2111,13 @@ function addWalk(mat, { outline = 0, outfit = false, U = walkU, T = TINT, P = BU
         q.x -= 0.035 * uAmp * ear; q.z += sin(uPhase * 2.0 - 1.1) * 0.022 * uAmp * ear;` : ''}
         // arms: lowered from the rest pose, then swing opposite to the leg on the same side
         const float sho = ${f(P.sho)}, az = ${f(P.armZ)};
-        float side = sign(q.z);
-        float wa = smoothstep(az - 0.015, az + 0.02, abs(q.z)) * smoothstep(${f(P.top)}, ${f(P.top - 0.07)}, q.y) * step(${f(P.bot)}, q.y);
+        ${P.baked ? 'float side = sign(aArm + q.z * 1e-4), wa = abs(aArm); // arms already hang down: only swung here' : `float side = sign(q.z);
+        float wa = smoothstep(az - 0.015, az + 0.02, abs(q.z)) * smoothstep(${f(P.top)}, ${f(P.top - 0.07)}, q.y) * step(${f(P.bot)}, q.y);`}
         // uHurt throws both arms up and out; uWave raises one arm high and waves it
         float waveUp = uWave * step(0.0, side) * (2.3 + 0.4 * sin(uWaveT));
         vec2 yz = rot2(vec2(q.y - sho, abs(q.z) - az), (${f(P.drop)} - 1.2 * uHurt - waveUp) * wa);
         q.y = yz.x + sho; q.z = side * (yz.y + az);
-        float along = clamp((sho - q.y) / 0.36, 0.0, 1.0); // 0 at the shoulder, 1 at the hand
+        float along = clamp((sho - q.y) / ${f(P.len || 0.36)}, 0.0, 1.0); // 0 at the shoulder, 1 at the hand
         float wig = sin(uPhase * 2.0 - along * 2.6) * along * uAmp;
         q.xy = rot2(q.xy - vec2(0.0, sho), (-0.85 * sw * side - 0.45 * wig + uHurtWig * side) * wa) + vec2(0.0, sho);
         vec2 fl = rot2(vec2(q.y - sho, abs(q.z) - az), 0.22 * along * uAmp * (0.5 + 0.5 * sin(uPhase * 2.0 + 1.3)) * wa);
@@ -2523,10 +2621,60 @@ function confetti() {
 // ---------- playing with a friend: a short code (or a link) connects two browsers directly (PeerJS) ----------
 // The host picks the world and maze; both race the same maze from opposite corners. Moves and the win are sent as
 // small messages; your friend's Buddy walks where they walk.
+// When two networks can't connect directly (phones on mobile data often can't), the game talks through public MQTT
+// brokers instead: a tiny MQTT-over-WebSocket client (connect, subscribe, publish, keepalive), on two brokers at once
+// so one being down doesn't matter (messages carry an id, so the copy from the second broker is dropped).
+function makeRelay(base, mine, onMsg) {
+  const BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://test.mosquitto.org:8081/mqtt'];
+  const enc = new TextEncoder(), dec = new TextDecoder(), seen = new Set(), me = Math.random().toString(36).slice(2, 10);
+  const str = t => { const b = enc.encode(t); return [b.length >> 8, b.length & 255, ...b]; };
+  const pkt = (type, body) => { const len = []; let n = body.length; do { let d = n & 127; n >>= 7; if (n) d |= 128; len.push(d); } while (n); return new Uint8Array([type, ...len, ...body]); };
+  let ended = false, seq = 0;
+  const links = BROKERS.map(url => {
+    const L = { ws: null, ready: false, buf: new Uint8Array(0), ping: 0 };
+    const open = () => {
+      if (ended) return;
+      const ws = L.ws = new WebSocket(url, 'mqtt'); ws.binaryType = 'arraybuffer';
+      ws.onopen = () => ws.send(pkt(0x10, [...str('MQTT'), 4, 2, 0, 60, ...str('bm' + me + Math.random().toString(36).slice(2, 6))]));
+      ws.onmessage = e => {
+        const nb = new Uint8Array(L.buf.length + e.data.byteLength); nb.set(L.buf); nb.set(new Uint8Array(e.data), L.buf.length); L.buf = nb;
+        for (;;) {
+          let len = 0, mul = 1, i = 1;
+          for (; i < 5 && i < L.buf.length; i++) { len += (L.buf[i] & 127) * mul; mul *= 128; if (!(L.buf[i] & 128)) break; }
+          if (i >= L.buf.length || L.buf.length < i + 1 + len) break;
+          const type = L.buf[0] >> 4, body = L.buf.subarray(i + 1, i + 1 + len); L.buf = L.buf.slice(i + 1 + len);
+          if (type === 2) { L.ready = true; ws.send(pkt(0x82, [0, 1, ...str(base + mine), 0])); clearInterval(L.ping); L.ping = setInterval(() => ws.readyState === 1 && ws.send(new Uint8Array([0xc0, 0])), 30000); }
+          else if (type === 3) {
+            const tl = (body[0] << 8) | body[1];
+            try { const env = JSON.parse(dec.decode(body.subarray(2 + tl))); const k = env.f + ':' + env.i; if (!seen.has(k)) { seen.add(k); if (seen.size > 500) seen.clear(); onMsg(env); } } catch {}
+          }
+        }
+      };
+      ws.onclose = () => { L.ready = false; clearInterval(L.ping); if (!ended) setTimeout(open, 1500); };
+      ws.onerror = () => {};
+    };
+    open();
+    return L;
+  });
+  return {
+    get ready() { return links.some(L => L.ready); },
+    pub(to, m, from) { const body = enc.encode(JSON.stringify({ f: from, i: me + seq++, m })); for (const L of links) if (L.ready) L.ws.send(pkt(0x30, [...str(base + to), ...body])); },
+    end() { ended = true; for (const L of links) { clearInterval(L.ping); try { if (L.ws.readyState === 1) L.ws.send(new Uint8Array([0xe0, 0])); L.ws.close(); } catch {} } },
+  };
+}
+// a relayed friend looks just like a direct connection to the lobby code: open, send(), close(), on(data/open/close)
+function relayConn(out) {
+  const h = { data: [], open: [], close: [] };
+  return { open: false, relay: true, on(ev, f) { h[ev].push(f); }, send(m) { if (this.open) out(m); },
+    close() { if (this.gone) return; this.gone = true; if (this.open) out({ t: 'bye' }); this.open = false; h.close.forEach(f => f()); },
+    emit(ev, x) { h[ev].forEach(f => f(x)); } };
+}
 const net = (() => {
   // A small lobby: the host holds a code, up to 3 friends join it (a star: every message goes through the host), the
   // host presses Start. Everyone gets the same maze and their own corner; moves and the win are relayed to all.
   let peer = null, host = false, code = '', conns = [], hostConn = null, players = [], me = 0, waitTimer = 0, pending = [], mode = 'ffa';
+  let relay = null, relayTimer = 0, knockTimer = 0;
+  const gid = Math.random().toString(36).slice(2, 9), topic = () => 'buddymaze/v1/' + code.toLowerCase() + '/';
   const MAX = 4, TEAM = ['#5bb2f2', '#ff8c6b'], TEAM_NAME = ['Blue', 'Orange'];
   const dbg = (...a) => { if (params.has('peerdebug')) console.log('[net]', ...a); };
   const status = t => { $('friendStatus').textContent = t; dbg(t); };
@@ -2603,7 +2751,47 @@ const net = (() => {
       if (!host && c === hostConn && c.wasOpen) { hostConn = null; toast('The host left the game'); status('The host left.'); }
     });
   }
-  function reset() { clearTimeout(waitTimer); for (const c of conns) c.close(); if (peer) peer.destroy(); peer = hostConn = null; conns = []; players = []; me = 0; }
+  function reset() {
+    clearTimeout(waitTimer); clearTimeout(relayTimer); clearInterval(knockTimer);
+    for (const c of conns) c.close();
+    if (peer) peer.destroy(); if (relay) setTimeout(relay.end, 300); // (let the goodbyes go out first)
+    peer = hostConn = relay = null; conns = []; players = []; me = 0;
+  }
+  // host: friends who couldn't connect directly knock on the relay; each becomes a relayed connection
+  function hostRelay() {
+    const rc = new Map();
+    relay = makeRelay(topic(), 'h', ({ f, m }) => {
+      let c = rc.get(f);
+      if (m.t === 'knock') {
+        if (!c) {
+          if (live().length >= raceCfg.size - 1 || state !== 'friend') return relay.pub('g/' + f, { t: 'full' }, 'h');
+          c = relayConn(x => relay && relay.pub('g/' + f, x, 'h')); rc.set(f, c); conns.push(c); wire(c); c.open = true; c.emit('open');
+        }
+        relay.pub('g/' + f, { t: 'welcome' }, 'h');
+      } else if (m.t === 'bye') { if (c) { rc.delete(f); c.open = false; c.gone = true; c.emit('close'); } }
+      else if (c) c.emit('data', m);
+    });
+  }
+  // guest: if no direct connection is up after a few seconds, knock on the relay until the host answers
+  function guestRelay() {
+    if (relay || (hostConn && hostConn.open)) return;
+    const c = relayConn(x => relay && relay.pub('h', x, gid));
+    relay = makeRelay(topic(), 'g/' + gid, ({ m }) => {
+      if (m.t === 'welcome') { if (!c.open && !(hostConn && hostConn.open)) { clearInterval(knockTimer); conns.push(c); wire(c); c.open = true; c.emit('open'); joined(c); } }
+      else if (m.t === 'full') { clearInterval(knockTimer); status('That game is full.'); }
+      else if (m.t === 'bye') { c.open = false; c.gone = true; c.emit('close'); }
+      else c.emit('data', m);
+    });
+    knockTimer = setInterval(() => { if (relay && relay.ready) relay.pub('h', { t: 'knock' }, gid); }, 1500);
+  }
+  function joined(cc) {
+    clearTimeout(waitTimer); clearTimeout(relayTimer); hostConn = cc;
+    for (const o of pending) if (o !== cc) o.close();
+    if (!cc.relay && relay) { clearInterval(knockTimer); setTimeout(relay.end, 300); relay = null; }
+    cc.send({ t: 'hello', skin, char: charId });
+    status('Joined! Waiting for the host to start…');
+  }
+  addEventListener('pagehide', () => { if (peer || relay) reset(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && peer && !peer.destroyed && peer.disconnected) peer.reconnect(); });
   const softErr = e => ['network', 'server-error', 'socket-error', 'socket-closed', 'disconnected'].includes(e.type);
   return {
@@ -2612,7 +2800,8 @@ const net = (() => {
     async host() {
       reset(); host = true; code = newCode(); me = 0; players = [];
       $('friendCode').textContent = code; syncLobby(); status('Getting ready…');
-      try { await loadPeer(); } catch { return status('Could not reach the friend service. Check your connection.'); }
+      hostRelay();
+      try { await loadPeer(); } catch { return lobby(); } // (the relay still works)
       peer = new Peer(idOf(code), PEER_OPTS);
       peer.on('open', () => lobby());
       peer.on('connection', c => {
@@ -2623,37 +2812,34 @@ const net = (() => {
       peer.on('error', e => {
         if (e.type === 'unavailable-id') return status('That code is taken, try again.');
         if (softErr(e)) { setTimeout(() => { if (peer && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); return; }
-        status('Connection problem: ' + e.type);
+        if (!relay) status('Connection problem: ' + e.type);
       });
     },
     async join(c) {
       reset(); host = false; code = c.trim().toUpperCase();
       if (code.length < 4) return status('Type the 5-letter code from your friend.');
       status('Looking for your friend…');
-      try { await loadPeer(); } catch { return status('Could not reach the friend service. Check your connection.'); }
+      relayTimer = setTimeout(guestRelay, 4500); // no direct connection by then: go through the relay
+      if (params.has('relayonly')) return guestRelay(); // (testing the relay)
+      try { await loadPeer(); } catch { return guestRelay(); }
       peer = new Peer(PEER_OPTS);
       // keep trying for about a minute: the host may be away from the game for a moment (sending you the link)
       let tries = 0;
       const attempt = () => {
         if (!peer || peer.destroyed || (hostConn && hostConn.open)) return;
-        if (++tries > 12) return status('Could not reach your friend. Ask them for a new invite.');
+        if (++tries > 12) return relay ? null : status('Could not reach your friend. Ask them for a new invite.');
         if (tries > 2) status('Still looking for your friend… keep the game open on both sides.');
         const cc = peer.connect(idOf(code), { reliable: true });
         if (tries === 1) pending = []; pending.push(cc); conns.push(cc);
         wire(cc);
-        cc.on('open', () => {
-          clearTimeout(waitTimer); hostConn = cc;
-          for (const o of pending) if (o !== cc) o.close();
-          cc.send({ t: 'hello', skin, char: charId });
-          status('Joined! Waiting for the host to start…');
-        });
+        cc.on('open', () => { if (hostConn && hostConn.open) cc.close(); else joined(cc); });
         clearTimeout(waitTimer); waitTimer = setTimeout(attempt, 5000);
       };
       peer.on('open', attempt);
       peer.on('error', e => {
         if (e.type === 'peer-unavailable') { clearTimeout(waitTimer); waitTimer = setTimeout(attempt, 4000); return; }
         if (softErr(e)) { setTimeout(() => { if (peer && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); return; }
-        status('Connection problem: ' + e.type);
+        guestRelay();
       });
     },
     start, syncLobby, toggleTeam,
@@ -2709,27 +2895,30 @@ function raceCrew() {
 }
 // the outfit screen's characters: a little picture of each, locked ones greyed with the world that unlocks them
 const charPics = {};
+// character card pictures: drawn once each by a small renderer of their own (smooth, antialiased, same light as the
+// menus), with the same model the menus use
+let picR = null, picEnv = null;
 function charPreview(id) {
   return charPics[id] ||= loadChar(id).then(ch => {
-    const S = 384, sc = new THREE.Scene();
-    sc.add(new THREE.HemisphereLight('#ffffff', '#dbe9cc', 1.1));
-    const kl = new THREE.DirectionalLight('#fff1dc', 2.2); kl.position.set(-2, 3, 4); sc.add(kl);
-    sc.environment = scene.environment; sc.environmentIntensity = 0.4;
-    const m = ch.scene.clone(true), U0 = newWalkU();
-    m.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.metalness = 0; addWalk(o.material, { outfit: ch.id === 'buddy', U: U0, P: ch.P, key: ch.id + 'pic' }); } });
-    const box = new THREE.Box3().setFromObject(m), k = 1 / (box.max.y - box.min.y);
-    m.scale.setScalar(k); m.position.set(0, -box.min.y * k, 0); m.rotation.y = -Math.PI / 2 + 0.35;
-    sc.add(m);
-    const cam = new THREE.PerspectiveCamera(26, 1, 0.1, 20); cam.position.set(0, 0.75, 2.6); cam.lookAt(0, 0.48, 0);
-    const rt = new THREE.WebGLRenderTarget(S, S, { colorSpace: THREE.SRGBColorSpace });
-    renderer.setClearColor(0x000000, 0); renderer.setRenderTarget(rt); renderer.clear(); renderer.render(sc, cam);
-    const px = new Uint8Array(S * S * 4); renderer.readRenderTargetPixels(rt, 0, 0, S, S, px);
-    renderer.setRenderTarget(null); renderer.setClearColor(0x000000, 1); rt.dispose();
-    const c = document.createElement('canvas'); c.width = c.height = S;
-    const x = c.getContext('2d'), img = x.createImageData(S, S);
-    for (let y = 0; y < S; y++) img.data.set(px.subarray((S - 1 - y) * S * 4, (S - y) * S * 4), y * S * 4);
-    x.putImageData(img, 0, 0);
-    return c.toDataURL();
+    const S = 256;
+    if (!picR) {
+      picR = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+      picR.setPixelRatio(1); picR.setSize(S, S, false);
+      picR.outputColorSpace = THREE.SRGBColorSpace; picR.toneMapping = THREE.ACESFilmicToneMapping;
+      picEnv = new THREE.PMREMGenerator(picR).fromScene(new RoomEnvironment(), 0.04).texture;
+    }
+    const sc = new THREE.Scene();
+    sc.environment = picEnv; sc.environmentIntensity = 0.55;
+    sc.add(new THREE.HemisphereLight('#ffffff', '#dbe9cc', 0.8));
+    const kl = new THREE.DirectionalLight('#fff1dc', 2.1); kl.position.set(-2, 3, 4);
+    const rim = new THREE.DirectionalLight('#ffffff', 1.2); rim.position.set(2, 3, -3); sc.add(kl, rim);
+    const z = () => ({ value: 0 });
+    const m = face.makeModel(ch, { uYaw: z(), uPitch: z(), uRoll: z(), uIdle: z(), uLean: z(), uArm: z(), uWave: z(), uWaveT: z() },
+      { uBlink: z(), uEyeY: z(), uEyeHalf: z(), uSkin: { value: new THREE.Color() }, uEyeOn: z() }, TINT);
+    m.rotation.y = -Math.PI / 2 + 0.3; sc.add(m);
+    const cam = new THREE.PerspectiveCamera(26, 1, 0.1, 20); cam.position.set(0, 0.72, 2.75); cam.lookAt(0, 0.5, 0);
+    picR.render(sc, cam);
+    return picR.domElement.toDataURL();
   });
 }
 function renderChars() {
@@ -2779,7 +2968,9 @@ const coach = (() => {
   const remember = id => { seen[id] = 1; try { localStorage.setItem('hidden-maze-tut', JSON.stringify(seen)); } catch {} };
   const ico = id => `<svg class="ico"><use href="#${id}"/></svg>`;
   const TIPS = {
-    move: { pic: '<div class="keys"><b>W</b><b>A</b><b>S</b><b>D</b></div>', title: 'Hello, explorer!', text: 'Walk with <kbd>W A S D</kbd> or the arrow keys. Hold a key to keep walking.' },
+    move: matchMedia('(pointer: coarse)').matches
+      ? { pic: ico('i-steps'), title: 'Hello, explorer!', text: 'Swipe the way you want to walk. Keep your finger down to keep walking.' }
+      : { pic: '<div class="keys"><b>W</b><b>A</b><b>S</b><b>D</b></div>', title: 'Hello, explorer!', text: 'Walk with <kbd>W A S D</kbd> or the arrow keys. Hold a key to keep walking.' },
     hidden: { pic: ico('i-eye'), title: 'The maze is hidden', text: 'Walls only rise around you, then sink back down. Remember the way you came!' },
     key: { pic: ico('i-key'), title: 'Find the golden key', text: 'It waits at the end of a side path somewhere in the maze.' },
     portal: { pic: ico('i-portal'), title: 'Now, the portal!', text: 'The stone portal woke up. Walk into it to finish the level.' },
@@ -2826,7 +3017,7 @@ function show(name) {
   if (name === 'worlds') renderMap();
   if (name === 'title') {
     const n = nextLevel();
-    $('playSub').textContent = `Level ${Math.floor(n / LEVELS_PER_WORLD) + 1}-${n % LEVELS_PER_WORLD + 1}`;
+    $('playSub').textContent = $('playSub2').textContent = `Level ${Math.floor(n / LEVELS_PER_WORLD) + 1}-${n % LEVELS_PER_WORLD + 1}`;
     $('starCount').textContent = Array.from({ length: TOTAL_LEVELS }, (_, k) => save.stars(k)).reduce((a, b) => a + b, 0);
     const wd = WORLDS[Math.floor(n / LEVELS_PER_WORLD)];
     $('worldNameCard').textContent = wd.name;
@@ -2955,6 +3146,12 @@ addEventListener('pointermove', e => {
   r.setProperty('--mx', (e.clientX / innerWidth * 2 - 1).toFixed(3));
   r.setProperty('--my', (e.clientY / innerHeight * 2 - 1).toFixed(3));
 });
+// Netlify's free plan pins a small badge to a bottom corner: lift the bottom buttons above it so it never covers them
+function clearBadge() {
+  const f = document.getElementById('nl-badge-frame') || document.getElementById('nl-hud-frame'), r = f && f.getBoundingClientRect();
+  document.documentElement.style.setProperty('--badge-h', r && r.height && r.top > innerHeight * 0.6 ? Math.ceil(innerHeight - r.top + 6) + 'px' : '0px');
+}
+setTimeout(clearBadge, 2500); setTimeout(clearBadge, 7000); addEventListener('resize', () => setTimeout(clearBadge, 300));
 // title menu: the hovered item is the selected one; arrow keys / W S move it, Enter or Space picks it
 const menuItems = [...document.querySelectorAll('#sideMenu .mitem')];
 const selectItem = el => menuItems.forEach(m => m.classList.toggle('sel', m === el));
@@ -3173,7 +3370,7 @@ const face = (() => {
   }
   // friends in the lobby stand behind you, a little apart (Fortnite-style), each with its own little idle
   const crew = [];
-  const SPOTS = [[-0.5, -0.45], [0.5, -0.45], [0, -0.85]];
+  const SPOTS = [[-0.58, -0.42], [0.58, -0.42], [-1.12, -0.95]];
   function setCrew(list) {
     for (const m of crew) { sc.remove(m.root); sc.remove(m.root.userData.sh); } crew.length = 0;
     list.slice(0, 3).forEach((it, i) => {
@@ -3248,9 +3445,12 @@ const face = (() => {
       cam.aspect = w / h;
       // the whole character on its pedestal, a little from above
       // with friends behind, pull back so the whole group fits
-      const wide = crew.length ? 1.55 : 1, fit = Math.max(0.95 / 0.2126, 0.62 * wide / (0.2126 * cam.aspect)) * (crew.length ? 1.12 : 1);
-      cam.position.set(0, 0.9 + (crew.length ? 0.25 : 0), fit);
-      cam.lookAt(0, crew.length ? 0.5 : 0.62, crew.length ? -0.35 : 0); // a bit low in the frame, leaving the top for the logo
+      // (on a phone's title the canvas is just the gap between the logo and the buttons: fill it)
+      const tight = !crew.length && canvas.closest('#title') && innerWidth / innerHeight < 1.25;
+      const wide = crew.length ? [1, 1.45, 1.6, 2.1][crew.length] : 1, fit = tight ? Math.max(0.6 / 0.2126, 0.5 / (0.2126 * cam.aspect))
+        : Math.max(0.95 / 0.2126, 0.62 * wide / (0.2126 * cam.aspect)) * (crew.length ? 1.12 : 1);
+      cam.position.set(crew.length === 3 ? -0.25 : 0, tight ? 0.75 : 0.9 + (crew.length ? 0.25 : 0), fit);
+      cam.lookAt(crew.length === 3 ? -0.25 : 0, tight ? 0.5 : crew.length ? 0.5 : 0.62, crew.length ? -0.35 : 0); // a bit low in the frame, leaving the top for the logo
       cam.updateProjectionMatrix();
     }
     let ty, tp, tr;
@@ -3294,7 +3494,7 @@ const face = (() => {
     updateBlink(dt);
     r.render(sc, cam);
   }
-  return { init, render, blink: B, setCrew };
+  return { init, render, blink: B, setCrew, makeModel };
 })();
 
 // ---------- pillars per frame ----------
@@ -3622,6 +3822,16 @@ peekBtn.addEventListener('pointerup', setPeek(false));
 peekBtn.addEventListener('pointerleave', setPeek(false));
 
 let fitW = 0, fitH = 0;
+// the render resolution follows the frame rate: long frames lower it a step, a long smooth run raises it back
+let prNow = PR_MAX, slowT = 0, fastT = 0;
+function adaptRes(raw) {
+  if (state !== 'play' || raw > 0.25) return; // (a hitch from loading or a hidden tab says nothing)
+  if (raw > 1 / 42) { slowT += raw; fastT = 0; } else { fastT += raw; if (raw < 1 / 55) slowT = Math.max(0, slowT - raw); }
+  const step = slowT > 1.2 && prNow > 0.75 ? -0.25 : fastT > 10 && prNow < PR_MAX ? 0.25 : 0;
+  if (!step) return;
+  prNow = Math.min(PR_MAX, Math.max(0.75, prNow + step)); slowT = fastT = 0;
+  renderer.setPixelRatio(prNow); composer.setPixelRatio(prNow); fitW = 0; // re-fit at the new resolution
+}
 function fitView() {
   const w = innerWidth, h = innerHeight;
   if (w === fitW && h === fitH) return;
@@ -3631,14 +3841,15 @@ function fitView() {
   renderer.setSize(w, h);
   composer.setSize(w, h);
   tiltH.uniforms.amt.value = 3.2 / w; tiltV.uniforms.amt.value = 3.2 / h; // blur step size in screen texels
-  const pr = renderer.getPixelRatio() * 0.5;
+  const pr = renderer.getPixelRatio() * (PHONE ? 0.35 : 0.5);
   mirror.getRenderTarget().setSize(Math.round(w * pr), Math.round(h * pr));
 }
 
 // ---------- loop ----------
 const clock = new THREE.Clock();
 function frame() {
-  const dt = Math.min(clock.getDelta(), 1 / 20), time = clock.elapsedTime;
+  const raw = clock.getDelta(), dt = Math.min(raw, 1 / 20), time = clock.elapsedTime;
+  adaptRes(raw);
   fitView();
   updatePlayer(dt, time);
   updateRivals(dt, time);
@@ -3689,4 +3900,4 @@ show('title');
 { const j = params.get('join'); if (j) { $('friend').classList.add('guest'); $('friendTitle').textContent = 'Joining your friend…'; show('friend'); net.join(j); } } // opened from an invite: straight in
 $('loading').style.opacity = 0; setTimeout(() => $('loading').remove(), 450);
 frame();
-window.__game = { st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };
+window.__game = { loadChar, st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };

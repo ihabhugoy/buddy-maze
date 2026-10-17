@@ -1,0 +1,4 @@
+/assets/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+/*.glb
+  Content-Type: model/gltf-binary

@@ -119,7 +119,7 @@ scene.environmentIntensity = 0.35;
 
 const camera = new THREE.PerspectiveCamera(28, 1, 0.5, 200);
 // miniature look: tilt-shift blur above and below a sharp band around Buddy
-const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: PHONE ? 2 : 4 }));
 composer.addPass(new RenderPass(scene, camera));
 // tilt-shift with a sharp band (not a single sharp line) centered on Buddy's height on screen each frame, so he is never
 // in the blur; the blur grows gently above and below the band. Two passes: across, then down.
@@ -886,6 +886,7 @@ let heldDir = null, queued = null;
 
 // a model's texture goes to a canvas (shrunk to keep phone memory in check) so its colors can be adjusted
 function canvasTexture(tex, size) {
+  if (PHONE) size /= 2; // phones: a quarter of the texture memory (the stones are small on a phone screen anyway)
   const img = tex.image;
   const k = Math.min(1, size / Math.max(img.width, img.height));
   const c = document.createElement('canvas');
@@ -2587,6 +2588,8 @@ async function startRace(online = null) {
   }
   warp.t = -1; $('fader').style.opacity = 0;
   buildLevel(-1, rm); setupRaceUI(); show('play'); intro.t = 0; intro.warm = 3; intro.wave = false; lastCount = -1;
+  intro.online = !!online; intro.hold = !!online && !intro.goAt; // (a late phone may already have its 'go')
+  if (online) { net.ready(); toast('Waiting for everyone to be ready…'); }
 }
 
 function win() {
@@ -2726,22 +2729,46 @@ const net = (() => {
     live().forEach((c, i) => c.send({ t: 'lobby', players, you: i + 1, mode }));
   }
   function toggleTeam(i) { if (!host || mode !== 'teams' || !players[i]) return; players[i].team ^= 1; lobby(); live().forEach((c, k) => c.send({ t: 'lobby', players, you: k + 1, mode })); }
+  // the host measures each friend's round trip all along, so the start can make up for it
+  let readyAt = new Set(), goTimer = 0;
+  setInterval(() => { if (host) for (const c of live()) c.send({ t: 'ping', s: performance.now() }); }, 2000);
+  function checkGo() {
+    if (!host || !goTimer) return;
+    const humans = players.map((p, i) => i).filter(i => !players[i].bot);
+    if (humans.every(i => readyAt.has(i))) go();
+  }
+  // start everyone's countdown at the same moment: the host picks a moment a little ahead and tells each friend when
+  // that is on their own clock (from the clock offset its pings measured, NTP style: the fastest round trip wins)
+  function go() {
+    clearTimeout(goTimer); goTimer = 0;
+    const now = performance.now(), L = Math.max(350, ...live().map(c => (c.rtt || 250) / 2 + 200)), T = now + L;
+    live().forEach(c => c.send({ t: 'go', at: c.off !== undefined ? T + c.off : null, wait: L - (c.rtt || 250) / 2 }));
+    raceGo(T);
+  }
   function start() { // host: everyone gets the same maze; player i starts in corner i
     if (players.length < 2) return;
+    readyAt = new Set(); clearTimeout(goTimer); goTimer = setTimeout(go, 20000); // (nobody waits forever for a stuck phone)
     const setup = { t: 'setup', seed: (Math.random() * 1e9) | 0, biome: raceCfg.biome, shape: raceCfg.shape, cells: 10, players, mode };
     live().forEach((c, i) => c.send({ ...setup, you: i + 1 }));
     begin({ ...setup, you: 0 });
   }
-  function begin(m) { me = m.you; players = m.players; startRace({ ...m, me }); }
+  function begin(m) { me = m.you; players = m.players; intro.goAt = 0; startRace({ ...m, me }); }
   function onData(c, m) {
     dbg('got', m.t);
     if (host) {
-      if (m.t === 'hello') { if (live().length > raceCfg.size - 1) { c.send({ t: 'full' }); return; } c.skin = m.skin; c.char = m.char; syncLobby(); }
+      if (m.t === 'hello') { if (live().length > raceCfg.size - 1) { c.send({ t: 'full' }); return; } c.skin = m.skin; c.char = m.char; syncLobby(); for (let k = 1; k <= 5; k++) setTimeout(() => c.open && c.send({ t: 'ping', s: performance.now() }), k * 300); }
       else if (m.t === 'pos' || m.t === 'win') { toAll(m, c); remote(m); } // pass it on to the others too
+      else if (m.t === 'pong') {
+        const r = performance.now() - m.s; c.rtt = c.rtt ? c.rtt * 0.7 + r * 0.3 : r;
+        if (!(c.best <= r * 1.2)) { c.best = r; c.off = m.g - (m.s + r / 2); } // their clock minus mine
+      }
+      else if (m.t === 'ready') { readyAt.add(live().indexOf(c) + 1); checkGo(); }
       else if (m.t === 'again') start();
     } else {
       if (m.t === 'lobby') { players = m.players; me = m.you; mode = m.mode; lobby(); }
       else if (m.t === 'setup') begin(m);
+      else if (m.t === 'ping') c.send({ t: 'pong', s: m.s, g: performance.now() });
+      else if (m.t === 'go') raceGo(m.at != null && m.at > performance.now() - 2000 ? m.at : performance.now() + Math.max(0, m.wait));
       else if (m.t === 'full') status('That game is full.');
       else remote(m);
     }
@@ -2851,6 +2878,7 @@ const net = (() => {
         guestRelay();
       });
     },
+    ready() { if (host) { readyAt.add(0); checkGo(); } else send({ t: 'ready' }); },
     start, syncLobby, toggleTeam,
     get isHost() { return host; },
     again() { if (host) start(); else { send({ t: 'again' }); toast('Asked the host for a rematch'); } },
@@ -2906,7 +2934,7 @@ function raceCrew() {
 const charPics = {};
 // character card pictures: drawn once each by a small renderer of their own (smooth, antialiased, same light as the
 // menus), with the same model the menus use
-let picR = null, picEnv = null;
+let picR = null, picEnv = null, picFree = 0;
 function charPreview(id) {
   return charPics[id] ||= loadChar(id).then(ch => {
     const S = 256;
@@ -2927,7 +2955,9 @@ function charPreview(id) {
     m.rotation.y = -Math.PI / 2 + 0.3; sc.add(m);
     const cam = new THREE.PerspectiveCamera(26, 1, 0.1, 20); cam.position.set(0, 0.72, 2.75); cam.lookAt(0, 0.5, 0);
     picR.render(sc, cam);
-    return picR.domElement.toDataURL();
+    const url = picR.domElement.toDataURL();
+    clearTimeout(picFree); picFree = setTimeout(() => { picR.dispose(); picR.forceContextLoss(); picR = picEnv = null; }, 2000); // (one WebGL context less)
+    return url;
   });
 }
 function renderChars() {
@@ -3047,7 +3077,7 @@ async function play(level) {
   const b = levelBiome(level);
   if (!stoneSets[b]) { $('busy').classList.add('on'); await stoneSet(b); $('busy').classList.remove('on'); } // first visit to a biome
   warp.t = -1; $('fader').style.opacity = 0;
-  buildLevel(level); show('play'); intro.t = 0; intro.warm = 3; intro.wave = false;
+  buildLevel(level); show('play'); intro.t = 0; intro.warm = 3; intro.wave = false; intro.online = intro.hold = false;
 }
 
 // adventure map: a 3D board of floating islands, one per world, left to right (see map3d.js)
@@ -3055,7 +3085,7 @@ const starSvg = on => `<svg class="${on ? 'on' : ''}"><use href="#i-star"/></svg
 let map3d = null;
 function renderMap() {
   if (!map3d) {
-    map3d = createMap3D({ canvas: $('mapCanvas'), layer: $('mapNodes'), worlds: WORLDS, perWorld: LEVELS_PER_WORLD,
+    map3d = createMap3D({ canvas: $('mapCanvas'), renderer, layer: $('mapNodes'), worlds: WORLDS, perWorld: LEVELS_PER_WORLD,
       stars: save.stars, unlocked, next: nextLevel, starSvg, stoneSet, addLights, biomes: BIOMES,
       patterns: { woods: groundTexture('woods'), autumn: groundTexture('autumn'), desert: groundTexture('desert'), snow: groundTexture('snow') },
       decor: b => sceneryModels.arch.map(m => ({ geo: m.geo, mat: decorMat(m, b), h: m.h })) });
@@ -3263,7 +3293,7 @@ $('nextBtn').addEventListener('click', () => {
 const face = (() => {
   const canvas = $('faceCanvas');
   const r = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-  r.setPixelRatio(Math.min(devicePixelRatio, 2));
+  r.setPixelRatio(Math.min(devicePixelRatio, PHONE ? 1.5 : 2));
   r.outputColorSpace = THREE.SRGBColorSpace;
   r.toneMapping = THREE.ACESFilmicToneMapping;
   const sc = new THREE.Scene();
@@ -3574,10 +3604,12 @@ const CAM_DIR = new THREE.Vector3(1, Math.tan(THREE.MathUtils.degToRad(54)) * Ma
 const AHEAD = new THREE.Vector3(-0.9, 0, -0.9); // keep more maze visible above the character
 // level intro: start close on the portal, pull out to the whole maze, then glide down to the character.
 // Every move eases in and out, and the zoom changes at an even rate (interpolated in log space).
-const intro = { t: -1, warm: 0, wave: false };
+const intro = { t: -1, warm: 0, wave: false, online: false, hold: false, t0: 0 };
+// online race: everyone's countdown starts together (the host's 'go', minus each player's network delay)
+function raceGo(at) { intro.hold = false; intro.goAt = intro.t0 = at; } // (at: this device's clock)
 const INTRO = [1.2, 3.4, 3.9, 6.4]; // key hold | out to wide | wide hold | down to the character
 const skipIntro = () => {
-  if (intro.t < 0) return;
+  if (intro.t < 0 || intro.online) return; // (an online race's intro is shared: nobody can skip ahead)
   if (mode === 'race') { const end = RACE_HOLD + rivals.length * RACE_SEG; if (intro.t < end) intro.t = end; } // straight to the countdown
   else if (intro.t < INTRO[2]) intro.t = INTRO[2];
   intro.warm = 0;
@@ -3612,8 +3644,8 @@ function raceShots() {
   return [new THREE.Vector3(key.position.x, 0, key.position.z), ...rivals.map(r => r.root.position.clone().setY(0)), player.position.clone().setY(0).add(AHEAD)];
 }
 function raceShot(dt) {
-  if (intro.warm > 0) { intro.warm--; dt = 0; }
-  intro.t += Math.min(dt, 1 / 30);
+  if (intro.online) intro.t = intro.hold ? 0 : Math.max(0, (performance.now() - intro.t0) / 1000); // real time, not frames
+  else { if (intro.warm > 0) { intro.warm--; dt = 0; } intro.t += Math.min(dt, 1 / 30); }
   const shots = raceShots(), t = intro.t, moveEnd = RACE_HOLD + (shots.length - 1) * RACE_SEG;
   let W = 3.4;
   intro.wave = false;
@@ -3913,4 +3945,4 @@ show('title');
 { const j = params.get('join'); if (j) { $('friend').classList.add('guest'); $('friendTitle').textContent = 'Joining your friend…'; show('friend'); net.join(j); } } // opened from an invite: straight in
 $('loading').style.opacity = 0; setTimeout(() => $('loading').remove(), 450);
 frame();
-window.__game = { loadChar, st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };
+window.__game = { intro, net, loadChar, st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };

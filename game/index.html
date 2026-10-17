@@ -44,6 +44,7 @@
 
   /* color grading over the 3D view */
   .grade { position: fixed; inset: 0; pointer-events: none; }
+  body[data-state="worlds"] .grade { display: none; } /* the map is drawn ungraded */
   .grade.tint { background: linear-gradient(180deg, rgba(255,205,140,.20), rgba(255,170,110,.06) 60%, rgba(255,190,130,.12)); mix-blend-mode: soft-light; }
   .grade.sun { background: radial-gradient(120% 60% at 50% -8%, rgba(255,226,170,.4), rgba(255,226,170,0) 55%); mix-blend-mode: screen; }
   .grade.vig { background: radial-gradient(130% 95% at 50% 42%, rgba(0,0,0,0) 55%, rgba(120,80,40,.22) 100%); mix-blend-mode: multiply; }
@@ -229,7 +230,7 @@
   .panel .row .btn { flex: 1; min-width: 0; padding: 11px 12px 14px; font-size: 17px; }
 
   /* ---------- adventure map ---------- */
-  #worlds { padding: 0; background: #f5f1ea; }
+  #worlds { padding: 0; background: transparent; } /* the board is drawn by the game's canvas behind */
   #mapCanvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
   #mapCanvas:active { cursor: grabbing; }
   #mapNodes { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }

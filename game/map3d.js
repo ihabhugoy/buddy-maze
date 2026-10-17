@@ -7,12 +7,16 @@ import * as THREE from 'three';
 
 const STEP = 1.7, GAP = 4.2, PAD = 2.4;
 
-export function createMap3D({ canvas, layer, worlds, perWorld, stars, unlocked, next, starSvg, stoneSet, addLights, biomes, patterns, decor }) {
-  const r = new THREE.WebGLRenderer({ canvas, antialias: true });
-  r.setPixelRatio(Math.min(devicePixelRatio, 2));
-  r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
-  r.toneMapping = THREE.ACESFilmicToneMapping; r.outputColorSpace = THREE.SRGBColorSpace;
-  r.localClippingEnabled = true;
+export function createMap3D({ canvas, renderer, layer, worlds, perWorld, stars, unlocked, next, starSvg, stoneSet, addLights, biomes, patterns, decor }) {
+  // drawn by the game's own renderer when it's given (one WebGL context, so the stones' textures are on the GPU once);
+  // the canvas then only catches the drags, and the game's canvas behind it shows the board
+  const own = !renderer, r = renderer || new THREE.WebGLRenderer({ canvas, antialias: true });
+  if (own) {
+    r.setPixelRatio(Math.min(devicePixelRatio, 2));
+    r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.toneMapping = THREE.ACESFilmicToneMapping; r.outputColorSpace = THREE.SRGBColorSpace;
+    r.localClippingEnabled = true;
+  }
   const BG = new THREE.Color('#f5f1ea');
   const sc = new THREE.Scene();
   sc.background = BG; sc.fog = new THREE.Fog(BG, 16, 34);
@@ -171,7 +175,7 @@ export function createMap3D({ canvas, layer, worlds, perWorld, stars, unlocked, 
   const v = new THREE.Vector3();
   function render(dt, t) {
     const cw = canvas.clientWidth, ch = canvas.clientHeight;
-    if (cw !== w || ch !== h) { w = cw; h = ch; r.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); }
+    if (cw !== w || ch !== h) { w = cw; h = ch; if (own) r.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); }
     camX += (wantX - camX) * Math.min(1, dt * 6);
     regions.forEach((R, i) => { if (!R.built && camX + 14 > R.x0 && camX - 14 < R.x1) build(i); });
     const far = Math.max(1, 1.5 / cam.aspect); // narrow windows pull back
@@ -184,6 +188,7 @@ export function createMap3D({ canvas, layer, worlds, perWorld, stars, unlocked, 
       const want = m.userData.rise ? m.userData.rise + Math.sin(t * 2) * 0.03 : 0;
       m.position.y += (want - m.position.y) * Math.min(1, dt * 5);
     }
+    if (!own) r.shadowMap.needsUpdate = true;
     r.render(sc, cam);
     for (let L = 0; L < total; L++) {
       const p = nodePos(L);

@@ -2428,8 +2428,8 @@ function confetti() {
 // The host picks the world and maze; both race the same maze from opposite corners. Moves and the win are sent as
 // small messages; your friend's Buddy walks where they walk.
 const net = (() => {
-  let peer = null, conn = null, host = false, code = '', friendSkin = 1;
-  const status = t => { $('friendStatus').textContent = t; };
+  let peer = null, conn = null, host = false, code = '', friendSkin = 1, pending = [];
+  const status = t => { $('friendStatus').textContent = t; if (params.has('peerdebug')) console.log('[net]', t); };
   const loadPeer = () => window.Peer ? Promise.resolve() : new Promise((res, rej) => {
     const sc = document.createElement('script'); sc.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc);
   });
@@ -2449,6 +2449,7 @@ const net = (() => {
     startRace({ ...setup, friendSkin, guest: false });
   }
   function onData(m) {
+    if (params.has('peerdebug')) console.log('[net] got', m.t);
     if (m.t === 'hello') { friendSkin = m.skin; status('Your friend is here!'); setTimeout(round, 600); }
     else if (m.t === 'setup') { friendSkin = m.skin; startRace({ ...m, friendSkin, guest: true }); }
     else if (m.t === 'pos') {
@@ -2460,11 +2461,12 @@ const net = (() => {
     else if (m.t === 'again' && host) round();
   }
   function wire(c) {
-    conn = c;
-    c.on('data', onData);
-    c.on('close', () => { conn = null; toast('Your friend left the game'); status('Your friend left.'); });
+    c.on('data', m => { conn = c; onData(m); }); // whichever connection talks to us is the live one
+    c.on('close', () => { if (conn !== c) return; const was = c.wasOpen; conn = null; if (was) { toast('Your friend left the game'); status('Your friend left.'); } });
+    c.on('open', () => { c.wasOpen = true; });
   }
-  function reset() { if (conn) conn.close(); if (peer) peer.destroy(); peer = conn = null; }
+  function reset() { clearTimeout(waitTimer); if (conn) conn.close(); if (peer) peer.destroy(); peer = conn = null; }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && peer && !peer.destroyed && peer.disconnected) peer.reconnect(); });
   return {
     get online() { return !!(conn && conn.open); },
     send,
@@ -2476,7 +2478,11 @@ const net = (() => {
       peer.on('open', () => status('Send the link to your friend, then wait here.'));
       peer.on('connection', c => { wire(c); status('Your friend is joining…'); });
       peer.on('disconnected', () => { if (peer && !peer.destroyed) peer.reconnect(); }); // keep the code alive if the signal drops
-      peer.on('error', e => status(e.type === 'unavailable-id' ? 'That code is taken, try again.' : 'Connection problem: ' + e.type));
+      peer.on('error', e => {
+        if (e.type === 'unavailable-id') return status('That code is taken, try again.');
+        if (['network', 'server-error', 'socket-error', 'socket-closed', 'disconnected'].includes(e.type)) { status('Reconnecting…'); setTimeout(() => { if (peer && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); return; }
+        status('Connection problem: ' + e.type);
+      });
     },
     async join(c) {
       reset(); host = false; code = c.trim().toUpperCase();
@@ -2484,14 +2490,29 @@ const net = (() => {
       status('Looking for your friend…');
       try { await loadPeer(); } catch { return status('Could not reach the friend service. Check your connection.'); }
       peer = new Peer(PEER_OPTS);
-      peer.on('open', () => {
+      // keep trying for about a minute: the host may be away from the game for a moment (sending you the link)
+      let tries = 0;
+      const attempt = () => {
+        if (!peer || peer.destroyed) return;
+        if (conn && conn.open) return;
+        if (++tries > 12) return status('Could not reach your friend. Ask them to open the friend screen again and send a new code.');
+        if (tries > 2) status('Still looking for your friend… keep the game open on both sides.');
         const cc = peer.connect(idOf(code), { reliable: true });
+        tries === 1 ? (pending = [cc]) : pending.push(cc);
         wire(cc);
-        clearTimeout(waitTimer);
-        waitTimer = setTimeout(() => { if (!cc.open) status('Still connecting… make sure your friend keeps the game open on the friend screen.'); }, 12000);
-        cc.on('open', () => { clearTimeout(waitTimer); status('Connected! Starting…'); send({ t: 'hello', skin }); });
+        cc.on('open', () => {
+          clearTimeout(waitTimer); conn = cc;
+          for (const o of pending) if (o !== cc) o.close(); // drop the other attempts
+          status('Connected! Starting…'); cc.send({ t: 'hello', skin });
+        });
+        clearTimeout(waitTimer); waitTimer = setTimeout(attempt, 5000);
+      };
+      peer.on('open', attempt);
+      peer.on('error', e => {
+        if (e.type === 'peer-unavailable') { clearTimeout(waitTimer); waitTimer = setTimeout(attempt, 4000); return; } // not there yet: try again shortly
+        if (['network', 'server-error', 'socket-error', 'socket-closed', 'disconnected'].includes(e.type)) { setTimeout(() => { if (peer && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); return; }
+        status('Connection problem: ' + e.type);
       });
-      peer.on('error', e => status(e.type === 'peer-unavailable' ? 'No game with that code. Check it and try again.' : 'Connection problem: ' + e.type));
     },
     again() { if (host) round(); else { send({ t: 'again' }); toast('Asked your friend for a rematch'); } },
     copy() { navigator.clipboard.writeText(link()).then(() => toast('Link copied! Send it to your friend'), () => toast(link())); },

@@ -134,7 +134,7 @@ addEventListener('pagehide', () => { if (bb.lostAt && Date.now() - bb.lostAt < 3
 const PHONE = matchMedia('(pointer: coarse)').matches;
 // (1.5 on Retina laptops too: 2x is ~1.8 times the pixels through MSAA, tilt-shift and the reflection, which kept the
 // GPU flat out and the fans on, for a difference the soft tilt-shift look hides)
-const PR_MAX = Math.min(devicePixelRatio, 1.5);
+const PR_MAX = Math.min(devicePixelRatio, PHONE ? 1.25 : 1.5); // (phones: fixed, see adaptRes)
 if (PHONE) document.documentElement.classList.add('phone');
 // (phones draw straight to the screen, so they use the canvas's own antialiasing and skip the composer's big buffers)
 const renderer = new THREE.WebGLRenderer({ antialias: PHONE, powerPreference: 'high-performance' });
@@ -343,17 +343,15 @@ const sfx = (() => {
     }));
     apply();
     wantMusic = true; // the music starts with the game (quietly under the menus), not only once you play
-    fetch('assets/music/cozy.mp3').then(r => r.arrayBuffer()).then(b => ctx.decodeAudioData(b)).then(buf => { music = buf; startMusic(); }).catch(() => {});
+    // (streamed from an <audio> element through the mixer, not decoded whole into memory)
+    try { music = new Audio('assets/music/cozy.mp3'); music.loop = true; music.preload = 'auto'; ctx.createMediaElementSource(music).connect(musicGain); startMusic(); } catch { music = null; }
   }
   // background music: starts the first time you play, then loops (60 s track)
   let musicStarted = false, wantMusic = false;
   function startMusic() {
     if (!wantMusic || musicStarted || !music || !ctx) return;
     musicStarted = true;
-    const src = ctx.createBufferSource();
-    src.buffer = music; src.loop = true;
-    src.connect(musicGain);
-    src.start();
+    music.play().catch(() => { musicStarted = false; }); // (tried again on the next tap if the browser said no)
     apply();
   }
   function setScene(playing) { // called on every screen change
@@ -1830,7 +1828,7 @@ function addHaze(mat) {
 }
 async function loadScenery() {
   const loader = new GLB();
-  for (const [n, kind] of SCENERY) {
+  for (const [n, kind] of PHONE ? SCENERY.slice(0, 4) : SCENERY) { // (phones: 4 ruin models, not 9; they're far, hazy background)
     const url = `assets/decor/d${String(n).padStart(2, '0')}.glb`;
     try {
       const g = await loader.loadAsync(url);
@@ -2089,6 +2087,7 @@ const charCache = {};
 function loadChar(id) {
   const C = CHARS.find(c => c.id === id) || CHARS[0];
   return charCache[C.id] ||= new GLB().loadAsync(C.file).then(g => {
+    if (PHONE) g.scene.traverse(o => { if (o.isMesh && o.material.map && o.material.map.image && o.material.map.image.width > 1024) o.material.map = canvasTexture(o.material.map, 2048); if (o.isMesh) o.material.metalnessMap = o.material.roughnessMap = null; });
     if (C.id === 'buddy') return { id: 'buddy', scene: g.scene, P: BUDDY_P };
     g.scene.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(g.scene), h = box.max.y - box.min.y;
@@ -3669,7 +3668,10 @@ const face = (() => {
     updateBlink(dt);
     r.render(sc, cam);
   }
-  function sleep() { if (w) { r.setSize(1, 1, false); w = h = 0; } } // (re-sized on the next menu frame)
+  function sleep() {
+    if (w) { r.setSize(1, 1, false); w = h = 0; } // (re-sized on the next menu frame)
+    if (PHONE) sc.traverse(o => { for (const m of o.material ? [].concat(o.material) : []) for (const k in m) if (m[k] && m[k].isTexture) m[k].dispose(); }); // (uploaded again when shown)
+  }
   return { init, render, blink: B, setCrew, makeModel, sleep };
 })();
 
@@ -4003,7 +4005,9 @@ let fitW = 0, fitH = 0;
 // the render resolution follows the frame rate: long frames lower it a step, a long smooth run raises it back
 let prNow = PR_MAX, slowT = 0, fastT = 0;
 function adaptRes(raw) {
-  if (state !== 'play' || raw > 0.25) return; // (a hitch from loading or a hidden tab says nothing)
+  // phones keep one resolution: every change reallocates the screen buffers (iPhones pile that memory up until Safari
+  // closes the page), and the hiccups of loading a level were read as slowness, dropping a step each level
+  if (PHONE || state !== 'play' || raw > 0.25) return; // (a hitch from loading or a hidden tab says nothing)
   if (raw > 1 / 42) { slowT += raw; fastT = 0; } else { fastT += raw; if (raw < 1 / 55) slowT = Math.max(0, slowT - raw); }
   const step = slowT > 1.2 && prNow > 0.75 ? -0.25 : !PHONE && fastT > 10 && prNow < PR_MAX ? 0.25 : 0; // (phones only step down)
   if (!step) return;

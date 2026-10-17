@@ -26,12 +26,20 @@ class GLB extends GLTFLoader {
   loadAsync(url) { return super.loadAsync(url).then(g => { g.scene.traverse(o => { if (o.isMesh) floatify(o.geometry); }); return g; }); }
 }
 // the stone models come at ~95k triangles: far too many for a phone. Keep ~12k (texture seams are kept intact).
+MeshoptSimplifier.useExperimentalFeatures = true; // (for simplifyWithAttributes)
 function simplifyGeo(geo, ratio = 0.15, err = 0.02) {
   const P = geo.attributes.position, pos = new Float32Array(P.count * 3);
   for (let i = 0; i < P.count; i++) { pos[i * 3] = P.getX(i); pos[i * 3 + 1] = P.getY(i); pos[i * 3 + 2] = P.getZ(i); }
-  const idx = new Uint32Array(geo.index.array);
+  // the normals count as error too: a collapse that turns a face away from its neighbours showed as a dark hole
+  const Nm = geo.attributes.normal, nrm = new Float32Array(P.count * 3);
+  if (Nm) for (let i = 0; i < P.count; i++) { nrm[i * 3] = Nm.getX(i); nrm[i * 3 + 1] = Nm.getY(i); nrm[i * 3 + 2] = Nm.getZ(i); }
+  const idx = new Uint32Array(geo.index.array), want = Math.floor(idx.length * ratio / 3) * 3;
+  const run = (ix, flags, w) => w ? MeshoptSimplifier.simplifyWithAttributes(ix, pos, 3, nrm, 3, [w, w, w], null, want, err, flags)[0] : MeshoptSimplifier.simplify(ix, pos, 3, want, err, flags)[0];
   // texture seams are open edges in the index: locking them keeps the surface closed (otherwise holes appear)
-  const [out] = MeshoptSimplifier.simplify(idx, pos, 3, Math.floor(idx.length * ratio / 3) * 3, err, ['LockBorder']);
+  let out = run(idx, ['LockBorder'], Nm ? 0.6 : 0);
+  // a scan cut into many texture islands is nearly all "border", so locking it can leave it at full size (one snow
+  // stone stayed at 35k): then the seams may move too (the simplifier keeps both sides of a seam together)
+  if (out.length > want * 1.5) out = run(out, [], 0);
   geo.setIndex(new THREE.BufferAttribute(out, 1));
 }
 
@@ -94,9 +102,11 @@ const nextLevel = () => { for (let L = 0; L < TOTAL_LEVELS; L++) if (!save.stars
 function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
 // ---------- renderer / scene ----------
-// phones get a lighter setup: a lower resolution cap and smaller shadows (the composer does its own antialiasing)
+// phones get a lighter setup: smaller shadows and no composer (the composer does its own antialiasing)
 const PHONE = matchMedia('(pointer: coarse)').matches;
-const PR_MAX = Math.min(devicePixelRatio, PHONE ? 1.5 : 2);
+// (1.5 on Retina laptops too: 2x is ~1.8 times the pixels through MSAA, tilt-shift and the reflection, which kept the
+// GPU flat out and the fans on, for a difference the soft tilt-shift look hides)
+const PR_MAX = Math.min(devicePixelRatio, 1.5);
 if (PHONE) document.documentElement.classList.add('phone');
 // (phones draw straight to the screen, so they use the canvas's own antialiasing and skip the composer's big buffers)
 const renderer = new THREE.WebGLRenderer({ antialias: PHONE, powerPreference: 'high-performance' });
@@ -1332,7 +1342,7 @@ function bakeFloor(variants, B) {
       renderer.render(bakeScene, c.cam);
     }
     renderer.setRenderTarget(null);
-    rt.texture.anisotropy = 4;
+    rt.texture.anisotropy = 4; rt.texture.userData.rt = rt; // (kept so the whole target can be freed later)
     return rt.texture;
   };
   const half = CFG.tileW / 2, slab = -CFG.clipY;
@@ -1344,7 +1354,8 @@ function bakeFloor(variants, B) {
     return cam;
   });
   // aVar = variant * 4 + rotation: top atlas is 8 x 4 cells, side atlas is 16 x 8 cells (4 sides per aVar)
-  const TC = 384, SW = 256, SH = 64, V = variants.length;
+  // (phones: half size, a quarter of the memory; a flat stone is only ~60 px across on a phone screen)
+  const TC = PHONE ? 192 : 384, SW = PHONE ? 128 : 256, SH = PHONE ? 32 : 64, V = variants.length;
   const topCells = [], sideCells = [];
   for (let v = 0; v < V; v++) for (let r = 0; r < 4; r++) {
     const a = v * 4 + r;
@@ -1367,6 +1378,9 @@ function bakeFloor(variants, B) {
   // BoxGeometry face order: +x, -x, +y, -y, +z, -z
   return [side(0), side(1), top, top, side(2), side(3)];
 }
+// the flat stones' picture atlas (~60 MB of graphics memory on a laptop, ~15 MB on a phone) is baked when a level of
+// that world is played, not when the map loads the world's stones (scrolling the map used to bake every world)
+function floorMatOf(set) { return (set.floorMat ||= bakeFloor(set.variants, set.B)); }
 // each biome's stones and door block, loaded and prepared the first time the biome is needed
 const stoneSets = {};
 const stoneSetLoads = {};
@@ -1419,6 +1433,7 @@ function stoneSet(name) {
         if (y > CFG.clipY - 0.05) idx.push(src[t], src[t + 1], src[t + 2]);
       }
       v.cap = v.raw.clone(); v.cap.setIndex(idx);
+      v.raw.userData.shared = v.cap.userData.shared = true; // (the portal's stones use them too: never freed with a level)
     }
     door.mat.clippingPlanes = clip; door.mat.clipShadows = true;
     // the door's tree is a big leafy mass: the moss glow made it look flat and haloed, so it gets only a touch
@@ -1440,7 +1455,7 @@ function stoneSet(name) {
       };
       door.mat.customProgramCacheKey = () => 'door-neon';
     }
-    return (stoneSets[name] = { variants, wallMats, floorMat: bakeFloor(variants, B), door, rockRef, mossRef });
+    return (stoneSets[name] = { variants, wallMats, floorMat: null, B, door, rockRef, mossRef });
   })();
 }
 
@@ -1564,13 +1579,59 @@ function freeTree(o) {
     for (const m of c.material ? [].concat(c.material) : []) if (!keep.has(m)) { for (const k of ['map', 'alphaMap', 'emissiveMap']) if (m[k] && !m[k].userData.shared) m[k].dispose(); m.dispose(); }
   });
 }
+// A world's stone meshes are built the first time one of its levels is played and then reused by every level after
+// it (only rebuilt, larger, if a maze is bigger than any before). Rebuilding them per level made phones send every
+// stone to the graphics chip again each level; iPhones don't hand that memory back quickly and closed the page.
+const WHITE = new THREE.Color(1, 1, 1);
+const roomFor = T => Math.max(625, Math.ceil(T * 1.25)); // a little headroom so the next, bigger maze fits too
+function setMeshes(set, T) {
+  if (set.meshes && set.meshes.room >= T) return set.meshes;
+  if (set.meshes) for (const m of [...set.meshes.walls, ...set.meshes.caps]) m.dispose(); // (frees only their instance data)
+  const room = roomFor(T);
+  const walls = set.variants.map((v, i) => {
+    const m = new THREE.InstancedMesh(v.raw, set.wallMats[i], room);
+    m.castShadow = true;
+    return m;
+  });
+  // flat stones near the camera are drawn as the real stone top (no flattening); far ones use the lighter picture
+  const caps = set.variants.map((v, i) => {
+    const geo = new THREE.BufferGeometry();
+    geo.setIndex(v.cap.index);
+    for (const k in v.cap.attributes) geo.setAttribute(k, v.cap.attributes[k]);
+    geo.boundingSphere = v.cap.boundingSphere; geo.boundingBox = v.cap.boundingBox;
+    geo.setAttribute('aGlow', new THREE.InstancedBufferAttribute(new Float32Array(room), 1));
+    const m = new THREE.InstancedMesh(geo, set.wallMats[i], room);
+    m.receiveShadow = true;
+    return m;
+  });
+  for (const m of [...walls, ...caps]) { m.frustumCulled = false; m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.setColorAt(0, WHITE); }
+  return (set.meshes = { walls, caps, room });
+}
+// the flat tiles' pictures and their soft shadows: one pair for every world (each world swaps in its own atlas)
+let floorRoom = 0;
+function floorMeshes(T) {
+  if (floorRoom >= T) return;
+  if (floor) { scene.remove(floor, floorShadow); floor.dispose(); floorShadow.dispose(); }
+  floorRoom = roomFor(T);
+  if (assets.floorGeo.attributes.aVar) assets.floorGeo.dispose(); // (the old, smaller per-tile attribute leaves the GPU)
+  assets.floorGeo.setAttribute('aVar', new THREE.InstancedBufferAttribute(new Float32Array(floorRoom), 1));
+  floor = new THREE.InstancedMesh(assets.floorGeo, floorMatOf(curSet), floorRoom);
+  floorShadow = new THREE.InstancedMesh(assets.shadowGeo, assets.shadowMat, floorRoom);
+  floorShadow.receiveShadow = true;
+  for (const m of [floor, floorShadow]) { m.frustumCulled = false; m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(m); }
+  floor.setColorAt(0, WHITE);
+}
+// the cave doors' mushroom glow: two lights that always stay in the scene (dark when unused), because adding or
+// removing a light makes the browser rebuild every material's shader, a long stall on phones
+const doorLights = [0, 1].map(() => { const l = new THREE.PointLight('#c77dff', 0, 3, 1.5); scene.add(l); return l; });
 // phones: the other worlds' stones leave the GPU while you play (three.js uploads them again by itself if the map shows
 // them later), so only the level's own world is held in graphics memory
 function trimGPU() {
   if (!PHONE) return;
   for (const [b, set] of Object.entries(stoneSets)) {
     if (!set || !set.variants || set === curSet || b === 'cave') continue;
-    for (const m of [...(set.wallMats || []), set.floorMat, set.door && set.door.mat]) if (m) for (const k in m) if (m[k] && m[k].isTexture) m[k].dispose();
+    for (const m of [...(set.wallMats || []), set.door && set.door.mat]) if (m) for (const k in m) if (m[k] && m[k].isTexture) m[k].dispose();
+    if (set.floorMat) { new Set(set.floorMat.map(m => m.map)).forEach(t => t.userData.rt.dispose()); set.floorMat = null; } // (a render target: baked again on return)
     for (const v of set.variants) { if (v.raw) v.raw.dispose(); if (v.cap) v.cap.dispose(); }
     if (set.door && set.door.raw) set.door.raw.dispose();
   }
@@ -1582,7 +1643,8 @@ function buildLevel(level, race = null, opts = {}) {
   const bName = race ? race.biome || 'woods' : stage === 'cave' ? 'cave' : world.biome;
   curSet = stoneSets[bName];
   applyBiome(bName);
-  if (floor) { scene.remove(...walls, ...caps, floor, floorShadow, key); for (const m of [...walls, ...caps, floor, floorShadow]) m.dispose(); for (const m of caps) m.geometry.dispose(); freeTree(key); }
+  scene.remove(...walls, ...caps); // (the previous world's meshes stay built for next time)
+  for (const l of doorLights) { l.intensity = 0; scene.add(l); } // back from the old doors: the scene keeps its light count
   for (const m of doorMeshes.values()) scene.remove(m);
   doorMeshes.clear();
   const shape = race || isGateway(L) ? null : levelPlan(L).shape;
@@ -1598,46 +1660,22 @@ function buildLevel(level, race = null, opts = {}) {
   // hand-placed look: each stone slightly twisted and nudged
   twist = new Float32Array(T); // stones stay square to the grid
   nudge = Float32Array.from({ length: T * 2 }, () => rand(-0.012, 0.012));
-  assets.floorGeo.setAttribute('aVar', new THREE.InstancedBufferAttribute(new Float32Array(T), 1));
   tint = [];
   for (let i = 0; i < T; i++) { const v = rand(0.92, 1); tint.push(new THREE.Color(v * world.tint[0], v * world.tint[1], v * world.tint[2])); }
-  walls = curSet.variants.map((v, i) => {
-    const m = new THREE.InstancedMesh(v.raw, curSet.wallMats[i], T);
-    m.castShadow = true;
-    m.setColorAt(0, tint[0]);
-    return m;
-  });
-  // flat stones near the camera are drawn as the real stone top (no flattening); far ones use the lighter picture
   tileGlow = new Float32Array(T);
-  caps = curSet.variants.map((v, i) => {
-    const geo = new THREE.BufferGeometry();
-    geo.setIndex(v.cap.index);
-    for (const k in v.cap.attributes) geo.setAttribute(k, v.cap.attributes[k]);
-    geo.boundingSphere = v.cap.boundingSphere; geo.boundingBox = v.cap.boundingBox;
-    geo.setAttribute('aGlow', new THREE.InstancedBufferAttribute(new Float32Array(T), 1));
-    const m = new THREE.InstancedMesh(geo, curSet.wallMats[i], T);
-    m.receiveShadow = true;
-    m.setColorAt(0, tint[0]);
-    return m;
-  });
-  floor = new THREE.InstancedMesh(assets.floorGeo, curSet.floorMat, T);
-  floorShadow = new THREE.InstancedMesh(assets.shadowGeo, assets.shadowMat, T);
-  floorShadow.receiveShadow = true;
-  for (const m of [...walls, ...caps, floor, floorShadow]) {
-    m.frustumCulled = false;
-    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    scene.add(m);
-  }
-  floor.setColorAt(0, tint[0]);
+  ({ walls, caps } = setMeshes(curSet, T));
+  floorMeshes(T);
+  floor.material = floorMatOf(curSet);
+  scene.add(...walls, ...caps);
   // door blocks: their own meshes, rising and sinking with their tile; the cave mouth faces the side you come from
   for (const d of maze.doors || []) {
     const m = new THREE.Mesh(curSet.door.raw, curSet.door.mat);
     m.castShadow = true;
     m.rotation.y = curSet.door.yaw + Math.atan2(-(d.out[1] - d.z), d.out[0] - d.x); // cave mouth toward the side you arrive from
     m.userData = d;
-    if (bName === 'cave') { // the glowing mushrooms light the stones around them
-      const glow = new THREE.PointLight('#c77dff', 1.4, 3, 1.5);
-      glow.position.y = 0.7; m.add(glow);
+    if (bName === 'cave' && doorMeshes.size < doorLights.length) { // the glowing mushrooms light the stones around them
+      const glow = doorLights[doorMeshes.size];
+      glow.intensity = 1.4; glow.position.set(0, 0.7, 0); m.add(glow);
       const halo = new THREE.Sprite(doorHaloMat); // a soft magical haze around the mushrooms
       halo.position.y = 0.55; halo.scale.setScalar(1.6); m.add(halo);
     }
@@ -1648,7 +1686,8 @@ function buildLevel(level, race = null, opts = {}) {
   if (mazeGrass) mazeGrass.visible = false;
   // every biome's own ground, faded out around the maze (grass, sand, snow, golden grass, dark cave rock)
   buildMazeGrass(groundTexture(bName), bName === 'cave' ? 0.7 : bName === 'snow' ? 0.75 : 0.85);
-  key = makeKey();
+  key ||= makeKey(); // one key for the whole game
+  key.userData.wt = 0; key.scale.setScalar(1);
   start = opts.spawn || (race ? race.entries[0] : maze.start || [N - 2, N - 2]);
   goal = race ? race.goal : stage === 'cave' ? [-9, -9] : maze.goal || [1, 1]; // the portal (none in the cave)
   if (!opts.keep) hasKey = false;
@@ -1658,8 +1697,8 @@ function buildLevel(level, race = null, opts = {}) {
   key.userData.grab = -1;
   if (keyAt) key.position.set(keyAt[0] - origin, 0.55, keyAt[1] - origin);
   scene.add(key);
-  if (portal) { scene.remove(portal); freeTree(portal); }
-  portal = makePortal(curSet, bName); // rebuilt each level from that level's stones
+  if (portal) scene.remove(portal);
+  portal = curSet.portal ||= makePortal(curSet, bName); // built once per world from its stones, then reused
   portal.visible = !race && stage !== 'cave';
   portal.position.set(goal[0] - origin, 0, goal[1] - origin);
   portal.rotation.y = portalYaw(goal);
@@ -1839,11 +1878,13 @@ function leafLitter() {
   }
   return (leafLitterC = c);
 }
+const grassMask = document.createElement('canvas'); grassMask.width = grassMask.height = 512;
+const grassTex = new Map(); // ground pattern canvas -> its texture (one per world, made once)
 function buildMazeGrass(pattern, opacity = 0.85, spread = 2.4, dab = 0.22) {
-  if (mazeGrass) { scene.remove(mazeGrass); mazeGrass.geometry.dispose(); mazeGrass.material.map.dispose(); mazeGrass.material.alphaMap.dispose(); mazeGrass.material.dispose(); mazeGrass = null; }
-  const { N } = maze, M = N + 10, PX = 512, k = PX / M, c = document.createElement('canvas');
-  c.width = c.height = PX;
+  // the same mesh, mask and textures every level: only the mask is redrawn (no new GPU textures per level)
+  const { N } = maze, M = N + 10, c = grassMask, PX = c.width, k = PX / M;
   const x = c.getContext('2d');
+  x.globalCompositeOperation = 'source-over';
   x.fillStyle = '#000'; x.fillRect(0, 0, PX, PX);
   // soft brush dabs on every tile of the maze build up the shape, feathering out past its edges
   for (let z = 0; z < N; z++) for (let gx = 0; gx < N; gx++) {
@@ -1853,11 +1894,18 @@ function buildMazeGrass(pattern, opacity = 0.85, spread = 2.4, dab = 0.22) {
     g.addColorStop(0, `rgba(255,255,255,${dab})`); g.addColorStop(1, 'rgba(255,255,255,0)');
     x.fillStyle = g; x.fillRect(cx - r, cy - r, r * 2, r * 2);
   }
-  const mask = new THREE.CanvasTexture(c);
-  const tex = new THREE.CanvasTexture(pattern); tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(M / 3.2, M / 3.2); tex.anisotropy = 8; // fine, never blurry
-  mazeGrass = new THREE.Mesh(new THREE.PlaneGeometry(M, M).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ map: tex, alphaMap: mask, transparent: true, opacity, depthWrite: false, toneMapped: false }));
+  let tex = grassTex.get(pattern);
+  if (!tex) { tex = new THREE.CanvasTexture(pattern); tex.colorSpace = THREE.SRGBColorSpace; tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.anisotropy = 8; grassTex.set(pattern, tex); } // fine, never blurry
+  tex.repeat.set(M / 3.2, M / 3.2);
+  if (mazeGrass) {
+    mazeGrass.material.map = tex; mazeGrass.material.opacity = opacity;
+    mazeGrass.material.alphaMap.needsUpdate = true;
+    mazeGrass.scale.set(M, 1, M); mazeGrass.visible = true;
+    return;
+  }
+  mazeGrass = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ map: tex, alphaMap: new THREE.CanvasTexture(c), transparent: true, opacity, depthWrite: false, toneMapped: false }));
+  mazeGrass.scale.set(M, 1, M);
   mazeGrass.position.set(0, GROUND_Y + 0.003, 0);
   mazeGrass.renderOrder = 1;
   mazeGrass.layers.set(1);
@@ -1895,8 +1943,10 @@ function patchMat(b) {
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   return (patchMats[b] = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false }));
 }
+// each arch slot keeps its hazed material per model and world: made once, reused by every level (making and freeing
+// them per level made the phone compile their shaders again each time)
+const hazeMats = {};
 function placeScenery() {
-  for (const m of sceneryGroup.children) if (!Object.values(patchMats).includes(m.material) && m.material !== grassPatch.mat) m.material.dispose();
   sceneryGroup.clear();
   if (!maze) return;
   const rnd = mulberry32(L * 31 + 7), half = maze.N / 2, spots = [];
@@ -1911,10 +1961,13 @@ function placeScenery() {
       if (Math.max(Math.abs(x), Math.abs(z)) - size / 2 < half + K.inner - size / 2) continue;
       if (spots.some(p => Math.hypot(p[0] - x, p[1] - z) < (p[2] + size) / 2 + K.gap * 0.3)) continue;
       spots.push([x, z, size]);
-      const m = models[Math.floor(rnd() * models.length)], base = decorMat(m, biome);
-      const mat = base.clone();
-      mat.onBeforeCompile = base.onBeforeCompile;
-      addHaze(mat);
+      const mi = Math.floor(rnd() * models.length), m = models[mi];
+      const mat = hazeMats[`${kind}${mi}|${biome}|${placed}`] ||= (() => {
+        const base = decorMat(m, biome), mm = base.clone();
+        mm.onBeforeCompile = base.onBeforeCompile;
+        addHaze(mm);
+        return mm;
+      })();
       const h = m.h * size, sink = K.sink[0] + rnd() * (K.sink[1] - K.sink[0]);
       mat.userData.haze.uHazeTop.value = h * (1 - sink) * 0.1; // the grass patch carries the fade now; just soften the very base
       const mesh = new THREE.Mesh(m.geo, mat);
@@ -3935,7 +3988,15 @@ function fitView() {
 
 // ---------- loop ----------
 const clock = new THREE.Clock();
-function frame() {
+let lastDraw = -1e9, stillDrawn = false;
+function frame(now = performance.now()) {
+  // 120 Hz screens (MacBook Pro, iPad Pro) would draw every frame twice as often for no visible gain: hold ~60 fps
+  if (now - lastDraw < 1000 / 75) { requestAnimationFrame(frame); return; }
+  lastDraw = now;
+  // paused: the maze behind the card is frozen, so draw it once and let the GPU rest (the canvas keeps the last frame)
+  const still = !net.online && (state === 'pause' || (state === 'settings' && settingsBack === 'pause') || (state === 'help' && helpBack === 'pause'));
+  if (still && stillDrawn) { clock.getDelta(); requestAnimationFrame(frame); return; }
+  stillDrawn = still;
   const raw = clock.getDelta(), dt = Math.min(raw, 1 / 20), time = clock.elapsedTime;
   adaptRes(raw);
   fitView();

@@ -233,6 +233,18 @@ Each biome has:
 - **Outfit:** 9 colors recolor the olive parts of Buddy (`SKINS`, `setSkin`, shader `addOutfit`).
 - **Title character:** a second WebGL renderer (`face`) for the menu Buddy: idle sway and arm swing (`uIdle`), head-follow, blink.
 
+### Performance rules (phones crashed after 2–3 levels)
+- **Build once, reuse:** a world's stone meshes (`setMeshes`), the floor pair (`floorMeshes`), its portal
+  (`set.portal`), the key and the maze grass are made once and reused by every level. Don't create or dispose GPU
+  objects per level: phones (iOS Safari) don't free that memory fast and close the page.
+- Stone geometries are `userData.shared`: `freeTree` must never dispose them.
+- **Light count stays fixed:** the cave door glow uses the two permanent `doorLights`. Adding/removing a light
+  recompiles every shader.
+- The floor atlas is baked lazily (`floorMatOf`) when a world is played, not when the map loads it; half size on
+  phones, freed on phones when you leave the world (`trimGPU`).
+- Loop: ~60 fps cap (120 Hz screens), the paused scene is drawn once, pixel ratio max 1.5.
+- Mesh simplification (phones) is normal-aware (`simplifyWithAttributes`) so it leaves no dark holes.
+
 ### UI gotchas we hit
 - **Hidden screens must not catch clicks:** `.screen:not(.show) * { pointer-events: none !important }`. Without it, the map's Back button sat under the pause button and sent you home.
 - **No `backdrop-filter`** on modals over the WebGL canvas; it made the pause card invisible.

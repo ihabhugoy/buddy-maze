@@ -327,6 +327,7 @@ const sfx = (() => {
   function init() { // needs a user gesture (browser autoplay rules)
     if (NOSOUND) return;
     if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {} // iPhones: heard even with the silent switch on, like a video
     ctx = new (window.AudioContext || window.webkitAudioContext)();
     master = ctx.createGain();
     master.gain.value = 0;
@@ -365,24 +366,14 @@ const sfx = (() => {
     loading = loadPools(['rise', 'land', 'bump', 'step', ...UI_KINDS, ...Object.values(MIX[mixBiome] || {}).flat().map(m => m[0])]);
     apply();
     wantMusic = true; // the music starts with the game (quietly under the menus), not only once you play
-    // iPhones: decoded once and looped inside the mixer. Streamed from an <audio> element through the mixer, Safari
-    // reloaded the page right as the 60 s track looped (crashes at 1 and 2 minutes). Elsewhere it streams (less memory).
-    if (IOS) {
-      music = { buf: null, src: null };
-      fetch('assets/music/cozy.mp3').then(r => r.arrayBuffer()).then(a => ctx.decodeAudioData(a)).then(b => { music.buf = b; startMusic(); }).catch(() => { music = null; });
-    } else try { music = new Audio('assets/music/cozy.mp3'); music.loop = true; music.preload = 'auto'; ctx.createMediaElementSource(music).connect(musicGain); startMusic(); } catch { music = null; }
+    // (streamed from an <audio> element through the mixer, not decoded whole into memory; on iPhones a playing media
+    // element also lets the game be heard with the silent switch on)
+    try { music = new Audio('assets/music/cozy.mp3'); music.loop = true; music.preload = 'auto'; ctx.createMediaElementSource(music).connect(musicGain); startMusic(); } catch { music = null; }
   }
   // background music: starts the first time you play, then loops (60 s track)
   let musicStarted = false, wantMusic = false;
   function startMusic() {
     if (!wantMusic || musicStarted || !music || !ctx) return;
-    if (!music.play) { // (iPhone: one looping player, made once)
-      if (!music.buf) return;
-      musicStarted = true;
-      music.src = ctx.createBufferSource(); music.src.buffer = music.buf; music.src.loop = true;
-      music.src.connect(musicGain); music.src.start();
-      return apply();
-    }
     musicStarted = true;
     music.play().catch(() => { musicStarted = false; }); // (tried again on the next tap if the browser said no)
     apply();

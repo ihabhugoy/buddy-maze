@@ -101,9 +101,17 @@ const unlocked = L => BETA_ALL_OPEN || L === 0 || save.stars(L - 1) > 0;
 const nextLevel = () => { for (let L = 0; L < TOTAL_LEVELS; L++) if (!save.stars(L)) return L; return TOTAL_LEVELS - 1; };
 function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
-// ?memdebug: count every byte the game asks the graphics chip for (textures, render buffers, vertex data), so memory
+// Crash black box: what the game is doing is saved every second. If the page dies without saying goodbye (iOS closes
+// pages that run out of memory), the next visit shows it on a card that can be screenshotted and sent
+const BB_KEY = 'buddy-blackbox', bb = { errs: [], lost: 0, start: Date.now() };
+let bbPrev = null;
+try { bbPrev = JSON.parse(localStorage.getItem(BB_KEY) || 'null'); } catch {}
+addEventListener('error', e => { bb.errs.push(String(e.message || e).slice(0, 160)); });
+addEventListener('unhandledrejection', e => { bb.errs.push('promise: ' + String(e.reason && (e.reason.message || e.reason)).slice(0, 160)); });
+addEventListener('pagehide', () => { try { const d = JSON.parse(localStorage.getItem(BB_KEY) || '{}'); d.clean = 1; localStorage.setItem(BB_KEY, JSON.stringify(d)); } catch {} });
+// count every byte the game asks the graphics chip for (textures, render buffers, vertex data), so memory
 // problems can be measured instead of guessed; window.__gpu() returns the totals in MB
-if (params.has('memdebug')) {
+{ // (always on: it only adds a little bookkeeping to allocation calls)
   const P = WebGL2RenderingContext.prototype, sizes = new Map(), bound = new Map(), kind = {};
   const bpp = f => ({ 0x8058: 4, 0x881A: 8, 0x8814: 16, 0x8C43: 4, 0x81A5: 2, 0x81A6: 3, 0x88F0: 4, 0x8CAC: 4, 0x8229: 1, 0x822B: 2, 0x8D48: 1, 0x1908: 4, 0x1907: 3 }[f] || 4);
   const set = (o, k, b, d = '') => { const old = sizes.get(o); if (old) kind[old.k] -= old.b; sizes.set(o, { k, b, d }); kind[k] = (kind[k] || 0) + b; };
@@ -141,7 +149,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.localClippingEnabled = true;
 renderer.domElement.id = 'game';
 // if the phone's graphics chip resets, keep the page alive and reload it once the context is back (your progress is saved)
-renderer.domElement.addEventListener('webglcontextlost', e => { e.preventDefault(); }, false);
+renderer.domElement.addEventListener('webglcontextlost', e => { e.preventDefault(); bb.lost++; bb.save && bb.save(); }, false);
 renderer.domElement.addEventListener('webglcontextrestored', () => location.reload(), false);
 document.body.prepend(renderer.domElement);
 
@@ -4061,6 +4069,37 @@ function frame(now = performance.now()) {
 let manualStep = false;
 if (params.has('memdebug')) window.__step = (n = 1) => { manualStep = true; for (let i = 0; i < n; i++) { lastDraw = -1e9; frame(); } manualStep = false; };
 
+{
+  let frames = 0, fps = 0;
+  const count = () => { frames++; requestAnimationFrame(count); }; requestAnimationFrame(count);
+  const dbg = params.has('debug') ? Object.assign(document.body.appendChild(document.createElement('div')), { style: 'position:fixed;left:6px;bottom:6px;z-index:99;font:600 11px ui-monospace,monospace;color:#3b2a1a;background:rgba(255,250,240,.85);padding:4px 7px;border-radius:8px;pointer-events:none' }) : null;
+  bb.save = () => {
+    const g = window.__gpu ? window.__gpu() : {};
+    const rec = { t: Date.now(), start: bb.start, state, level: L, biome, mode, mb: (g.textures || 0) + (g.renderbuffers || 0) + (g.buffers || 0), pr: renderer.getPixelRatio(), fps,
+      errs: bb.errs.slice(-4), lost: bb.lost, hidden: document.hidden, clean: 0, ua: navigator.userAgent, scr: `${screen.width}x${screen.height}@${devicePixelRatio}` };
+    try { localStorage.setItem(BB_KEY, JSON.stringify(rec)); } catch {}
+    if (dbg) dbg.textContent = `${fps} fps · ${rec.mb} MB · x${rec.pr} · ${state}${bb.lost ? ' · reset ' + bb.lost : ''}${bb.errs.length ? ' · err ' + bb.errs.length : ''}`;
+  };
+  setInterval(() => { fps = frames; frames = 0; bb.save(); }, 1000);
+  document.addEventListener('visibilitychange', () => bb.save());
+  // last visit ended without a goodbye: show what it was doing
+  const P = bbPrev;
+  if (P && !P.clean && Date.now() - P.t < 3 * 864e5) {
+    const os = (P.ua.match(/OS (\d+[_\d]*) like Mac/) || [])[1], dev = /iPhone/.test(P.ua) ? 'iPhone' : /iPad/.test(P.ua) ? 'iPad' : /Android/.test(P.ua) ? 'Android' : 'Computer';
+    const lines = [
+      `Screen: ${P.state}${P.state === 'play' ? ` (${P.mode === 'race' ? 'race' : 'level ' + (P.level + 1)}, ${P.biome})` : ''} · played ${Math.round((P.t - P.start) / 60000)} min`,
+      `Graphics memory: ${P.mb} MB · quality x${P.pr} · ${P.fps} fps`,
+      `In the background: ${P.hidden ? 'yes' : 'no'} · graphics resets: ${P.lost}`,
+      `Errors: ${P.errs.length ? P.errs.join(' | ') : 'none'}`,
+      `Device: ${dev}${os ? ' iOS ' + os.replace(/_/g, '.') : ''} · ${P.scr}`,
+    ];
+    const card = document.createElement('div');
+    card.style = 'position:fixed;inset:auto 12px 12px 12px;z-index:100;background:#fffaf1;color:#3b2a1a;border-radius:20px;padding:14px 16px;font:600 13px/1.45 Nunito,system-ui,sans-serif;box-shadow:0 10px 30px rgba(80,50,20,.25),inset 0 0 0 2px #ead9bd';
+    card.innerHTML = `<b style="font-size:15px">The game closed unexpectedly last time</b><br>Please screenshot this and send it.<div style="margin:8px 0;font-size:12px">${lines.map(l => l.replace(/</g, '&lt;')).join('<br>')}</div><button style="font:800 14px Nunito,system-ui;padding:8px 18px;border-radius:12px;border:0;background:#7cc26b;color:#fff">OK</button>`;
+    card.querySelector('button').onclick = () => card.remove();
+    document.body.appendChild(card);
+  }
+}
 await load();
 { const ch = await loadChar(charId).catch(() => loadChar('buddy')); charId = ch.id; document.body.dataset.char = charId; setupPlayer(ch); face.init(ch); }
 loadScenery(); // in the background; pieces appear as they arrive

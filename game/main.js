@@ -496,6 +496,7 @@ function updatePuffs(dt) {
     puffMesh.setColorAt(n, f.color);
     n++;
   }
+  if (n === 0 && puffMesh.count === 0) return; // (no dust in the air: nothing to send)
   puffMesh.count = n;
   puffMesh.instanceMatrix.needsUpdate = true;
   if (puffMesh.instanceColor) puffMesh.instanceColor.needsUpdate = true;
@@ -1670,7 +1671,7 @@ function trimGPU() { // (every device: laptops held ~110 MB per world visited ot
   }
 }
 function buildLevel(level, race = null, opts = {}) {
-  L = level; mode = race ? 'race' : 'levels';
+  L = level; mode = race ? 'race' : 'levels'; pillarsDirty = true;
   stage = opts.stage || 'surface';
   const world = race ? (WORLDS.find(w => w.biome === race.biome) || { tint: [1, 1, 1], reveal: 2.1, icon: 'i-w-cave' }) : WORLDS[Math.floor(L / LEVELS_PER_WORLD)];
   const bName = race ? race.biome || 'woods' : stage === 'cave' ? 'cave' : world.biome;
@@ -3677,20 +3678,26 @@ const face = (() => {
 
 // ---------- pillars per frame ----------
 const TRAIL_GLOW = 0; // stepped tiles fade all the way back to dark
+// The stones' positions go to the graphics chip only when something changed: re-sending every stone each frame (as
+// this did) is what iPhones (iOS 18) choke on after a minute of play. Standing still now sends nothing.
+let pillarsKey = '', pillarsDirty = true;
+const _nw = [], _nc = [];
 function updatePillars(dt, time) {
   const T = heights.length, { N } = maze;
   const k = 220, damp = Math.exp(-15 * dt);
-  const aVar = floor.geometry.attributes.aVar;
-  const nw = new Array(walls.length).fill(0), nc = new Array(caps.length).fill(0);
-  let nf = 0;
-  // how far from the view center flat stones are drawn in full 3D (more when zoomed out)
-  const near = THREE.MathUtils.clamp((camera.userData.W ?? viewW) * 0.4 + 1.5, 3.5, 6), ncx = camTarget.x, ncz = camTarget.z;
   const empty = maze.empty;
   const stepGlow = curSet.variants[0].glowTex, under = st.gz * N + st.gx;
-  for (let i = 0; i < T; i++) {
-    if (empty && empty[i]) continue; // outside the shape: just the white floor
+  let active = false;
+  for (let i = 0; i < T; i++) { // the springs, the glow underfoot, the tremble
+    if (empty && empty[i]) continue;
     // lights up underfoot, then fades back to dark over a couple of seconds
-    if (stepGlow) tileGlow[i] = i === under ? Math.min(1, tileGlow[i] + dt * 6) : tileGlow[i] > TRAIL_GLOW ? TRAIL_GLOW + (tileGlow[i] - TRAIL_GLOW) * Math.exp(-dt * 1.1) : tileGlow[i];
+    if (stepGlow) {
+      const g0 = tileGlow[i];
+      tileGlow[i] = i === under ? Math.min(1, g0 + dt * 6) : g0 > TRAIL_GLOW ? TRAIL_GLOW + (g0 - TRAIL_GLOW) * Math.exp(-dt * 1.1) : g0;
+      if (Math.abs(tileGlow[i] - g0) > 1e-4) active = true;
+    }
+    if (heights[i] === targets[i] && vels[i] === 0 && shake[i] === 0) continue; // at rest
+    active = true;
     vels[i] += (targets[i] - heights[i]) * k * dt;
     vels[i] *= damp;
     heights[i] += vels[i] * dt;
@@ -3698,8 +3705,23 @@ function updatePillars(dt, time) {
       if (targets[i] === 0 && vels[i] < -0.4) sfx.play('land', 0.6, panOf(i % N, (i / N) | 0)); // settles into the floor
       heights[i] = 0; vels[i] = 0;
     }
-    // very subtle grinding tremble while a stone moves
+    if (Math.abs(heights[i] - targets[i]) < 1e-4 && Math.abs(vels[i]) < 1e-3) { heights[i] = targets[i]; vels[i] = 0; } // settled
     shake[i] = Math.max(0, shake[i] - dt * 2.5);
+  }
+  // how far from the view center flat stones are drawn in full 3D (more when zoomed out)
+  // (the view position is rounded to a quarter tile, so a stone is near or far exactly when the key says so)
+  const near = Math.round(THREE.MathUtils.clamp((camera.userData.W ?? viewW) * 0.4 + 1.5, 3.5, 6) * 4) / 4, ncx = Math.round(camTarget.x * 4) / 4, ncz = Math.round(camTarget.z * 4) / 4;
+  const key = ncx + ',' + ncz + ',' + near;
+  if (!active && !pillarsDirty && key === pillarsKey) return; // nothing moved: the graphics chip already has it all
+  // the far flat stones only change when the view shifts (stones that rise are always near you, never far)
+  const doFloor = pillarsDirty || key !== pillarsKey;
+  pillarsKey = key; pillarsDirty = false;
+  const aVar = floor.geometry.attributes.aVar;
+  const nw = _nw, nc = _nc; nw.length = walls.length; nc.length = caps.length; nw.fill(0); nc.fill(0);
+  let nf = 0;
+  for (let i = 0; i < T; i++) {
+    if (empty && empty[i]) continue; // outside the shape: just the white floor
+    // very subtle grinding tremble while a stone moves
     const a = 0.006 * shake[i] + 0.003 * Math.min(1, Math.abs(vels[i]) / 3);
     const jx = nudge[i * 2] + a * Math.sin(time * 71 + i * 12.9), jz = nudge[i * 2 + 1] + a * Math.cos(time * 63 + i * 7.3);
     const x = i % N, z = (i / N) | 0;
@@ -3718,6 +3740,7 @@ function updatePillars(dt, time) {
       if (stepGlow) m.geometry.attributes.aGlow.array[nc[v]] = tileGlow[i];
       nc[v]++;
     } else {
+      if (!doFloor) continue;
       _m.makeRotationY(twist[i]);
       _m.setPosition(x - origin + jx, 0, z - origin + jz);
       floor.setMatrixAt(nf, _m); floor.setColorAt(nf, tint[i]); floorShadow.setMatrixAt(nf, _m);
@@ -3725,12 +3748,16 @@ function updatePillars(dt, time) {
       nf++;
     }
   }
-  walls.forEach((m, v) => { m.count = nw[v]; m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; });
-  caps.forEach((m, v) => { m.count = nc[v]; m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; m.geometry.attributes.aGlow.needsUpdate = true; });
+  // send only the part of each buffer that is in use (the buffers have room for the biggest maze)
+  walls.forEach((m, v) => { m.count = nw[v]; sendUsed(m.instanceMatrix, nw[v] * 16); sendUsed(m.instanceColor, nw[v] * 3); });
+  caps.forEach((m, v) => { m.count = nc[v]; sendUsed(m.instanceMatrix, nc[v] * 16); sendUsed(m.instanceColor, nc[v] * 3); if (stepGlow) sendUsed(m.geometry.attributes.aGlow, nc[v]); });
+  if (!doFloor) return;
   floor.count = nf; floorShadow.count = nf;
-  floor.instanceMatrix.needsUpdate = floorShadow.instanceMatrix.needsUpdate = true;
-  floor.instanceColor.needsUpdate = true;
-  aVar.needsUpdate = true;
+  sendUsed(floor.instanceMatrix, nf * 16); sendUsed(floorShadow.instanceMatrix, nf * 16); sendUsed(floor.instanceColor, nf * 3); sendUsed(aVar, nf);
+}
+function sendUsed(attr, n) {
+  if (!attr || n <= 0) return;
+  attr.clearUpdateRanges(); attr.addUpdateRange(0, n); attr.needsUpdate = true;
 }
 
 // ---------- camera ----------

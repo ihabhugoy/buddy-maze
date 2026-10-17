@@ -108,8 +108,10 @@
   @keyframes nudge { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(4px); } }
 
   /* ============ screens ============ */
-  .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; opacity: 0; pointer-events: none; transition: opacity .35s; padding: 24px 32px; }
-  .screen.show { opacity: 1; pointer-events: auto; }
+  /* a hidden screen is really hidden (visibility), so phones don't keep its full-screen layers and animations alive */
+  .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; opacity: 0; pointer-events: none; visibility: hidden; transition: opacity .35s, visibility 0s linear .35s; padding: 24px 32px; }
+  .screen.show { opacity: 1; pointer-events: auto; visibility: visible; transition: opacity .35s, visibility 0s; }
+  .screen:not(.show) *, .screen:not(.show)::before { animation-play-state: paused !important; }
   .screen:not(.show) * { pointer-events: none !important; } /* a hidden screen's buttons must never catch clicks */
   .screen.show .pop { animation: pop .6s var(--spring) both; }
 

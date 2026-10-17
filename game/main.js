@@ -96,9 +96,10 @@ function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = 
 // ---------- renderer / scene ----------
 // phones get a lighter setup: a lower resolution cap and smaller shadows (the composer does its own antialiasing)
 const PHONE = matchMedia('(pointer: coarse)').matches;
-const PR_MAX = Math.min(devicePixelRatio, PHONE ? 1.75 : 2);
+const PR_MAX = Math.min(devicePixelRatio, PHONE ? 1.5 : 2);
 if (PHONE) document.documentElement.classList.add('phone');
-const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+// (phones draw straight to the screen, so they use the canvas's own antialiasing and skip the composer's big buffers)
+const renderer = new THREE.WebGLRenderer({ antialias: PHONE, powerPreference: 'high-performance' });
 renderer.setPixelRatio(PR_MAX);
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
@@ -593,7 +594,9 @@ function makePortal(set, biomeName) {
         col += uB * exp(-r * r * 70.0) * (0.3 + 0.7 * uOn);
         vec3 sleep = uRock * (0.62 + 0.1 * s);
         gl_FragColor = vec4(mix(sleep, col, uOn), a * (0.92 + 0.08 * uOn));
-      }`,
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`, // (so it reads the same drawn straight to the screen, as on phones)
   }));
   disc.scale.y = (pillarTop - base) / 0.72; disc.position.y = (base + pillarTop) / 2; // fills the opening
   disc.renderOrder = 3;
@@ -906,6 +909,7 @@ function canvasTexture(tex, size) {
   // opaque first: some scans have see-through specks, which drop any color painted into them and render black
   cx.fillStyle = '#000'; cx.fillRect(0, 0, c.width, c.height);
   cx.drawImage(img, 0, 0, c.width, c.height);
+  if (img.close) img.close(); // (a decoded ImageBitmap holds its pixels until closed)
   const t = new THREE.CanvasTexture(c);
   t.flipY = tex.flipY; t.colorSpace = tex.colorSpace; t.wrapS = tex.wrapS; t.wrapT = tex.wrapT; t.anisotropy = 4;
   tex.dispose();
@@ -3089,6 +3093,7 @@ function show(name) {
   if (name !== state) { if (['pause', 'settings', 'race', 'win', 'raceEnd'].includes(name)) sfx.ui('modal', 0.4); else if (name === 'worlds' || name === 'outfit') sfx.ui('whoosh', 0.3); }
   state = name;
   document.body.dataset.state = name;
+  if (['play', 'worlds', 'pause', 'win', 'raceEnd'].includes(name)) face.sleep();
   for (const el of document.querySelectorAll('.screen')) el.classList.toggle('show', el.id === name);
   if (name === 'worlds') renderMap();
   if (name === 'title') {
@@ -3574,7 +3579,8 @@ const face = (() => {
     updateBlink(dt);
     r.render(sc, cam);
   }
-  return { init, render, blink: B, setCrew, makeModel };
+  function sleep() { if (w) { r.setSize(1, 1, false); w = h = 0; } } // (re-sized on the next menu frame)
+  return { init, render, blink: B, setCrew, makeModel, sleep };
 })();
 
 // ---------- pillars per frame ----------
@@ -3909,10 +3915,10 @@ let prNow = PR_MAX, slowT = 0, fastT = 0;
 function adaptRes(raw) {
   if (state !== 'play' || raw > 0.25) return; // (a hitch from loading or a hidden tab says nothing)
   if (raw > 1 / 42) { slowT += raw; fastT = 0; } else { fastT += raw; if (raw < 1 / 55) slowT = Math.max(0, slowT - raw); }
-  const step = slowT > 1.2 && prNow > 0.75 ? -0.25 : fastT > 10 && prNow < PR_MAX ? 0.25 : 0;
+  const step = slowT > 1.2 && prNow > 0.75 ? -0.25 : !PHONE && fastT > 10 && prNow < PR_MAX ? 0.25 : 0; // (phones only step down)
   if (!step) return;
   prNow = Math.min(PR_MAX, Math.max(0.75, prNow + step)); slowT = fastT = 0;
-  renderer.setPixelRatio(prNow); composer.setPixelRatio(prNow); fitW = 0; // re-fit at the new resolution
+  renderer.setPixelRatio(prNow); if (!PHONE) composer.setPixelRatio(prNow); fitW = 0; // re-fit at the new resolution
 }
 function fitView() {
   const w = innerWidth, h = innerHeight;
@@ -3921,7 +3927,7 @@ function fitView() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
-  composer.setSize(w, h);
+  if (!PHONE) composer.setSize(w, h);
   tiltH.uniforms.amt.value = 3.2 / w; tiltV.uniforms.amt.value = 3.2 / h; // blur step size in screen texels
   const pr = renderer.getPixelRatio() * (PHONE ? 0.35 : 0.5);
   mirror.getRenderTarget().setSize(Math.round(w * pr), Math.round(h * pr));
@@ -3967,7 +3973,7 @@ function frame() {
   else if (state === 'worlds') map3d && map3d.render(dt, time); // the map has its own little 3D board
   else {
     renderer.shadowMap.needsUpdate = true;
-    composer.render();
+    if (PHONE) renderer.render(scene, camera); else composer.render(); // phones: no post effects (memory)
   }
   requestAnimationFrame(frame);
 }

@@ -142,14 +142,27 @@ const GPU_NAME = (() => { try { const gl = document.createElement('canvas').getC
 const WEAK_GPU = /Mali-(G5\d|G6\d|G7[0-6]|T\d)|PowerVR|Adreno \(TM\) ([1-5]\d\d|6[0-2]\d)\b/i.test(GPU_NAME);
 let liteChoice = null; try { liteChoice = localStorage.getItem('buddy-lite'); } catch {} // '1' on, '0' off (your choice wins)
 const LITE = params.has('lite') || liteChoice === '1' || (PHONE && liteChoice !== '0' && !params.has('full') && ((navigator.deviceMemory > 0 && navigator.deviceMemory <= 4) || WEAK_GPU));
-const NOSOUND = params.has('nosound');
+// ?exp: an unattended test on a phone, to find what fills its memory. The game plays itself with one part switched
+// off; when the page gets closed (out of memory) or lasts 4 minutes, the next part is tried. Results stay on screen.
+const EXP_LIST = ['idle', 'noshadow', 'noaa', 'nofx', 'nohud'];
+let EXP = null;
+if (params.has('exp')) {
+  try { EXP = JSON.parse(localStorage.getItem('buddy-exp') || 'null'); } catch {}
+  if (!EXP || params.get('exp') === 'reset') { EXP = { i: 0, r: [] }; history.replaceState(null, '', location.pathname + '?exp'); } // (a reload after a crash carries on)
+  if (EXP.run && EXP.run.i === EXP.i) { EXP.r[EXP.i] = `${EXP_LIST[EXP.i]}: closed after ${Math.round((EXP.run.last - EXP.run.start) / 1000)} s`; EXP.i++; } // the page died during that run
+  EXP.run = EXP.i < EXP_LIST.length ? { i: EXP.i, start: Date.now(), last: Date.now() } : null;
+  try { localStorage.setItem('buddy-exp', JSON.stringify(EXP)); } catch {}
+}
+const XF = EXP && EXP.run ? EXP_LIST[EXP.i] : '';
+const off = k => params.has(k) || XF === k;
+const NOSOUND = params.has('nosound') || params.has('exp');
 const PR_MAX = Math.min(devicePixelRatio, PHONE ? (LITE ? 1 : 1.25) : 1.5); // (phones: fixed, see adaptRes)
 if (PHONE) document.documentElement.classList.add('phone');
 // (phones draw straight to the screen, so they use the canvas's own antialiasing and skip the composer's big buffers)
-const renderer = new THREE.WebGLRenderer({ antialias: PHONE, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ antialias: PHONE && !off('noaa'), powerPreference: 'high-performance' });
 renderer.setPixelRatio(PR_MAX);
 renderer.setSize(innerWidth, innerHeight);
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = !off('noshadow');
 renderer.shadowMap.type = LITE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 renderer.shadowMap.autoUpdate = false; // updated once per frame, not again for the reflection
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -516,6 +529,7 @@ const puffs = [];
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _c = new THREE.Color();
 
 function spawnPuff(x, y, z, vx, vy, vz, size, color, life) {
+  if (off('nofx')) return;
   if (puffs.length >= MAX_PUFFS) puffs.shift();
   puffs.push({ p: new THREE.Vector3(x, y, z), v: new THREE.Vector3(vx, vy, vz), size, color: new THREE.Color(color), life: 0, max: life });
 }
@@ -3958,7 +3972,7 @@ const atmosphere = (() => {
   scene.add(group);
 
   // dust motes: soft glowing specks drifting slowly around the player
-  const MOTES = LITE ? 0 : PHONE ? 110 : 220, R = 4.5;
+  const MOTES = LITE || off('nofx') ? 0 : PHONE ? 110 : 220, R = 4.5;
   const pos = new Float32Array(MOTES * 3), vel = [];
   for (let i = 0; i < MOTES; i++) {
     pos.set([rand(-R, R), rand(0.05, 2.2), rand(-R, R)], i * 3);
@@ -4014,7 +4028,7 @@ const atmosphere = (() => {
     autumn: { tex: leaf, colors: ['#e07a2e', '#f2a93b', '#c9542a', '#e9c24a'], size: 0.8, n: 35, fall: 0.16, sway: 0.35, wind: 0.15, opacity: 1 },
     cave: { tex: soft, colors: ['#7ff6e6', '#5fd8ff', '#c9a2ff', '#ff9ad8'], size: 0.4, n: 45, fall: 0.1, sway: 0.15, wind: 0, opacity: 0.9, glow: true }, // drifting spores
   };
-  const WN = LITE ? 80 : PHONE ? 160 : 320, WR = 6, TOP = 5;
+  const WN = off('nofx') ? 0 : LITE ? 80 : PHONE ? 160 : 320, WR = 6, TOP = 5;
   const wpos = new Float32Array(WN * 3), wcol = new Float32Array(WN * 3), wvar = [];
   for (let i = 0; i < WN; i++) { wpos.set([rand(-WR, WR), rand(0, TOP), rand(-WR, WR)], i * 3); wvar.push([rand(0.7, 1.3), rand(0, 6.28), rand(0.6, 1.4)]); }
   const wgeo = new THREE.BufferGeometry();
@@ -4266,10 +4280,11 @@ if (params.has('memdebug')) window.__step = (n = 1) => { manualStep = true; for 
 }
 // ?autoplay: the game plays itself, level after level (walks to the key, then the portal, taps Next), for long
 // unattended tests on phones and simulators
-if (params.has('autoplay')) (async () => {
+if (params.has('autoplay') || XF) (async () => {
   const wait = ms => new Promise(r => setTimeout(r, ms));
   while (!assets) await wait(200);
   await wait(1500);
+  if (XF === 'idle') { await play(+(params.get('autoplay') || 0) || 2); return; } // stands still in a level
   const path = (from, to) => {
     const m = maze, N = m.N, prev = new Int32Array(N * N).fill(-2), q = [from[1] * N + from[0]]; prev[q[0]] = -1;
     for (let h = 0; h < q.length; h++) { const i = q[h], x = i % N, z = (i / N) | 0; if (x === to[0] && z === to[1]) break;
@@ -4279,7 +4294,7 @@ if (params.has('autoplay')) (async () => {
     return out;
   };
   const walk = async to => { for (const d of path([st.gx, st.gz], to)) { while (st.moving) await wait(20); tryMove(d[0], d[1]); await wait(40); while (st.moving) await wait(20); } };
-  let level = +(params.get('autoplay') || 0) || 0;
+  let level = +(params.get('autoplay') || 0) || (XF ? 3 : 0);
   for (;;) {
     if (isGateway(level)) { level++; continue; } // (door levels need the cave: skipped by the robot)
     await play(level); await wait(8000);
@@ -4290,6 +4305,24 @@ if (params.has('autoplay')) (async () => {
     level = (level + 1) % 20;
   }
 })();
+if (EXP) { // the test's own little board: which part is off, for how long, and what happened so far
+  const box = Object.assign(document.createElement('div'), { style: 'position:fixed;left:8px;right:8px;top:calc(env(safe-area-inset-top) + 64px);z-index:120;background:rgba(255,250,240,.93);color:#3b2a1a;border-radius:14px;padding:8px 12px;font:700 13px/1.4 ui-monospace,monospace;pointer-events:none;box-shadow:0 4px 14px rgba(80,50,20,.2)' });
+  document.body.appendChild(box);
+  try { navigator.wakeLock && navigator.wakeLock.request('screen').catch(() => {}); } catch {} // (keep the screen on)
+  const tick = () => {
+    const done = EXP.r.filter(Boolean).map(x => '• ' + x).join('<br>');
+    if (!EXP.run) { box.innerHTML = `<b>TEST FINISHED</b><br>${done}<br>Send a screenshot.`; return; }
+    const secs = Math.round((Date.now() - EXP.run.start) / 1000);
+    box.innerHTML = `<b>TEST ${EXP.i + 1}/${EXP_LIST.length}: ${XF}</b> · ${secs} s / 240 s${done ? '<br>' + done : ''}`;
+    EXP.run.last = Date.now();
+    if (secs >= 240) { EXP.r[EXP.i] = `${XF}: OK, lasted 4 min`; EXP.i++; EXP.run = null; }
+    try { localStorage.setItem('buddy-exp', JSON.stringify(EXP)); } catch {}
+    if (!EXP.run) return location.reload();
+    setTimeout(tick, 1000);
+  };
+  tick();
+  if (XF === 'nohud') document.head.appendChild(Object.assign(document.createElement('style'), { textContent: '.grade, #hud, .hud, #coach { display: none !important; }' }));
+}
 await load();
 { const ch = await loadChar(charId).catch(() => loadChar('buddy')); charId = ch.id; document.body.dataset.char = charId; setupPlayer(ch); face.init(ch); }
 loadScenery(); // in the background; pieces appear as they arrive

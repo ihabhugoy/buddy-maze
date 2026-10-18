@@ -2919,14 +2919,34 @@ function spawnWolves(ch, n, { glow = false, from = [start], minD = 7 } = {}) {
   });
 }
 function flashMark(a, ch) { a.mark.material = wolfMark[ch]; a.markT = 1.3; }
-// a wolf's next tile: down the scent toward its prey while chasing; otherwise it roams, not turning back unless it has
-// to, and drifts home when it has wandered off
-function wolfStep(w, d) {
+// can the wolf see this tile? A body-wide look (two rays a little apart, both clear) across tiles no risen wall cuts,
+// so slipping behind a wall or a corner breaks it
+function inSight(x0, z0, x1, z1) {
+  const { N, g } = maze, dx = x1 - x0, dz = z1 - z0, len = Math.hypot(dx, dz), n = Math.ceil(len * 4);
+  if (!len) return true;
+  const ox = -dz / len * 0.3, oz = dx / len * 0.3;
+  for (const s of [-1, 1]) for (let k = 1; k < n; k++) {
+    const f = k / n, x = Math.round(x0 + dx * f + ox * s), z = Math.round(z0 + dz * f + oz * s);
+    if (x < 0 || z < 0 || x >= N || z >= N || g[z * N + x]) return false;
+  }
+  return true;
+}
+// a wolf's next tile: straight at its prey while it can see it; out of sight it runs to where it last saw it, sniffs,
+// and gives up ("?"). Otherwise it roams, not turning back unless it has to, and drifts home when it has wandered off
+function wolfStep(w, d, prey) {
   const { N, g } = maze, here = w.z * N + w.x, dh = d ? d[here] : -1;
   const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => [w.x + dx, w.z + dz]).filter(([x, z]) => x >= 0 && z >= 0 && x < N && z < N && !g[z * N + x]);
-  if (w.state === 'roam' && dh >= 0 && dh <= WOLF.see && w.rest <= 0) { w.state = 'chase'; w.chaseT = 0; flashMark(w, '!'); sfx.ui('nope', 0.35); }
+  const seen = dh >= 0 && dh <= WOLF.lose ? prey.find(([x, z]) => inSight(w.x, w.z, x, z)) : null;
+  if (w.state === 'roam' && seen && dh <= WOLF.see && w.rest <= 0) { w.state = 'chase'; w.chaseT = 0; flashMark(w, '!'); sfx.ui('nope', 0.35); }
   if (w.state === 'chase') {
-    if (dh < 0 || dh > WOLF.lose || w.chaseT > WOLF.chaseMax) { w.state = 'roam'; w.rest = WOLF.rest; w.wait = 1.1; flashMark(w, '?'); return null; }
+    if (seen) { w.lastSeen = seen; w.trail = null; }
+    const giveUp = () => { w.state = 'roam'; w.rest = WOLF.rest; w.wait = 1.1; w.trail = null; flashMark(w, '?'); return null; };
+    if (dh < 0 || w.chaseT > WOLF.chaseMax) return giveUp();
+    if (!seen) {
+      if (!w.lastSeen || (w.x === w.lastSeen[0] && w.z === w.lastSeen[1])) return giveUp(); // reached the spot: nobody there
+      if (!w.trail) w.trail = distFrom([w.lastSeen]);
+      d = w.trail;
+    }
     let best = null, bv = 1e9;
     for (const t of nb) { const v = d[t[1] * N + t[0]]; if (v >= 0 && v < bv) { bv = v; best = t; } }
     return best;
@@ -2938,7 +2958,7 @@ function wolfStep(w, d) {
   return opts[Math.floor(Math.random() * opts.length)];
 }
 // prey: you on your own; online, every animal that's in play (the host moves the computer wolves for everyone)
-let preyKey = '', preyDist = null;
+let preyKey = '', preyDist = null, preyNow = [];
 function wolfPrey() {
   if (mode === 'hunt') return hunt.preyTiles();
   return wolfOver || won ? [] : [[st.moving ? st.tx : st.gx, st.moving ? st.tz : st.gz]];
@@ -2950,6 +2970,7 @@ function updateWolves(dt, time) {
   const live = state === 'play' && intro.t < 0 && (mode === 'hunt' ? hunt.live() : !won && !wolfOver);
   if (live) {
     const prey = wolfPrey(), k = prey.map(p => p.join(',')).join(';');
+    preyNow = prey;
     if (k !== preyKey) { preyKey = k; preyDist = prey.length ? distFrom(prey) : null; }
   }
   for (const w of wolves) {
@@ -2959,7 +2980,7 @@ function updateWolves(dt, time) {
       if (w.state === 'chase') w.chaseT += dt;
       if (w.wait > 0) w.wait -= dt;
       else if (w.t >= 1) {
-        const nx = wolfStep(w, preyDist);
+        const nx = wolfStep(w, preyDist, preyNow);
         if (nx) {
           w.fx = w.x; w.fz = w.z; [w.x, w.z] = nx; w.t = 0;
           w.stepTime = w.state === 'chase' ? WOLF.chase : WOLF.roam;

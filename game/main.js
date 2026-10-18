@@ -2959,11 +2959,11 @@ function patrolRoute(x0, z0) {
   }
   return path;
 }
-const routeDotGeo = new THREE.CircleGeometry(0.055, 12).rotateX(-Math.PI / 2);
+const routeDotGeo = new THREE.CircleGeometry(0.075, 14).rotateX(-Math.PI / 2);
 function drawRoute(route, glow) {
   const pts = [];
   for (let k = 0; k < route.length; k++) { pts.push(route[k]); if (k + 1 < route.length) for (const f of [1 / 3, 2 / 3]) pts.push([route[k][0] + (route[k + 1][0] - route[k][0]) * f, route[k][1] + (route[k + 1][1] - route[k][1]) * f]); }
-  const mat = new THREE.MeshBasicMaterial({ color: glow ? '#7fe8ff' : '#e0604f', transparent: true, opacity: glow ? 0.75 : 0.6, depthWrite: false, toneMapped: false });
+  const mat = new THREE.MeshBasicMaterial({ color: glow ? '#7fe8ff' : '#f0553c', transparent: true, opacity: glow ? 0.8 : 0.9, depthWrite: false, toneMapped: false });
   const m = new THREE.InstancedMesh(routeDotGeo, mat, pts.length), M = new THREE.Matrix4();
   pts.forEach(([x, z], k) => { M.makeTranslation(x - origin, 0.1, z - origin); m.setMatrixAt(k, M); });
   m.renderOrder = 4; m.frustumCulled = false; scene.add(m);

@@ -6,7 +6,8 @@ A cozy, relaxing **PC (landscape)** 3D maze game built with Three.js, with no bu
 
 Everything is in `game/`:
 - `index.html`: all UI markup and CSS.
-- `main.js`: the whole game, about 2,500 lines.
+- `main.js`: the whole game, about 4,900 lines.
+- `map3d.js` (adventure map), `props.js` (scenery), `story.js` (the story's speech bubbles), `sw.js` (offline helper).
 - `assets/`: models, sounds, music and the map painting.
 
 ---
@@ -69,7 +70,8 @@ Then open http://localhost:8770.
   of three stones laid on their side; a calm swirl in milky biome tints (`PORTAL_TINTS`).
 - **Key** (`makeKey`): lies flat and turns, soft shadow, no glow. Pickup: hops over Buddy's head, then flies as an
   icon up into the HUD key slot (`flyKeyToHud`).
-- **Beta:** `BETA_ALL_OPEN = true` opens every level. Set it to false for release.
+- **Beta:** `BETA_ALL_OPEN` opens every level only when the game runs locally (localhost); online, levels unlock in order.
+  `CHARS_ALL_OPEN = true` keeps every animal unlocked for now.
 - **Ground textures** (`groundTexture`): seamless procedural grass (woods green / autumn golden), sand with wind ripples,
   snow. Used on the map (finely tiled + fade mask) and as the autumn floor in play (the leaf litter was disliked).
 - **Desert stones** keep their natural colored layers (`tint 0.12`, `matchStrength 0.45`); the cactus door stays green.
@@ -233,6 +235,34 @@ Each biome has:
 - **Outfit:** 9 colors recolor the olive parts of Buddy (`SKINS`, `setSkin`, shader `addOutfit`).
 - **Title character:** a second WebGL renderer (`face`) for the menu Buddy: idle sway and arm swing (`uIdle`), head-follow, blink.
 
+### Characters (`CHARS`, `loadChar`)
+- Buddy plus four animals, one per world: Frog (woods), Fennec (desert), Polar Bear (snow), Cat (autumn), in
+  `assets/chars/`. The animal scans come T-posed; `loadChar` bakes them into Buddy's space and `poseArms` lowers each
+  arm as a rigid piece turning at the shoulder, so Buddy's walk / idle / bump animations drive every character.
+- The menu shows them with smooth shading; in play they keep the low-poly look. Keep their original proportions.
+
+### Wolves
+- **Wolf Chase** (solo, `startWolf`): find the key and reach the portal while wolves roam. Each cleared map is bigger
+  with one more wolf (`wolfCount`); the worlds cycle, and the cave has glowing fungus wolves. Best run in `buddy-wolf-best`.
+- A wolf only spots you with a clear, body-wide line of sight (`inSight`). Out of sight it runs to where it last saw
+  you, sniffs, and gives up ("?"). Hiding behind a wall works (the owner found the old scent-tracking too hard).
+- **Wolves vs Animals** (online, `hunt`): animals find `HUNT.keys` keys and escape; wolves (players or computer) catch them.
+
+### Online play (`net`)
+- PeerJS lobby with a short code or link; the host is the hub (star), up to 4 players, computer Buddies fill empty
+  spots, teams optional. Strict networks fall back to the openrelay TURN server, then to an MQTT relay over two public
+  brokers (`makeRelay`). Still needs real-world testing across networks.
+
+### Story (`story.js`)
+- Wolves with glowing mushroom eyes stormed Buddy's village and scattered his four friends; each world's last level
+  is where its friend is found. Ooblets-style speech bubbles: pill name tag in the speaker's color, a portrait window
+  (portraits, short clips, or stickers from `assets/story/`; Buddy's is a render of his model, `charPortrait`).
+- Scenes: `intro` (first start of 1-1), `arrive-<world>` (first level of worlds 2–4), `found-<friend>` (after the
+  world finale, before the win card). Each plays once (`buddy-story` in localStorage); the opening shot waits
+  (`intro.hold`). Tap / Space / Enter = next line (first tap finishes the typing), Esc or Skip = close.
+- The map shows each friend's sticker over its world's last stone: grey with "?" until found; tap a found one to replay.
+- Source art (white backgrounds) is in `inbox/`; the cut-out stickers and square crops were made from it.
+
 ### Performance rules (phones crashed after 2–3 levels)
 - **Build once, reuse:** a world's stone meshes (`setMeshes`), the floor pair (`floorMeshes`), its portal
   (`set.portal`), the key and the maze grass are made once and reused by every level. Don't create or dispose GPU
@@ -262,5 +292,6 @@ Each biome has:
 
 ## Online
 
-- Netlify (main): https://buddy-maze.netlify.app (deploy: `netlify deploy --prod --dir game --site 6edc3228-2263-424c-a079-7b943b571002`)
-- GitHub Pages (backup): https://ihabhugoy.github.io/buddy-maze/
+- **The owner works only on GitHub** (https://github.com/ihabhugoy/buddy-maze, branch `main`). Don't deploy to Netlify.
+- GitHub Pages: https://ihabhugoy.github.io/buddy-maze/
+- Netlify (old, not maintained from here): https://buddy-maze.netlify.app

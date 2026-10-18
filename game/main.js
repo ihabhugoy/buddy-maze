@@ -4,6 +4,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Reflector } from 'three/addons/objects/Reflector.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createMap3D } from './map3d.js';
+import { createStory, FRIENDS, startScene, winScene } from './story.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
@@ -3277,15 +3278,18 @@ function win() {
   const wasLocked = L + 1 < TOTAL_LEVELS && !unlocked(L + 1);
   save.set(L, stars);
   const newWorld = wasLocked && (L + 1) % LEVELS_PER_WORLD === 0 ? WORLDS[(L + 1) / LEVELS_PER_WORLD] : null;
+  const found = winScene(L, LEVELS_PER_WORLD), friend = found && !story.seen(found) ? FRIENDS[(L + 1) / LEVELS_PER_WORLD - 1] : null;
   $('winStats').innerHTML = chip('i-steps', `${steps} steps`) + chip('i-clock', fmt(Math.round(elapsed))) + chip('i-flag', `best ${optimal}`);
-  $('unlockText').innerHTML = newWorld ? `<svg class="ico"><use href="#${newWorld.icon}"/></svg>New world: ${newWorld.name}` : '';
+  $('unlockText').innerHTML = (friend ? `<img class="fsticker" alt="" src="${friend.sticker}">${friend.name} is back!` : '')
+    + (newWorld ? `<svg class="ico"><use href="#${newWorld.icon}"/></svg>New world: ${newWorld.name}` : '');
   confetti();
   coach.done();
-  $('unlockMsg').classList.toggle('on', !!newWorld);
+  $('unlockMsg').classList.toggle('on', !!(newWorld || friend));
   $('nextBtn').firstChild.textContent = L + 1 < TOTAL_LEVELS ? 'Next' : 'Map';
   const starEls = [...$('winStars').children];
   starEls.forEach(e => e.classList.remove('on'));
-  setTimeout(() => {
+  setTimeout(async () => {
+    if (friend) await tell(found);
     show('win');
     starEls.forEach((e, i) => setTimeout(() => i < stars && e.classList.add('on'), 350 + i * 260));
   }, 700);
@@ -3679,18 +3683,49 @@ function doorPreview(b) {
     sc.environment = scene.environment; sc.environmentIntensity = 0.3;
     const m = new THREE.Mesh(set.door.raw, set.door.mat); m.rotation.y = set.door.yaw - 0.55; sc.add(m); // the stone is cut at the floor, like in the maze
     const cam = new THREE.PerspectiveCamera(24, 1, 0.1, 30); cam.position.set(2.4, 2.1, 2.9); cam.lookAt(0, 0.38, 0);
-    const rt = new THREE.WebGLRenderTarget(S, S, { colorSpace: THREE.SRGBColorSpace });
-    renderer.setClearColor(0x000000, 0); renderer.setRenderTarget(rt); renderer.clear(); renderer.render(sc, cam);
-    const px = new Uint8Array(S * S * 4); renderer.readRenderTargetPixels(rt, 0, 0, S, S, px);
-    renderer.setRenderTarget(null); renderer.setClearColor(0x000000, 1); rt.dispose();
-    const c = document.createElement('canvas'); c.width = c.height = S;
-    const x = c.getContext('2d'), img = x.createImageData(S, S);
-    for (let y = 0; y < S; y++) img.data.set(px.subarray((S - 1 - y) * S * 4, (S - y) * S * 4), y * S * 4); // flip: GL rows go up
-    x.putImageData(img, 0, 0);
-    const out = document.createElement('canvas'); out.width = out.height = 256; // drawn down for smooth edges
-    out.getContext('2d').drawImage(c, 0, 0, 256, 256);
-    return out.toDataURL();
+    return snapshot(sc, cam, S);
   });
+}
+// renders a scene off-screen once into a picture (transparent background)
+function snapshot(sc, cam, S) {
+  const rt = new THREE.WebGLRenderTarget(S, S, { colorSpace: THREE.SRGBColorSpace });
+  renderer.setClearColor(0x000000, 0); renderer.setRenderTarget(rt); renderer.clear(); renderer.render(sc, cam);
+  const px = new Uint8Array(S * S * 4); renderer.readRenderTargetPixels(rt, 0, 0, S, S, px);
+  renderer.setRenderTarget(null); renderer.setClearColor(0x000000, 1); rt.dispose();
+  const c = document.createElement('canvas'); c.width = c.height = S;
+  const x = c.getContext('2d'), img = x.createImageData(S, S);
+  for (let y = 0; y < S; y++) img.data.set(px.subarray((S - 1 - y) * S * 4, (S - y) * S * 4), y * S * 4); // flip: GL rows go up
+  x.putImageData(img, 0, 0);
+  const out = document.createElement('canvas'); out.width = out.height = 256; // drawn down for smooth edges
+  out.getContext('2d').drawImage(c, 0, 0, 256, 256);
+  return out.toDataURL();
+}
+// a character's head and shoulders, turned a little toward you (Buddy's picture in the story's speech bubbles)
+const portraits = {};
+function charPortrait(id) {
+  return portraits[id] ||= loadChar(id).then(ch => {
+    const sc = new THREE.Scene();
+    addLights(sc, false, BIOMES.woods);
+    sc.traverse(o => { if (o.isLight) o.intensity *= 0.85; });
+    sc.environment = scene.environment; sc.environmentIntensity = 0.3;
+    const m = ch.scene.clone(true);
+    m.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.metalness = 0; } });
+    const box = new THREE.Box3().setFromObject(m), h = box.max.y - box.min.y;
+    m.position.set(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2); sc.add(m);
+    const look = new THREE.Vector3(0, h * 0.7, 0), cam = new THREE.PerspectiveCamera(22, 1, h * 0.05, h * 20);
+    cam.position.set(h * 1.62, h * 0.84, h * 0.4); cam.lookAt(look); // (the models face +X: a little from the side)
+    return snapshot(sc, cam, 384);
+  });
+}
+
+// ---------- the story: speech bubbles at the start of a world and when a friend is found (see story.js) ----------
+let buddyPicUrl = null;
+const story = createStory({ layer: $('story'), sfx, buddyPic: () => buddyPicUrl });
+// plays a scene once (or again, from a map sticker); resolves when it is closed
+async function tell(id, replay = false) {
+  if (!id || (story.seen(id) && !replay)) return false;
+  buddyPicUrl ||= await charPortrait('buddy').catch(() => null);
+  return story.play(id, { replay });
 }
 
 // ---------- first steps: a friendly guide on the first level (and the first door and cave) ----------
@@ -3776,6 +3811,8 @@ async function play(level) {
   if (!stoneSets[b]) { $('busy').classList.add('on'); await stoneSet(b); $('busy').classList.remove('on'); } // first visit to a biome
   warp.t = -1; $('fader').style.opacity = 0;
   buildLevel(level); show('play'); intro.t = 0; intro.warm = 3; intro.wave = false; intro.online = intro.hold = false;
+  const scene = startScene(level, LEVELS_PER_WORLD);
+  if (scene && !story.seen(scene)) { intro.hold = true; await tell(scene); intro.hold = false; }
 }
 
 // adventure map: a 3D board of floating islands, one per world, left to right (see map3d.js)
@@ -3785,6 +3822,7 @@ function renderMap() {
   if (!map3d) {
     map3d = createMap3D({ canvas: $('mapCanvas'), renderer, layer: $('mapNodes'), worlds: WORLDS, perWorld: LEVELS_PER_WORLD,
       stars: save.stars, unlocked, next: nextLevel, starSvg, stoneSet, addLights, biomes: BIOMES,
+      friends: FRIENDS.map((f, i) => ({ ...f, found: () => story.seen(`found-${f.id}`) || save.stars((i + 1) * LEVELS_PER_WORLD - 1) > 0, tell: () => tell(`found-${f.id}`, true) })),
       patterns: { woods: groundTexture('woods'), autumn: groundTexture('autumn'), desert: groundTexture('desert'), snow: groundTexture('snow') },
       decor: b => sceneryModels.arch.map(m => ({ geo: m.geo, mat: decorMat(m, b), h: m.h })) });
     map3d.focusNext();
@@ -4035,6 +4073,7 @@ $('raceGo').addEventListener('click', () => startRace());
 $('raceAgain').addEventListener('click', () => mode === 'wolf' ? startWolf(wolfOver ? 0 : wolfRun + 1) : net.online ? net.again() : startRace());
 $('pauseBtn').addEventListener('click', () => show('pause'));
 $('resumeBtn').addEventListener('click', () => show('play'));
+$('pauseX').addEventListener('click', () => show('play')); // (the pause panel's close X)
 $('restartBtn').addEventListener('click', () => mode === 'hunt' ? net.again() : mode === 'wolf' ? startWolf(wolfRun) : mode === 'race' ? startRace() : play(L));
 $('nextBtn').addEventListener('click', () => {
   if (L + 1 >= TOTAL_LEVELS) return show('worlds');
@@ -4409,6 +4448,7 @@ const ease = k => k * k * k * (k * (k * 6 - 15) + 10); // smootherstep
 const zoomLerp = (a, b, k) => Math.exp(THREE.MathUtils.lerp(Math.log(a), Math.log(b), k));
 function introShot(dt) {
   if (intro.warm > 0) { intro.warm--; dt = 0; } // let the first heavy frames of a new level pass before moving
+  if (intro.hold) dt = 0; // (a story scene is being told over the opening shot)
   intro.t += Math.min(dt, 1 / 30);
   const t = intro.t, wideW = maze.N * 1.3;
   const focus = portal && portal.visible ? portal.position : key.position; // the portal (where you're headed)

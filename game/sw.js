@@ -3,7 +3,7 @@
 // arrive at once) and fall back to the saved copy offline; models, sounds, pictures and the three.js library come
 // from the saved copy and are refreshed in the background.
 const CACHE = 'buddy-files-v1';
-const CODE = /\/(index\.html|main\.js|map3d\.js|props\.js|manifest\.webmanifest|assets-list\.json)?$/;
+const CODE = /\/(index\.html|main\.js|map3d\.js|props\.js|story\.js|manifest\.webmanifest|assets-list\.json)?$/;
 const OTHER_HOSTS = /(^|\.)cdn\.jsdelivr\.net$|(^|\.)unpkg\.com$|(^|\.)fonts\.(googleapis|gstatic)\.com$/;
 
 self.addEventListener('install', () => self.skipWaiting());

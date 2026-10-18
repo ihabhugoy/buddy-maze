@@ -294,12 +294,6 @@
   /* first-steps guide: a small card near the bottom with a picture, a title and a line of help */
   .coach { position: fixed; left: 24px; bottom: 24px; transform: translate(-30px, 0) scale(.92); transform-origin: 0 100%; z-index: 6; opacity: 0; pointer-events: none; transition: opacity .3s, transform .45s var(--spring); }
   .coach.on { opacity: 1; transform: none; } /* bottom-left corner, clear of Buddy in the middle */
-  .coach .card { display: flex; align-items: center; gap: 14px; padding: 14px 20px 16px 14px; border-radius: 26px; text-align: left; max-width: min(400px, 44vw); }
-  .coach .card::before { inset: 7px; border-radius: 20px; }
-  .coach .pic { width: 64px; height: 64px; border-radius: 20px; display: grid; place-items: center; flex: none; background: var(--well); color: var(--leaf); }
-  .coach .pic .ico { width: 34px; height: 34px; animation: bob 1.8s ease-in-out infinite; }
-  .coach h4 { margin: 0 0 2px; font-family: var(--title); font-weight: 400; font-size: 21px; color: var(--ink); }
-  .coach p { margin: 0; color: var(--ink-soft); font-size: 15px; line-height: 1.35; }
   .coach kbd { font: inherit; font-size: 13px; color: var(--ink); background: var(--well); border-radius: 7px; padding: 1px 7px 2px; box-shadow: inset 0 -2px 0 var(--lip); }
   .coach .keys { display: grid; grid-template-columns: repeat(3, 20px); grid-template-rows: repeat(2, 20px); gap: 3px; }
   .coach .keys b { display: grid; place-items: center; border-radius: 6px; background: var(--card); color: var(--ink); font-size: 11px; box-shadow: inset 0 -2px 0 var(--lip), inset 0 0 0 1.5px var(--edge); }
@@ -307,6 +301,59 @@
   .coach .dots { display: flex; gap: 5px; margin-top: 8px; }
   .coach .dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--edge); transition: background .2s, transform .3s var(--bounce); }
   .coach .dots i.on { background: var(--leaf); transform: scale(1.25); }
+  /* story: an Ooblets-style speech bubble with a pill name tag and a portrait window (story.js). The window and the
+     name tag take the speaker's color (--who); the storyteller has neither. Tap / Space for the next line. */
+  .story { position: fixed; inset: 0; z-index: 30; display: none; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    background: linear-gradient(to top, rgba(70, 45, 20, .3), rgba(70, 45, 20, 0) 50%); }
+  .story.on { display: block; animation: fadeup .3s ease both; }
+  body.talking .hud, body.talking .peek, body.talking .coach, body.talking .toast { opacity: 0 !important; pointer-events: none !important; } /* a clean frame while someone talks */
+  .talk { --who: var(--lilac); display: flex; align-items: flex-end; } /* (the bubble family: story, coach) */
+  .story .talk { position: absolute; left: 50%; bottom: max(28px, env(safe-area-inset-bottom)); width: min(780px, calc(100vw - 40px)); transform: translateX(-50%); }
+  .tpic { flex: none; position: relative; z-index: 1; width: 152px; height: 152px; margin: 0 -30px 14px 0; border-radius: 36px; overflow: hidden;
+    background: #fefefe; border: 5px solid #fff; box-shadow: 0 0 0 4px var(--who), var(--shadow-m); transform: rotate(-4deg); transition: box-shadow .3s; }
+  .tpic img, .tpic video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tpic.none { display: none; }
+  .tbub { position: relative; flex: 1; min-width: 0; min-height: 118px; padding: 32px 52px 26px 56px; border-radius: 36px; background: var(--bubble);
+    box-shadow: inset 0 -7px 0 var(--bubble-lip), 0 0 0 4px var(--rim), var(--shadow-l); }
+  .talk.narr .tbub { padding: 30px 52px 26px; text-align: center; }
+  .tname { position: absolute; left: 44px; top: 0; transform: translateY(-55%) rotate(-2deg); padding: 5px 20px 7px; border-radius: 999px;
+    background: var(--who); color: #fff; font-family: var(--title); font-size: 20px; letter-spacing: .05em; box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .14), 0 0 0 4px var(--rim), var(--shadow-s); }
+  .talk.narr .tname { display: none; }
+  .ttext { margin: 0; min-height: 2.8em; color: var(--ink); font-size: 21px; font-weight: 800; line-height: 1.4; }
+  .talk.narr .ttext { color: var(--ink-soft); }
+  .tnext { position: absolute; right: -8px; bottom: -12px; width: 54px; height: 44px; border-radius: 15px; transition: opacity .2s; animation: nudge 1s ease-in-out infinite;
+    background: var(--who) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M8.6 4.6a1.6 1.6 0 0 1 2.3 0l6.2 6.3a1.6 1.6 0 0 1 0 2.2l-6.2 6.3a1.6 1.6 0 1 1-2.3-2.3l5.1-5.1-5.1-5.1a1.6 1.6 0 0 1 0-2.3z'/%3E%3C/svg%3E") center/24px no-repeat;
+    box-shadow: inset 0 -5px 0 rgba(0, 0, 0, .18), 0 0 0 4px var(--rim), var(--shadow-s); }
+  .talk.narr .tnext { background-color: var(--leaf); }
+  .talk.typing .tnext { opacity: 0; }
+  .talk.pop .tbub { animation: talkpop .38s var(--spring); }
+  .talk.pop .tpic { animation: talkpic .45s var(--spring); }
+  @keyframes talkpop { from { transform: scale(.95) translateY(8px); } }
+  @keyframes talkpic { from { transform: rotate(-10deg) scale(.85); } }
+  .tskip { position: absolute; top: max(18px, env(safe-area-inset-top)); right: max(20px, env(safe-area-inset-right)); display: flex; align-items: center; gap: 4px;
+    padding: 9px 12px 10px 18px; border: 0; border-radius: 999px; background: var(--card); color: var(--ink-soft); font: 800 16px/1 "Nunito", sans-serif;
+    box-shadow: inset 0 -3px 0 var(--edge), var(--shadow-s); cursor: pointer; }
+  .tskip .ico { width: 18px; height: 18px; }
+  .tskip:hover { color: var(--ink); }
+  @media (max-height: 520px), (max-width: 640px) {
+    .talk { width: calc(100vw - 24px); bottom: max(14px, env(safe-area-inset-bottom)); }
+    .tpic { width: 108px; height: 108px; border-radius: 28px; margin: 0 -24px 10px 0; }
+    .tbub { min-height: 92px; padding: 24px 40px 18px 40px; border-radius: 28px; }
+    .tname { left: 32px; font-size: 17px; }
+    .ttext { font-size: 17px; }
+    .tnext { width: 46px; height: 38px; bottom: -10px; }
+  }
+  /* the friends' stickers over each world's last stone on the map: grey with a "?" until found */
+  .mfriend { position: absolute; z-index: 3; width: 84px; padding: 0; border: 0; background: none; pointer-events: auto; cursor: default; transform: translate(-50%, -100%);
+    filter: drop-shadow(0 8px 10px rgba(90, 60, 25, .22)); -webkit-tap-highlight-color: transparent; }
+  .mfriend img { display: block; width: 100%; filter: grayscale(1) brightness(1.18) opacity(.5); transition: filter .5s, scale .35s var(--bounce), rotate .35s var(--bounce); }
+  .mfriend b { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -46%); font: 400 32px var(--title); color: var(--ink-soft); }
+  .mfriend.found { cursor: pointer; }
+  .mfriend.found img { filter: none; animation: bob 2.6s ease-in-out infinite; }
+  .mfriend.found b { display: none; }
+  .mfriend.found:hover img { scale: 1.1; rotate: -5deg; }
+  .unlock .chip .fsticker { width: 30px; height: 30px; object-fit: contain; margin: -4px 2px -4px -4px; }
+  .unlock .chip .fsticker ~ .ico { margin-left: 10px; }
 
   /* ---------- modals ---------- */
   .modal { justify-content: center; background: rgba(70, 48, 28, .32); } /* no backdrop blur: it hides the card over the 3D view */
@@ -427,15 +474,13 @@
     /* title on a phone: round buttons in the top corners, logo under them, the character in the middle, and the menu
        as chunky buttons at the bottom (Race and Outfit stacked beside a tall Friends, a wide Adventure underneath) */
     .side-menu { top: auto; left: 12px; right: 12px; bottom: calc(14px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); width: auto; padding: 0; gap: 10px; background: none; box-shadow: none; transform: none !important; border-radius: 0;
-      display: grid; grid-template-columns: 1fr 1fr; grid-template-areas: "race friends" "wolves friends" "outfit friends" "play play"; animation: fadeup .55s .1s var(--spring) backwards; }
+      display: grid; grid-template-columns: 1fr 1fr; grid-template-areas: "tiles tiles" "friends play"; animation: fadeup .55s .1s var(--spring) backwards; }
     .side-menu::before { display: none; }
     .mitem { transform: none !important; margin: 0; min-width: 0; background: var(--card); color: var(--ink); font-size: 16px; padding: 9px 10px 12px 9px; gap: 10px; border-radius: 22px; box-shadow: inset 0 -5px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); }
     .mitem.sel:not(.big) { background: var(--card); box-shadow: inset 0 -5px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); }
     .mitem .mi, .mitem.sel .mi { width: 38px; height: 38px; background: var(--c); color: #fff; transform: none; }
     .mitem .go { display: none; }
-    #raceBtn { grid-area: race; } #wolfBtn { grid-area: wolves; } #outfitBtn { grid-area: outfit; } #friendMenuBtn { grid-area: friends; } #playBtn { grid-area: play; }
-    #friendMenuBtn { flex-direction: column; justify-content: center; gap: 8px; font-size: 21px; }
-    #friendMenuBtn span { align-items: center; text-align: center; }
+    #friendMenuBtn { grid-area: friends; } #playBtn { grid-area: play; }
     #playBtn { justify-content: center; font-size: 24px; padding: 13px 16px 17px; }
     .mitem.big .mi, .mitem.big.sel .mi { background: rgba(255,255,255,.25); }
     .cont { display: none; }
@@ -450,16 +495,11 @@
     .cont { width: 170px; } .cont .art { height: 90px; } .cont h3 { font-size: 18px; margin-top: 6px; } .cont p { margin-bottom: 6px; }
     .page .card { max-height: 86vh; padding: 14px; width: 270px; } .pagehead h2 { font-size: 30px; } .rc-row { padding: 5px 8px 5px 12px; font-size: 14px; }
     .hud .chip { height: 38px; font-size: 15px; } .round { width: 44px; height: 44px; border-radius: 15px; } .peek { right: calc(14px + env(safe-area-inset-right)); bottom: calc(14px + var(--badge-h, 0px)); } .camzoom { bottom: calc(66px + var(--badge-h, 0px)); }
-    .coach .card { max-width: 46vw; padding: 10px 14px 12px 10px; } .coach .pic { width: 46px; height: 46px; } .coach h4 { font-size: 17px; } .coach p { font-size: 13px; }
   }
 
   @media (max-aspect-ratio: 5/4) {
     .coach { left: 12px; right: 12px; bottom: auto; top: calc(70px + env(safe-area-inset-top)); transform: translateY(-14px) scale(.96); transform-origin: 50% 0; }
     .coach.on { transform: none; }
-    .coach .card { max-width: none; padding: 10px 14px 12px 10px; gap: 12px; border-radius: 22px; }
-    .coach .card::before { inset: 6px; border-radius: 17px; }
-    .coach .pic { width: 48px; height: 48px; border-radius: 15px; } .coach .pic .ico { width: 28px; height: 28px; }
-    .coach h4 { font-size: 18px; } .coach p { font-size: 14px; }
   }
   /* get the app: save the files on the phone, add to the home screen */
   .installcard { width: min(470px, 94vw) !important; text-align: left; }
@@ -554,6 +594,176 @@
     .rc-row { margin-bottom: 7px; padding: 6px 10px 6px 14px; } .card p { margin-bottom: 12px; font-size: 15px; }
   }
   @media (max-width: 640px) { .hud { padding: calc(12px + env(safe-area-inset-top)) 12px 0; } .hud .chip { height: 42px; font-size: 16px; } .hud .stats { gap: 8px; padding: 6px 12px; } }
+
+  /* ===== restyle after the owner's references (inbox/refs: kids-app cards, cozy phone menu, Ooblets bubble):
+     white sticker rims instead of stitched seams, icon tiles, one bubble style for the story, coach and toasts ===== */
+  :root {
+    --ink-soft: #85694f;                       /* was #a48b72 (3.1:1 on cream); now readable */
+    --bubble: #fff8e2; --bubble-lip: #ecd9ae;  /* Ooblets cream-yellow bubble + its darker lip */
+    --rim: #fff; --rim-w: 5px;                 /* the chunky white sticker rim of the kids-app cards */
+    --panel: #f8eedc;                          /* the cozy phone-menu cream */
+    --r-xl: 44px; --r-l: 30px; --r-m: 22px; --r-s: 14px;
+    --slate: #6f7f95; --peach: #f3a35b;
+  }
+
+  /* ---- cards: clean cream, white rim, cocoa lip under the rim; no stitched seam ---- */
+  .card { border: var(--rim-w) solid var(--rim); border-radius: var(--r-l); box-shadow: 0 7px 0 var(--lip), var(--shadow-l); }
+  .card::before { content: none; }
+  .ribbon { margin: 2px auto 14px; padding: 0; background: none; color: var(--ink-soft); font-size: 14px; letter-spacing: .1em; }
+  /* a page card's first ribbon becomes a colored tab flush in its top-left corner (the kids-app "NEW" tab) */
+  .page .card { --pt: 22px; --px: 20px; padding: var(--pt) var(--px) 20px; }
+  .page .card > .ribbon:first-child { display: inline-flex; align-items: center; gap: 7px; margin: calc(-1 * var(--pt)) 0 14px calc(-1 * var(--px)); padding: 10px 18px 11px 18px;
+    border-radius: calc(var(--r-l) - var(--rim-w)) 0 18px 0; background: var(--tab, var(--leaf)); color: #fff;
+    font: 400 18px/1 var(--title); letter-spacing: .02em; text-transform: none; text-shadow: 0 2px 0 rgba(0,0,0,.12); }
+  .page .card > .ribbon:first-child .rib { width: 17px; height: 17px; margin: 0; color: #fff; }
+  #outfit .pleft { --tab: var(--berry); } #outfit .pright { --tab: var(--lilac); } #race .pleft { --tab: var(--coral); }
+
+  /* coach = the same bubble, with an icon tile (the cozy-menu squircle) in the picture window and no name tag */
+  .coach .talk { position: relative; left: auto; bottom: auto; transform: none; width: min(520px, 46vw); }
+  .coach .tpic { width: 86px; height: 86px; margin: 0 -20px 10px 0; border-radius: 28px; display: grid; place-items: center; background: var(--tc, var(--leaf)); color: #fff;
+    border: var(--rim-w) solid var(--rim); box-shadow: inset 0 -6px 0 rgba(0,0,0,.16), 0 6px 0 var(--lip), var(--shadow-m); }
+  .coach .tpic .ico { width: 42px; height: 42px; animation: bob 1.8s ease-in-out infinite; }
+  .coach .tpic .keys b { color: var(--ink); }
+  .coach .tbub { min-height: 0; padding: 18px 22px 18px 38px; border-radius: 30px; }
+  .coach h4 { margin: 0 0 2px; font: 400 21px/1.15 var(--title); color: var(--ink); }
+  .coach .ttext { min-height: 0; font-size: 16px; line-height: 1.4; }
+  .coach .dots i { background: var(--bubble-lip); }
+
+  /* ---- toast: a small bubble with an icon badge; wraps instead of running off a phone screen ---- */
+  .toast { top: calc(84px + env(safe-area-inset-top)); padding: 0 16px; z-index: 7; }
+  .toast .chip { white-space: normal; max-width: min(560px, 100%); min-height: 52px; padding: 10px 22px 14px 12px; gap: 12px; border-radius: 26px; background: var(--bubble);
+    font-size: 18px; line-height: 1.3; text-align: left; box-shadow: inset 0 -5px 0 var(--bubble-lip), 0 0 0 4px var(--rim), var(--shadow-m); }
+  .toast .cbadge { margin-left: 0; width: 34px; height: 34px; background: var(--tc, var(--leaf)); }
+
+  /* ---- icon tiles (the cozy phone menu): a colored squircle with a label underneath ---- */
+  .tiles { display: grid; grid-template-columns: repeat(var(--cols, 4), 1fr); gap: 12px 10px; }
+  .tile { display: flex; flex-direction: column; align-items: center; gap: 7px; min-width: 0; font-size: 14px; font-weight: 900; letter-spacing: .03em; color: var(--ink); text-align: center; }
+  .tile .ti, .mitem.tile .mi { position: relative; width: 100%; max-width: 76px; height: auto; aspect-ratio: 1; border-radius: 30%; display: grid; place-items: center; background: var(--c); color: #fff;
+    min-height: 0; /* a flex item's auto min-height would stretch the squircle to max-width */
+    box-shadow: inset 0 -6px 0 rgba(0,0,0,.16), var(--shadow-s); transition: transform .25s var(--bounce), box-shadow .15s; }
+  .tile .ti .ico, .mitem.tile .mi .ico { width: 46%; height: 46%; }
+  .tile:hover .ti { transform: translateY(-3px) rotate(-5deg); }
+  .tile:active .ti { transform: translateY(2px) scale(.95); box-shadow: inset 0 -2px 0 rgba(0,0,0,.16); }
+
+  /* ---- title side menu = the cozy phone panel: two big candy pills, then a row of icon tiles ---- */
+  .side-menu { background: var(--panel); border: var(--rim-w) solid var(--rim); border-radius: var(--r-xl); padding: 16px 14px 16px; gap: 10px;
+    box-shadow: 0 7px 0 var(--lip), var(--shadow-l); width: clamp(240px, 23vw, 300px); }
+  .side-menu::before { content: none; }
+  .mitem.big { margin: 0; border-radius: 22px; }
+  .mtiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 4px; }
+  .mitem.tile { flex-direction: column; gap: 6px; padding: 0; font-size: 12px; letter-spacing: .05em; color: var(--ink); background: none; box-shadow: none; transform: none; border-radius: 0; }
+  .mitem.tile span { align-items: center; text-align: center; }
+  .mitem.tile .go { display: none; }
+  .mitem.tile:hover, .mitem.tile.sel { background: none; box-shadow: none; transform: none; color: var(--ink); }
+  .mitem.tile.sel .mi { transform: translateY(-3px) rotate(-6deg) scale(1.06); box-shadow: inset 0 -6px 0 rgba(0,0,0,.16), 0 0 0 3px var(--rim), var(--shadow-m); }
+  #helpBtn { --c: var(--honey-lip); }
+  /* top corner: Install and Settings only, each with a small label (no unlabeled icon row) */
+  .topbtns .round { width: auto; min-width: 54px; padding: 0 16px 4px 12px; display: flex; gap: 8px; font-size: 15px; font-weight: 900; color: var(--ink); }
+  .topbtns .round .ico { color: var(--leaf-ink); }
+
+  /* ---- the continue card: the world's own color inside a white rim, name-tag ribbon ---- */
+  .cont { background: var(--wc, #cfe9b8); border: var(--rim-w) solid var(--rim); padding: 0 0 12px; box-shadow: 0 7px 0 var(--lip), var(--shadow-l); }
+  .cont .art { border-radius: calc(var(--r-l) - var(--rim-w)) calc(var(--r-l) - var(--rim-w)) 0 0; background: radial-gradient(circle at 50% 42%, rgba(255,255,255,.7), rgba(255,255,255,0) 64%); box-shadow: none; }
+  .cont h3, .cont p { padding: 0 12px; }
+  .cont p { color: var(--ink); opacity: .7; }
+  .cont .btn { width: calc(100% - 24px); }
+  .cont .tag { top: -19px; padding: 7px 16px 9px; border-radius: 999px; background: var(--lilac); font: 400 18px/1 var(--title); letter-spacing: .03em; text-transform: none;
+    text-shadow: 0 2px 0 rgba(0,0,0,.12); box-shadow: inset 0 -3px 0 rgba(0,0,0,.15), 0 0 0 4px var(--rim); }
+
+  /* ---- tabs (kids-app category tabs): raised candy chips, the active one colored ---- */
+  .tabs { gap: 8px; padding: 0; background: none; margin-bottom: 14px; }
+  .tabs span { min-height: 46px; padding: 9px 10px 12px; border-radius: 16px; white-space: nowrap; font-size: 16px; font-weight: 900; color: var(--ink-soft); background: var(--well); box-shadow: inset 0 -4px 0 var(--edge); }
+  .tabs span.on { background: var(--sky); color: #fff; text-shadow: 0 2px 0 rgba(0,0,0,.12); box-shadow: inset 0 -4px 0 var(--sky-lip), 0 0 0 3px var(--rim), var(--shadow-s); }
+
+  /* ---- choice chips (World / Maze / Rivals): even, fingertip-sized candy tiles instead of 13px text ---- */
+  .seg { display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 6px; padding: 0; background: none; box-shadow: none; }
+  #frGame, #frMode, #frRole { grid-template-columns: 1fr 1fr; }
+  .seg button, #friend .rc-row .seg button { min-height: 40px; padding: 7px 8px 10px; border-radius: 14px; background: var(--card); color: var(--ink);
+    font-size: 15px; line-height: 1.1; text-wrap: balance; box-shadow: inset 0 -4px 0 var(--lip), inset 0 0 0 2px var(--edge); }
+  .seg button.on { background: var(--leaf); color: #fff; transform: none; text-shadow: 0 2px 0 rgba(0,0,0,.12); box-shadow: inset 0 -4px 0 var(--leaf-lip); }
+  .stepper .round { width: 44px; height: 44px; border-radius: 14px; }
+
+  /* ---- characters (kids-app cards): each friend on their own pastel, white rim, lock + NEW badges ---- */
+  .chars { gap: 12px; }
+  .charcard { --cc: var(--well); background: var(--cc); border: 4px solid var(--rim); border-radius: var(--r-m); padding: 4px 4px 8px; font-size: 14px; font-weight: 900; color: var(--ink);
+    box-shadow: 0 4px 0 var(--lip), var(--shadow-s); }
+  .charcard[data-char="buddy"] { --cc: #dcefc9; } .charcard[data-char="frog"] { --cc: #cdeccf; } .charcard[data-char="fennec"] { --cc: #fbe2c2; }
+  .charcard[data-char="bear"] { --cc: #d8eaf8; } .charcard[data-char="cat"] { --cc: #fdd9c6; }
+  .charcard.on { background: var(--cc); box-shadow: 0 0 0 4px var(--leaf), 0 8px 0 0 var(--leaf-lip), var(--shadow-m); transform: translateY(-2px); }
+  .charcard.on::before { content: ""; position: absolute; right: -10px; top: -10px; width: 28px; height: 28px; border-radius: 50%; z-index: 1;
+    background: var(--leaf) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M9.5 16.2 5.3 12a1.4 1.4 0 1 0-2 2l5.2 5.2a1.4 1.4 0 0 0 2 0L21.2 8.6a1.4 1.4 0 0 0-2-2z'/%3E%3C/svg%3E") center/16px no-repeat;
+    box-shadow: 0 0 0 3px var(--rim); }
+  .charcard.locked { filter: none; opacity: 1; }
+  .charcard.locked img { filter: grayscale(1) opacity(.45); }
+  .charcard.locked::after { content: ""; position: absolute; inset: -10px -10px auto auto; width: 30px; height: 30px; border-radius: 50%;
+    background: var(--honey) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%236b4706' d='M7 10V8a5 5 0 0 1 10 0v2a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2zm2.5 0h5V8a2.5 2.5 0 0 0-5 0z'/%3E%3C/svg%3E") center/15px no-repeat;
+    box-shadow: inset 0 -3px 0 var(--honey-lip), 0 0 0 3px var(--rim); }
+  .charcard .cname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } /* (badges sit outside the card: never clip the card itself) */
+  .charcard .lockhint { display: block; margin: 4px 6px 0; padding: 3px 8px 4px; border-radius: 999px; background: var(--rim); color: var(--ink-soft); font-size: 11px; line-height: 1.2; }
+  .charcard .newtag { position: absolute; left: -4px; top: -4px; padding: 5px 9px 6px; border-radius: var(--r-m) 0 12px 0; background: var(--leaf); color: #fff; font: 400 13px/1 var(--title); }
+
+  /* ---- pause = the cozy phone: status row with a coral close X, Resume pill, a row of icon tiles ---- */
+  .phonecard { width: min(430px, 94vw) !important; background: var(--panel); border-radius: var(--r-xl); padding: 16px 22px 22px; }
+  .phonecard .ptop { display: flex; align-items: center; justify-content: space-between; margin: 0 -4px 2px 2px; }
+  .phonecard .ptop .ribbon { margin: 0; font-size: 13px; }
+  .phonecard .x { width: 40px; height: 40px; border-radius: 14px; display: grid; place-items: center; color: var(--coral); background: var(--rim); box-shadow: inset 0 -3px 0 var(--edge); }
+  .phonecard .x .ico { width: 22px; height: 22px; }
+  .phonecard h2 { margin: 2px 0 14px; }
+  .phonecard .pitem.main { width: 100%; justify-content: center; min-height: 58px; font-size: 20px; border-radius: 20px; margin-bottom: 18px; }
+  .phonecard .tiles { --cols: 5; gap: 10px 8px; }
+  .phonecard .tile { font-size: 13px; }
+
+  /* ---- settings rows: the label takes the free width, its hint goes on its own line ---- */
+  .setting label { flex: 1; width: auto; min-width: 0; line-height: 1.15; }
+  .setting label small { display: block; margin: 2px 0 0; }
+  .setting input[type=range] { flex: 0 0 46%; }
+
+  /* ---- modals never clip: they scroll, and the card centers with auto margins ---- */
+  .modal { justify-content: flex-start; overflow-y: auto; overscroll-behavior: contain; padding: calc(14px + env(safe-area-inset-top)) 12px calc(18px + env(safe-area-inset-bottom)); }
+  .modal > .card { margin: auto 0; flex-shrink: 0; }
+  #win, #raceEnd { padding-top: calc(62px + env(safe-area-inset-top)); }
+
+  /* the empty key slot reads as an empty socket, not a faded chip */
+  .hud .keyhud:not(.got) { background: var(--well); box-shadow: inset 0 3px 0 var(--edge), 0 0 0 3px rgba(255,255,255,.85); color: #c3ab8c; }
+
+  /* ---- narrow (portrait) ---- */
+  @media (max-aspect-ratio: 5/4) {
+    .toast { top: auto; bottom: calc(170px + env(safe-area-inset-bottom)); } /* the coach owns the top; toasts never hide under it */
+    .coach .talk { width: min(100%, 620px); margin: 0 auto; }
+    .coach .tpic { width: 64px; height: 64px; border-radius: 22px; margin-right: -14px; } .coach .tpic .ico { width: 32px; height: 32px; }
+    .coach .tbub { padding: 14px 16px 14px 26px; } .coach h4 { font-size: 18px; } .coach .ttext { font-size: 14px; }
+    .side-menu { width: auto; padding: 0; border: 0; background: none; box-shadow: none; display: grid; grid-template-columns: 1fr 1fr; grid-template-areas: "tiles tiles" "friends play"; gap: 10px; }
+    .mtiles { grid-area: tiles; justify-items: center; padding: 8px 10px 10px; border-radius: 28px; background: var(--panel); border: var(--rim-w) solid var(--rim); box-shadow: 0 6px 0 var(--lip), var(--shadow-s); }
+    .mitem.tile { width: 100%; max-width: 92px; background: none !important; box-shadow: none !important; font-size: 13px; padding: 0; }
+    .mitem.tile .mi, .mitem.tile.sel .mi { width: 100%; height: auto; background: var(--c); }
+    #friendMenuBtn { flex-direction: row; font-size: 19px; } #friendMenuBtn span { align-items: flex-start; text-align: left; }
+    #playBtn { font-size: 21px; } .mitem.big { min-height: 76px; }
+    #friendMenuBtn { grid-area: friends; } #playBtn { grid-area: play; }
+    .chars { grid-template-columns: repeat(5, 1fr); }
+    .page .card { align-self: stretch; width: auto; max-width: 760px; margin: 0 12px 12px; }
+    @media (min-width: 600px) { .page .card { margin: 0 auto 12px; width: calc(100% - 24px); } #outfit .skins { grid-template-columns: repeat(9, 1fr); } }
+  }
+  @media (max-aspect-ratio: 5/4) and (max-width: 560px) { .chars { grid-template-columns: repeat(3, 1fr); } }
+  /* ---- phones held sideways ---- */
+  @media (max-height: 520px) and (min-aspect-ratio: 5/4) {
+    .side-menu { width: 232px; padding: 10px 10px 12px; gap: 7px; }
+    .mitem.big { font-size: 16px; padding: 7px 10px 10px 7px; gap: 9px; }
+    .mitem.big .mi { width: 34px; height: 34px; border-radius: 11px; } .mitem.big .mi .ico { width: 20px; height: 20px; }
+    .mitem.big small { white-space: nowrap; }
+    .mitem.tile { font-size: 10px; padding: 0; } .mitem.tile .mi { width: 100%; height: auto; }
+    .page .card { --pt: 14px; --px: 14px; top: calc(50% + 30px); max-height: calc(100dvh - 92px); }
+    .chars { gap: 8px; } .charcard { border-width: 3px; padding: 2px 2px 5px; font-size: 12px; white-space: nowrap; }
+    .charcard img { width: 84%; margin: 0 auto; } .charcard .lockhint { display: none; }
+    .helpcard h2, #settings h2 { font-size: 30px; } .tip { margin-bottom: 7px; padding: 6px 10px 6px 6px; } .tip .mi { width: 36px; height: 36px; } .tip span { font-size: 12.5px; line-height: 1.25; }
+    .helpcard > .btn { grid-column: auto !important; align-self: center; margin: 0 0 7px !important; } /* "Got it" takes the empty sixth cell */
+    #outfit .skins { grid-template-columns: repeat(5, 1fr); gap: 8px; }
+    .coach .talk { width: min(460px, 52vw); } .coach .tpic { width: 58px; height: 58px; border-radius: 19px; } .coach .tpic .ico { width: 30px; height: 30px; }
+    .coach .tbub { padding: 12px 14px 10px 26px; } .coach h4 { font-size: 17px; } .coach .ttext { font-size: 14px; } .coach .dots { margin-top: 5px; }
+    .helpcard, #settings .card { width: min(820px, 96vw) !important; display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; align-items: start; }
+    .helpcard > :is(h2, .ribbon, .btn), #settings .card > :is(h2, .ribbon, .btn) { grid-column: 1 / -1; }
+    .phonecard { padding: 12px 18px 16px; } .phonecard h2 { font-size: 30px; margin-bottom: 8px; } .phonecard .pitem.main { min-height: 48px; margin-bottom: 12px; }
+    .phonecard .tile .ti { max-width: 56px; }
+  }
 </style>
 <link rel="preload" href="assets/menu_bg.webp" as="image" type="image/webp">
 <script type="importmap">
@@ -603,6 +813,8 @@
   <symbol id="i-help" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M12 2.5a9.5 9.5 0 1 1 0 19 9.5 9.5 0 0 1 0-19zM12 16a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6zm.1-9.6c-2.1 0-3.6 1.2-3.8 3a1 1 0 0 0 2 .3c.1-.8.8-1.3 1.8-1.3s1.7.6 1.7 1.4c0 .7-.4 1-1.2 1.6-.9.6-1.6 1.3-1.6 2.6a1 1 0 0 0 2 0c0-.5.2-.7.9-1.2 1-.7 1.9-1.5 1.9-3 0-2-1.6-3.4-3.7-3.4z"/></symbol>
   <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.5c-.3 0-.6-.1-.8-.3C6.9 16.7 3 13.4 3 9.2 3 6.3 5.2 4 8 4c1.6 0 3 .8 4 2 1-1.2 2.4-2 4-2 2.8 0 5 2.3 5 5.2 0 4.2-3.9 7.5-8.2 11-.2.2-.5.3-.8.3z"/></symbol>
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M10.6 13.4a1 1 0 0 1 0-1.4l3.5-3.5a1 1 0 1 1 1.4 1.4L12 13.4a1 1 0 0 1-1.4 0zM7.8 19.6a4.4 4.4 0 0 1-3.1-7.5l2.1-2.1a1 1 0 1 1 1.4 1.4l-2.1 2.1a2.4 2.4 0 0 0 3.4 3.4l2.1-2.1a1 1 0 0 1 1.4 1.4l-2.1 2.1a4.4 4.4 0 0 1-3.1 1.3zm8.8-5.2a1 1 0 0 1-.7-1.7l2.1-2.1a2.4 2.4 0 0 0-3.4-3.4l-2.1 2.1a1 1 0 0 1-1.4-1.4l2.1-2.1a4.4 4.4 0 0 1 6.2 6.2l-2.1 2.1a1 1 0 0 1-.7.3z"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M10.2 2.5h3.6l.6 2.7c.7.3 1.3.6 1.9 1.1l2.6-.9 1.8 3.1-2.1 1.8a7 7 0 0 1 0 2.2l2.1 1.8-1.8 3.1-2.6-.9c-.6.5-1.2.8-1.9 1.1l-.6 2.7h-3.6l-.6-2.7a7 7 0 0 1-1.9-1.1l-2.6.9-1.8-3.1 2.1-1.8a7 7 0 0 1 0-2.2L3.3 8.5l1.8-3.1 2.6.9c.6-.5 1.2-.8 1.9-1.1zM12 8.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.3 4.2a1.5 1.5 0 0 0-2.1 2.1L9.9 12l-5.7 5.7a1.5 1.5 0 1 0 2.1 2.1l5.7-5.7 5.7 5.7a1.5 1.5 0 0 0 2.1-2.1L14.1 12l5.7-5.7a1.5 1.5 0 0 0-2.1-2.1L12 9.9z"/></symbol>
   <symbol id="i-sprout" viewBox="0 0 24 24"><path fill="#6cc15a" d="M11 21v-6.6C7 14.6 3.5 12 3.5 7c4.3 0 7.4 2.3 7.9 6 .3-4.8 3.5-8 9.1-8 0 5.4-3.3 8.6-7.5 8.9V21z"/><path fill="#4fa343" d="M11 21v-6.6c.5.1 1.5.1 2 0V21z"/></symbol>
 </svg>
 
@@ -626,7 +838,8 @@
 <div id="busy"><span class="chip">Loading…</span></div>
 <div class="countdown" id="countdown"></div>
 <div class="toast" id="toast"><span class="chip"></span></div>
-<div class="coach" id="coach"><div class="card"><div class="pic" id="coachPic"></div><div><h4 id="coachTitle"></h4><p id="coachText"></p><div class="dots" id="coachDots"></div></div></div></div>
+<div class="story" id="story"></div>
+<div class="coach" id="coach"><div class="talk"><div class="tpic" id="coachPic"></div><div class="tbub"><h4 id="coachTitle"></h4><p class="ttext" id="coachText"></p><div class="dots" id="coachDots"></div></div></div></div>
 
 <section class="screen warm" id="title">
   <div class="motes"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
@@ -637,16 +850,18 @@
   </div>
   <div class="logo"><span class="word" id="logoA">Buddy</span><br><div class="sub">Remember the way</div></div>
   <div class="topbtns">
-    <button class="round" id="installBtn" aria-label="Get the app"><svg class="ico"><use href="#i-download"/></svg><i class="dot" id="installDot"></i></button>
-    <button class="round" id="helpBtn" aria-label="Help"><svg class="ico"><use href="#i-help"/></svg></button>
-    <button class="round" id="settingsBtn" aria-label="Settings"><svg class="ico"><use href="#i-sound"/></svg></button>
+    <button class="round" id="installBtn" aria-label="Get the app"><svg class="ico"><use href="#i-download"/></svg>Get app<i class="dot" id="installDot"></i></button>
+    <button class="round" id="settingsBtn" aria-label="Settings"><svg class="ico"><use href="#i-gear"/></svg>Settings</button>
   </div>
   <nav class="side-menu" id="sideMenu">
     <button class="mitem big sel" id="playBtn"><i class="mi"><svg class="ico"><use href="#i-map"/></svg></i><span>Adventure<small id="playSub2">Level 1-1</small></span><svg class="ico go"><use href="#i-next"/></svg></button>
     <button class="mitem big" id="friendMenuBtn"><i class="mi"><svg class="ico"><use href="#i-heart"/></svg></i><span>Friends<small>Play together</small></span><svg class="ico go"><use href="#i-next"/></svg></button>
-    <button class="mitem" id="raceBtn"><i class="mi"><svg class="ico"><use href="#i-flag"/></svg></i><span>Race</span><svg class="ico go"><use href="#i-next"/></svg></button>
-    <button class="mitem" id="wolfBtn"><i class="mi"><svg class="ico"><use href="#i-paw"/></svg></i><span>Wolves</span><svg class="ico go"><use href="#i-next"/></svg></button>
-    <button class="mitem" id="outfitBtn"><i class="mi"><svg class="ico"><use href="#i-shirt"/></svg></i><span>Outfit</span><svg class="ico go"><use href="#i-next"/></svg></button>
+    <div class="mtiles">
+      <button class="mitem tile" id="raceBtn"><i class="mi"><svg class="ico"><use href="#i-flag"/></svg></i><span>Race</span></button>
+      <button class="mitem tile" id="wolfBtn"><i class="mi"><svg class="ico"><use href="#i-paw"/></svg></i><span>Wolves</span></button>
+      <button class="mitem tile" id="outfitBtn"><i class="mi"><svg class="ico"><use href="#i-shirt"/></svg></i><span>Outfit</span></button>
+      <button class="mitem tile" id="helpBtn"><i class="mi"><svg class="ico"><use href="#i-help"/></svg></i><span>Help</span></button>
+    </div>
   </nav>
   <div class="cont" id="contCard">
     <div class="tag">Continue</div>
@@ -683,16 +898,16 @@
 </section>
 
 <section class="screen modal" id="pause">
-  <div class="card pop">
+  <div class="card pop phonecard">
+    <div class="ptop"><span class="ribbon" id="pauseInfo"></span><button class="x" id="pauseX" aria-label="Resume"><svg class="ico"><use href="#i-x"/></svg></button></div>
     <h2 class="sticker">Paused</h2>
-    <div class="ribbon" id="pauseInfo"></div>
-    <nav class="plist">
-      <button class="pitem main" id="resumeBtn"><i class="mi"><svg class="ico"><use href="#i-play"/></svg></i>Resume</button>
-      <button class="pitem" id="restartBtn"><i class="mi"><svg class="ico"><use href="#i-redo"/></svg></i>Restart</button>
-      <button class="pitem" data-go="worlds"><i class="mi"><svg class="ico"><use href="#i-map"/></svg></i>Map</button>
-      <button class="pitem" id="pauseSoundBtn"><i class="mi"><svg class="ico"><use href="#i-sound"/></svg></i>Settings</button>
-      <button class="pitem" id="pauseHelpBtn"><i class="mi"><svg class="ico"><use href="#i-help"/></svg></i>How to play</button>
-      <button class="pitem" data-go="title"><i class="mi"><svg class="ico"><use href="#i-home"/></svg></i>Main menu</button>
+    <button class="pitem main" id="resumeBtn"><i class="mi"><svg class="ico"><use href="#i-play"/></svg></i>Resume</button>
+    <nav class="tiles">
+      <button class="tile" id="restartBtn" style="--c: var(--honey-lip)"><i class="ti"><svg class="ico"><use href="#i-redo"/></svg></i>Restart</button>
+      <button class="tile" data-go="worlds" style="--c: var(--leaf)"><i class="ti"><svg class="ico"><use href="#i-map"/></svg></i>Map</button>
+      <button class="tile" id="pauseSoundBtn" style="--c: var(--sky)"><i class="ti"><svg class="ico"><use href="#i-gear"/></svg></i>Settings</button>
+      <button class="tile" id="pauseHelpBtn" style="--c: var(--lilac)"><i class="ti"><svg class="ico"><use href="#i-help"/></svg></i>Help</button>
+      <button class="tile" data-go="title" style="--c: var(--coral)"><i class="ti"><svg class="ico"><use href="#i-home"/></svg></i>Home</button>
     </nav>
   </div>
 </section>

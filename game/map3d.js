@@ -7,7 +7,7 @@ import * as THREE from 'three';
 
 const STEP = 1.7, GAP = 4.2, PAD = 2.4;
 
-export function createMap3D({ canvas, renderer, layer, worlds, perWorld, stars, unlocked, next, starSvg, stoneSet, addLights, biomes, patterns, decor }) {
+export function createMap3D({ canvas, renderer, layer, worlds, perWorld, stars, unlocked, next, starSvg, stoneSet, addLights, biomes, patterns, decor, friends = [] }) {
   // drawn by the game's own renderer when it's given (one WebGL context, so the stones' textures are on the GPU once);
   // the canvas then only catches the drags, and the game's canvas behind it shows the board
   const own = !renderer, r = renderer || new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -142,8 +142,11 @@ export function createMap3D({ canvas, renderer, layer, worlds, perWorld, stars, 
 
   // HTML: a small badge over every stone and a name under each world
   layer.innerHTML = Array.from({ length: total }, (_, L) => `<button class="node" data-level="${L}"><span class="dot"></span><span class="stars"></span></button>`).join('')
-    + worlds.map((w, i) => `<div class="mbanner" data-w="${i}"><span class="chip"><i class="cbadge" style="background:${w.color}"><svg class="ico"><use href="#${w.icon}"/></svg></i>${w.name}</span></div>`).join('');
-  const nodes = [...layer.querySelectorAll('.node')], banners = [...layer.querySelectorAll('.mbanner')];
+    + worlds.map((w, i) => `<div class="mbanner" data-w="${i}"><span class="chip"><i class="cbadge" style="background:${w.color}"><svg class="ico"><use href="#${w.icon}"/></svg></i>${w.name}</span></div>`).join('')
+    // each world's friend waits over its last stone: a grey sticker with a "?" until found, then in color (tap: their scene again)
+    + friends.map((f, i) => `<button class="mfriend" type="button" data-f="${i}" aria-label="${f.name}"><img alt="" src="${f.sticker}"><b>?</b></button>`).join('');
+  const nodes = [...layer.querySelectorAll('.node')], banners = [...layer.querySelectorAll('.mbanner')], pals = [...layer.querySelectorAll('.mfriend')];
+  pals.forEach((el, i) => el.addEventListener('click', () => { if (friends[i].found()) friends[i].tell(); }));
 
   let camX = 0, wantX = 0, w = 0, h = 0;
   const minX = nodePos(0).x + 2, maxX = nodePos(total - 1).x - 2;
@@ -159,6 +162,7 @@ export function createMap3D({ canvas, renderer, layer, worlds, perWorld, stars, 
       if (stoneMeshes[L]) stoneMeshes[L].userData.rise = L === nx ? 0.42 : 0;
     }
     banners.forEach((el, i) => el.classList.toggle('locked', !unlocked(i * perWorld)));
+    pals.forEach((el, i) => el.classList.toggle('found', friends[i].found()));
   }
   function focusNext() { wantX = camX = THREE.MathUtils.clamp(nodePos(next()).x + 1.5, minX, maxX); }
   canvas.addEventListener('wheel', e => { wantX = THREE.MathUtils.clamp(wantX + (e.deltaX + e.deltaY) * 0.012, minX, maxX); e.preventDefault(); }, { passive: false });
@@ -202,6 +206,12 @@ export function createMap3D({ canvas, renderer, layer, worlds, perWorld, stars, 
       v.set(regions[i].x0 + 3.2, 0, 4.6).project(cam);
       el.style.left = ((v.x + 1) / 2 * w) + 'px'; el.style.top = ((1 - v.y) / 2 * h) + 'px';
       el.style.display = v.x < -1.3 || v.x > 1.3 ? 'none' : '';
+    });
+    pals.forEach((el, i) => {
+      const p = nodePos((i + 1) * perWorld - 1);
+      v.set(p.x, 1.25, p.z).project(cam);
+      el.style.left = ((v.x + 1) / 2 * w) + 'px'; el.style.top = ((1 - v.y) / 2 * h) + 'px';
+      el.style.display = v.x < -1.2 || v.x > 1.2 ? 'none' : '';
     });
   }
   return { render, refresh, focusNext };

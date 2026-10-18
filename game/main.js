@@ -10,7 +10,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { MeshoptSimplifier } from 'https://cdn.jsdelivr.net/npm/meshoptimizer@0.22.0/meshopt_simplifier.module.js';
+import { MeshoptSimplifier } from './vendor/meshopt_simplifier.module.js'; // (three.js and this live in the game itself: a blocked CDN can't stop it loading)
 await MeshoptSimplifier.ready;
 // the models ship meshopt-compressed (quantized, a fraction of the download); the game reshapes geometry in place, so
 // every attribute is widened back to plain floats on load
@@ -327,9 +327,15 @@ const sfx = (() => {
   const buffers = {}, last = {}, lastT = {};
   function init() { // needs a user gesture (browser autoplay rules)
     if (NOSOUND) return;
-    if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
+    // (iPhones stop the sound when headphones are plugged in or a call/Bluetooth device takes over: the state turns
+    // 'interrupted' or 'suspended' and the music element pauses; any tap starts both again)
+    if (ctx) { if (ctx.state !== 'running') ctx.resume().catch(() => {}); if (music && music.paused && musicStarted) music.play().catch(() => {}); return; }
     try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {} // iPhones: heard even with the silent switch on, like a video
     ctx = new (window.AudioContext || window.webkitAudioContext)();
+    ctx.onstatechange = () => { if (ctx.state !== 'running' && !document.hidden) ctx.resume().catch(() => {}); };
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener('devicechange', () => { // headphones in or out
+      if (!ctx) return; ctx.resume().catch(() => {}); if (music && musicStarted) music.play().catch(() => {});
+    });
     master = ctx.createGain();
     master.gain.value = 0;
     musicGain = ctx.createGain();
@@ -486,7 +492,7 @@ const sfx = (() => {
   const ui = (kind, vol = 0.5) => play1(kind, vol);
   return { stats, init, play, ui, set, prefs, setScene, setBiome, tick, get ready() { return !!ctx && ctx.state === 'running' && Object.keys(buffers).length; } };
 })();
-addEventListener('pointerdown', () => sfx.init());
+for (const ev of ['pointerdown', 'touchend', 'click', 'keydown']) addEventListener(ev, () => sfx.init(), { passive: true }); // (iPhones only unlock sound on some of these)
 addEventListener('keydown', () => sfx.init());
 // left/right placement of a tile on screen (screen right is world +x/-z)
 const panOf = (x, z) => THREE.MathUtils.clamp(((x - st.tx) - (z - st.tz)) / 5, -0.6, 0.6);
@@ -860,16 +866,20 @@ const levelPlan = (() => {
     if (w === 0 && c === 0) cells = [3, 4, 4, 5, 5][p]; // the very first levels are tiny
     if (k === LEVELS_PER_WORLD - 1) cells += 1;          // the world's finale
     let shape = null, gateway = false;
-    if (p === 3 && (w > 0 || c > 0)) gateway = true; // (door levels are shaped too: two shaped halves)
+    if (p === 3) gateway = true; // (from level 4 on; door levels are shaped too: two shaped halves)
     // every level has a shape (only the first two of the game are plain squares): the chapter's new shape on its
     // 3rd and 5th levels, otherwise one of the shapes already met
     const met = shapes.slice(0, c + (p > 2 ? 1 : 0)).concat(w > 0 ? WORLD_SHAPES[WORLDS[w - 1].biome] : []);
     if (p === 2 || p === 4) shape = shapes[c];
-    else if (met.length) shape = met[Math.floor(rnd() * met.length)];
+    else if (met.length && !(gateway && w === 0 && c === 0)) shape = met[Math.floor(rnd() * met.length)]; // (the first door level is plain, to learn the doors)
     if (shape && cells < 5) cells = 5;                    // shapes need room to read
     const reveal = Math.max(1.4, world.reveal - 0.08 * c - (p === 4 ? 0.12 : 0) + (p === 0 ? 0.15 : 0));
     const detour = p === 0 ? 0.15 : Math.min(0.85, 0.2 + 0.1 * c + 0.06 * w + (p === 4 ? 0.1 : 0));
-    return { cells, shape, gateway, reveal, detour, chapter: c };
+    // wolves on patrol: on each chapter's big last level from the 2nd chapter, and now and then later in the game;
+    // the caves under the door levels have a fungus wolf from the 3rd chapter on
+    const wolves = gateway ? 0 : p === 4 && (c > 0 || w > 0) ? Math.min(4, 1 + w + Math.floor(c / 2)) : p === 1 && w > 0 ? 1 : 0;
+    const caveWolves = gateway && (c >= 2 || w > 0) ? Math.min(3, 1 + Math.floor(w / 2)) : 0;
+    return { cells, shape, gateway, reveal, detour, chapter: c, wolves, caveWolves };
   })();
 })();
 function genShapedMaze(cells, rnd, shape) {
@@ -1891,6 +1901,15 @@ function buildLevel(level, race = null, opts = {}) {
   if (race && race.online) rivals.forEach((r, i) => { const o = race.others[i]; r.pid = o.pid; r.team = o.team; r.bot = o.bot; r.remote = !(o.bot && race.host); });
   for (let k = 0; race && !race.online && k < raceCfg.mates; k++) rivals[rivals.length - 1 - k].team = true; // your teammates (the far corners first)
   updateTargets(true);
+  wolfOver = false;
+  if (!race && L >= 0) { // this level's patrolling wolves (fungus ones in the cave)
+    const P = levelPlan(L), n = stage === 'cave' ? P.caveWolves : P.wolves, cave = stage === 'cave', at = L;
+    if (n) loadChar(cave ? 'wolf_fungi' : 'wolf').then(ch => {
+      if (L !== at || mode !== 'levels' || stage !== (cave ? 'cave' : 'surface') || wolves.length) return;
+      wolves = spawnWolves(ch, n, { glow: cave, from: [start], minD: 6 });
+      if (!seenWolves) { seenWolves = true; try { localStorage.setItem('buddy-seen-wolves', '1'); } catch {} setTimeout(() => toast('Wolves patrol here! Watch their dotted paths and slip by when they turn.'), 2500); }
+    });
+  }
   for (let i = 0; i < T; i++) heights[i] = targets[i];
   camTarget.copy(worldPos(st.gx, st.gz));
   if (isGateway(L) && !race) stoneSet('cave'); // get the cave ready in the background
@@ -2532,7 +2551,7 @@ async function warpSwap() {
   const toCave = stage !== 'cave';
   const dest = toCave ? genCaveMaze(L).doors.find(d => d.id === warp.door.id) : null;
   if (toCave) await stoneSet('cave'); else await stoneSet(levelBiome(L));
-  const back = !toCave ? genSplitMaze(levelCells(L), mulberry32(L * 9973 + 17)).doors.find(d => d.id === warp.door.id) : null;
+  const back = !toCave ? genSplitMaze(levelCells(L), mulberry32(L * 9973 + 17), levelPlan(L).shape).doors.find(d => d.id === warp.door.id) : null;
   const d = dest || back;
   buildLevel(L, null, { stage: toCave ? 'cave' : 'surface', spawn: d.out, keep: true });
   warp.from.copy(worldPos(d.x, d.z)); warp.to.copy(worldPos(d.out[0], d.out[1]));
@@ -2890,9 +2909,10 @@ function dropActor(a) {
   scene.remove(a.root);
   setTimeout(() => a.root.traverse(o => { if (o.material && !o.isSprite) [].concat(o.material).forEach(m => m.dispose()); }), 3000); // (textures are shared; freed a moment later so a shader still being prepared isn't pulled away)
 }
+let seenWolves = false; try { seenWolves = !!localStorage.getItem('buddy-seen-wolves'); } catch {}
 let wolves = [], wolfRun = 0, wolfOver = false, wolfMoving = false, wolfBest = 0;
 try { wolfBest = +localStorage.getItem('buddy-wolf-best') || 0; } catch {}
-function clearWolves() { wolves.forEach(dropActor); wolves = []; }
+function clearWolves() { wolves.forEach(w => { dropActor(w); if (w.routeMesh) { scene.remove(w.routeMesh); w.routeMesh.material.dispose(); } }); wolves = []; }
 // walking distance from the given tiles to every tile (-1: can't get there)
 function distFrom(tiles, mz = maze) {
   const { N, g } = mz, d = new Int16Array(N * N).fill(-1), q = [];
@@ -2916,8 +2936,38 @@ function spawnWolves(ch, n, { glow = false, from = [start], minD = 7 } = {}) {
   }
   return picked.map(i => {
     const w = makeActor(ch, [i % N, (i / N) | 0], { glow, scale: WOLF.size });
-    return Object.assign(w, { wolf: true, state: 'roam', chaseT: 0, rest: 1 + Math.random() * 2, home: distFrom([[w.x, w.z]]), wait: Math.random() * 1.5 });
+    Object.assign(w, { wolf: true, state: 'roam', chaseT: 0, rest: 1 + Math.random() * 2, home: distFrom([[w.x, w.z]]), wait: Math.random() * 1.5 });
+    w.route = patrolRoute(w.x, w.z); w.ri = 0; w.rdir = 1;
+    if (mode !== 'hunt' && w.route.length > 1) w.routeMesh = drawRoute(w.route, glow);
+    return w;
   });
+}
+// each wolf walks back and forth on its own patrol: from where it stands to a spot 6-10 steps away, the whole path
+// drawn on the floor as a dotted line so you can time your way past
+function patrolRoute(x0, z0) {
+  const { N } = maze, d = distFrom([[x0, z0]]), want = 6 + Math.floor(Math.random() * 5), ends = [];
+  let far = 0; for (let i = 0; i < N * N; i++) far = Math.max(far, d[i]);
+  const target = Math.min(want, far);
+  for (let i = 0; i < N * N; i++) if (d[i] === target) ends.push(i);
+  if (!ends.length) return [[x0, z0]];
+  let i = ends[Math.floor(Math.random() * ends.length)];
+  const path = [[i % N, (i / N) | 0]];
+  while (d[i] > 0) { // walk back down the distances to the wolf
+    const x = i % N, z = (i / N) | 0;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Z = z + dz, j = Z * N + X; if (X >= 0 && Z >= 0 && X < N && Z < N && d[j] === d[i] - 1) { i = j; break; } }
+    path.unshift([i % N, (i / N) | 0]);
+  }
+  return path;
+}
+const routeDotGeo = new THREE.CircleGeometry(0.055, 12).rotateX(-Math.PI / 2);
+function drawRoute(route, glow) {
+  const pts = [];
+  for (let k = 0; k < route.length; k++) { pts.push(route[k]); if (k + 1 < route.length) for (const f of [1 / 3, 2 / 3]) pts.push([route[k][0] + (route[k + 1][0] - route[k][0]) * f, route[k][1] + (route[k + 1][1] - route[k][1]) * f]); }
+  const mat = new THREE.MeshBasicMaterial({ color: glow ? '#7fe8ff' : '#e0604f', transparent: true, opacity: glow ? 0.75 : 0.6, depthWrite: false, toneMapped: false });
+  const m = new THREE.InstancedMesh(routeDotGeo, mat, pts.length), M = new THREE.Matrix4();
+  pts.forEach(([x, z], k) => { M.makeTranslation(x - origin, 0.1, z - origin); m.setMatrixAt(k, M); });
+  m.renderOrder = 4; m.frustumCulled = false; scene.add(m);
+  return m;
 }
 function flashMark(a, ch) { a.mark.material = wolfMark[ch]; a.markT = 1.3; }
 // can the wolf see this tile? A body-wide look (two rays a little apart, both clear) across tiles no risen wall cuts,
@@ -2951,6 +3001,18 @@ function wolfStep(w, d, prey) {
     let best = null, bv = 1e9;
     for (const t of nb) { const v = d[t[1] * N + t[0]]; if (v >= 0 && v < bv) { bv = v; best = t; } }
     return best;
+  }
+  if (w.route && w.route.length > 1) { // on patrol: the next tile of the route, turning round at each end
+    const at = w.route.findIndex(([x, z]) => x === w.x && z === w.z);
+    if (at < 0) { // off the route (after a chase): back to the nearest bit of it
+      w.toRoute ||= distFrom(w.route);
+      let best = null, bv = 1e9;
+      for (const t of nb) { const v = w.toRoute[t[1] * N + t[0]]; if (v >= 0 && v < bv) { bv = v; best = t; } }
+      return best;
+    }
+    w.toRoute = null;
+    if (at + w.rdir < 0 || at + w.rdir >= w.route.length) { w.rdir = -w.rdir; w.wait = 0.6; return null; } // looks around, turns back
+    return w.route[at + w.rdir];
   }
   let opts = nb.filter(([x, z]) => !(x === w.fx && z === w.fz));
   if (!opts.length) opts = nb;
@@ -2992,7 +3054,7 @@ function updateWolves(dt, time) {
       if (w.t < 1) { w.t = Math.min(1, w.t + dt / w.stepTime); hop = Math.abs(Math.sin(w.U.uPhase.value)) * (w.state === 'chase' ? 0.07 : 0.035); wolfMoving = true; }
     }
     animateActor(w, dt, time, hop, live && w.t < 1, w.state === 'chase');
-    if (live && mode === 'wolf' && Math.hypot(w.root.position.x - player.position.x, w.root.position.z - player.position.z) < WOLF.catchR) wolfCaught(w);
+    if (live && (mode === 'wolf' || mode === 'levels') && Math.hypot(w.root.position.x - player.position.x, w.root.position.z - player.position.z) < WOLF.catchR) wolfCaught(w);
   }
 }
 // moves an actor between its tiles and drives its walk (a run while chasing: leaning in, bigger hops)
@@ -3022,7 +3084,7 @@ function wolfCaught(w) {
   let k = 0; const leap = setInterval(() => { k += 0.05; w.pounce = Math.sin(Math.min(1, k / 0.4) * Math.PI) * 0.35; if (k >= 0.4) { clearInterval(leap); w.pounce = 0; } }, 16);
   for (let i = 0; i < 14; i++) { const a = i / 14 * Math.PI * 2; spawnPuff(player.position.x, 0.4, player.position.z, Math.cos(a) * 1.3, rand(0.4, 1), Math.sin(a) * 1.3, rand(0.07, 0.11), STONE_DUST[i % STONE_DUST.length], 0.6); }
   sfx.play('bump', 0.8);
-  setTimeout(() => wolfEnd(false), 1200);
+  setTimeout(() => { if (mode === 'wolf') wolfEnd(false); else { toast('A wolf caught you! Try again'); play(L); } }, 1200);
 }
 function wolfEnd(cleared) {
   const n = wolfRun + (cleared ? 1 : 0);

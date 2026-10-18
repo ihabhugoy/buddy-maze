@@ -1906,8 +1906,13 @@ function buildLevel(level, race = null, opts = {}) {
     const P = levelPlan(L), n = stage === 'cave' ? P.caveWolves : P.wolves, cave = stage === 'cave', at = L;
     if (n) loadChar(cave ? 'wolf_fungi' : 'wolf').then(ch => {
       if (L !== at || mode !== 'levels' || stage !== (cave ? 'cave' : 'surface') || wolves.length) return;
-      wolves = spawnWolves(ch, n, { glow: cave, from: [start], minD: 6 });
-      if (!seenWolves) { seenWolves = true; try { localStorage.setItem('buddy-seen-wolves', '1'); } catch {} setTimeout(() => toast('Wolves patrol here! Watch their dotted paths and slip by when they turn.'), 2500); }
+      wolves = crossingRoutes(n).map(route => { // each starts at the far end of its patrol, and never chases
+        const end = route[route.length - 1], w = makeActor(ch, end, { glow: cave, scale: WOLF.size });
+        Object.assign(w, { wolf: true, state: 'roam', patrolOnly: true, chaseT: 0, rest: 0, home: distFrom([end]), wait: 0.5 + Math.random(), route, ri: route.length - 1, rdir: -1 });
+        w.routeMesh = drawRoute(route, cave);
+        return w;
+      });
+      if (!seenWolves) { seenWolves = true; try { localStorage.setItem('buddy-seen-wolves', '1'); } catch {} setTimeout(() => toast('A wolf patrols across your way! Wait for it to pass, then cross.'), 2500); }
     });
   }
   for (let i = 0; i < T; i++) heights[i] = targets[i];
@@ -2846,7 +2851,7 @@ function updateRaceUI() {
 // spots you ("!") and gives chase for a while; get far enough away and it loses you ("?") and goes back to roaming.
 // Caught = game over. Each map cleared is bigger with one more wolf; the underworld's wolves are the glowing fungus ones.
 // The same wolves are the computer wolves of the online Wolves vs Animals game (run by the host).
-const WOLF = { roam: 0.34, chase: 0.19, human: 0.155, see: 5, lose: 9, chaseMax: 7, rest: 3, size: 1.12, catchR: 0.5 };
+const WOLF = { roam: 0.34, chase: 0.24, human: 0.155, see: 3, lose: 6, chaseMax: 4, rest: 4, size: 1.12, catchR: 0.42 }; // (you run 0.17 s a step: a chasing wolf is clearly slower)
 const WOLF_WORLDS = ['woods', 'desert', 'snow', 'autumn', 'cave'];
 const WOLF_SHAPES = () => Object.keys(SHAPES).filter(k => !k.startsWith('__') && k !== 'twin');
 const wolfCount = run => Math.min(7, 2 + run);
@@ -2942,6 +2947,47 @@ function spawnWolves(ch, n, { glow = false, from = [start], minD = 7 } = {}) {
     return w;
   });
 }
+// the way you have to go: start -> key -> portal (on a door level's surface: to door A, and from door B to the portal;
+// in its cave: door A -> key -> door B)
+function pathTiles(a, b) {
+  const { N } = maze, d = distFrom([b]), out = [a.slice()];
+  let i = a[1] * N + a[0];
+  if (d[i] < 0) return out;
+  while (d[i] > 0) { const x = i % N, z = (i / N) | 0; for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Z = z + dz, j = Z * N + X; if (X >= 0 && Z >= 0 && X < N && Z < N && d[j] === d[i] - 1) { i = j; break; } } out.push([i % N, (i / N) | 0]); }
+  return out;
+}
+function wayThrough() {
+  const D = maze.doors;
+  if (stage === 'cave') return keyAt ? [...pathTiles(D[0].out, keyAt), ...pathTiles(keyAt, D[1].out)] : [];
+  if (D && D.length) return [...pathTiles(start, D[0].out), ...pathTiles(D[1].out, goal)];
+  return keyAt ? [...pathTiles(start, keyAt), ...pathTiles(keyAt, goal)] : pathTiles(start, goal);
+}
+// patrols that cross your way: each wolf walks across it at a side opening (a short arm into the side path, over the
+// crossing, and on along the other side), so you wait for it to pass, then slip across
+function crossingRoutes(n) {
+  const way = wayThrough(), { N, g } = maze, on = new Set(way.map(([x, z]) => z * N + x)), routes = [], used = new Set();
+  const open = (x, z) => x >= 0 && z >= 0 && x < N && z < N && !g[z * N + x];
+  const arm = (x, z, from, len) => { const out = []; let px = from[0], pz = from[1];
+    for (let k = 0; k < len; k++) { out.push([x, z]); const nx = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => [x + dx, z + dz]).filter(([a, c]) => open(a, c) && !(a === px && c === pz) && !on.has(c * N + a) && !out.some(([u, v]) => u === a && v === c)); if (!nx.length) break; px = x; pz = z; [x, z] = nx[0]; }
+    return out; };
+  const lo = Math.floor(way.length * 0.22), hi = Math.ceil(way.length * 0.88);
+  const cands = [];
+  for (let k = lo; k < hi; k++) {
+    const [x, z] = way[k], sides = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => [x + dx, z + dz]).filter(([a, c]) => open(a, c) && !on.has(c * N + a));
+    if (sides.length) cands.push({ k, x, z, sides });
+  }
+  cands.sort((a, b) => b.sides.length - a.sides.length || Math.random() - 0.5); // crossroads first
+  for (const c of cands) {
+    if (routes.length >= n) break;
+    if ([...used].some(k => Math.abs(k - c.k) < Math.max(4, way.length / (n + 1)))) continue; // spread along the way
+    const a1 = arm(c.sides[0][0], c.sides[0][1], [c.x, c.z], 4);
+    const a2 = c.sides[1] ? arm(c.sides[1][0], c.sides[1][1], [c.x, c.z], 4) : [];
+    const route = [...a1.reverse(), [c.x, c.z], ...a2];
+    if (route.length < 3) continue;
+    routes.push(route); used.add(c.k);
+  }
+  return routes;
+}
 // each wolf walks back and forth on its own patrol: from where it stands to a spot 6-10 steps away, the whole path
 // drawn on the floor as a dotted line so you can time your way past
 function patrolRoute(x0, z0) {
@@ -2988,7 +3034,7 @@ function wolfStep(w, d, prey) {
   const { N, g } = maze, here = w.z * N + w.x, dh = d ? d[here] : -1;
   const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => [w.x + dx, w.z + dz]).filter(([x, z]) => x >= 0 && z >= 0 && x < N && z < N && !g[z * N + x]);
   const seen = dh >= 0 && dh <= WOLF.lose ? prey.find(([x, z]) => inSight(w.x, w.z, x, z)) : null;
-  if (w.state === 'roam' && seen && dh <= WOLF.see && w.rest <= 0) { w.state = 'chase'; w.chaseT = 0; flashMark(w, '!'); sfx.ui('nope', 0.35); }
+  if (w.state === 'roam' && seen && dh <= WOLF.see && w.rest <= 0 && !w.patrolOnly) { w.state = 'chase'; w.chaseT = 0; flashMark(w, '!'); sfx.ui('nope', 0.35); }
   if (w.state === 'chase') {
     if (seen) { w.lastSeen = seen; w.trail = null; }
     const giveUp = () => { w.state = 'roam'; w.rest = WOLF.rest; w.wait = 1.1; w.trail = null; flashMark(w, '?'); return null; };
@@ -3110,7 +3156,13 @@ async function startWolf(run = 0) {
   const rnd = mulberry32((Math.random() * 1e9) | 0), shapes = WOLF_SHAPES(), m = genShapedMaze(wolfCells(run), rnd, shapes[Math.floor(rnd() * shapes.length)]);
   warp.t = -1; $('fader').style.opacity = 0;
   buildLevel(-1, { maze: m, entries: [m.start], goal: m.goal, keyAt: keyTile(m, m.start, m.goal, 0.6), biome: b, kind: 'wolf', portal: true });
-  wolves = spawnWolves(ch, wolfCount(run), { glow: fungi });
+  // half the wolves patrol across the way to the key and the portal, the rest roam their own beats
+  const cross = crossingRoutes(Math.ceil(wolfCount(run) / 2)).map(route => {
+    const end = route[route.length - 1], w = makeActor(ch, end, { glow: fungi, scale: WOLF.size });
+    Object.assign(w, { wolf: true, state: 'roam', chaseT: 0, rest: 2, home: distFrom([end]), wait: 0.5 + Math.random(), route, ri: route.length - 1, rdir: -1 });
+    w.routeMesh = drawRoute(route, fungi); return w;
+  });
+  wolves = [...cross, ...spawnWolves(ch, wolfCount(run) - cross.length, { glow: fungi })];
   ui.level.textContent = `MAP ${run + 1}`;
   show('play'); intro.t = 0; intro.warm = 3; intro.wave = false; intro.online = intro.hold = false;
   toast(run === 0 ? 'Find the key and reach the portal. Don’t let the wolves catch you!' : fungi ? 'The underworld: fungus wolves see in the dark' : `${wolfCount(run)} wolves this time`);

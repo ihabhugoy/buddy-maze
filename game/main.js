@@ -1908,11 +1908,12 @@ function buildLevel(level, race = null, opts = {}) {
       if (L !== at || mode !== 'levels' || stage !== (cave ? 'cave' : 'surface') || wolves.length) return;
       wolves = crossingRoutes(n).map(route => { // each starts at the far end of its patrol, and never chases
         const end = route[route.length - 1], w = makeActor(ch, end, { glow: cave, scale: WOLF.size });
-        Object.assign(w, { wolf: true, state: 'roam', patrolOnly: true, chaseT: 0, rest: 0, home: distFrom([end]), wait: 0.5 + Math.random(), route, ri: route.length - 1, rdir: -1 });
+        Object.assign(w, { wolf: true, state: 'roam', chaseT: 0, rest: 0, home: distFrom([end]), wait: 0.5 + Math.random(), route, ri: route.length - 1, rdir: -1 });
         w.routeMesh = drawRoute(route, cave);
         return w;
       });
-      if (!seenWolves) { seenWolves = true; try { localStorage.setItem('buddy-seen-wolves', '1'); } catch {} setTimeout(() => toast('A wolf patrols across your way! Wait for it to pass, then cross.'), 2500); }
+      updateTargets(true);
+      if (!seenWolves) { seenWolves = true; try { localStorage.setItem('buddy-seen-wolves', '1'); } catch {} setTimeout(() => toast('A wolf patrols across your way: wait beside its path, cross when it walks away. If it spots you, hide behind a wall!'), 2500); }
     });
   }
   for (let i = 0; i < T; i++) heights[i] = targets[i];
@@ -1933,8 +1934,11 @@ function updateTargets(silent) {
     const dx = x - cx, dz = z - cz;
     const prev = targets[i];
     let t = 0;
-    if (Math.hypot(dx, dz) <= CFG.revealR) t = (dx + dz > 0) ? CFG.stubH : CFG.wallH; // camera sits on the +x+z side
+    const mine = Math.hypot(dx, dz) <= CFG.revealR;
+    if (mine) t = (dx + dz > 0) ? CFG.stubH : CFG.wallH; // camera sits on the +x+z side
+    else for (const w of wolves) { const ex = x - w.x, ez = z - w.z; if (Math.hypot(ex, ez) <= 1.5) { t = (ex + ez > 0) ? CFG.stubH : CFG.wallH; break; } } // (around a wolf too)
     targets[i] = t;
+    if (!mine) { if (!silent && prev !== t) shake[i] = 1; continue; } // (a wolf's stones rise without dust or sound)
     if (!silent && prev !== t) shake[i] = 1;
     if (!silent && prev === 0 && t > 0) { stonePuffs(x - origin, z - origin, true); rising++; panSum += panOf(x, z); }
     else if (!silent && prev > 0 && t === 0) stonePuffs(x - origin, z - origin, false);
@@ -3033,17 +3037,15 @@ function inSight(x0, z0, x1, z1) {
 function wolfStep(w, d, prey) {
   const { N, g } = maze, here = w.z * N + w.x, dh = d ? d[here] : -1;
   const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => [w.x + dx, w.z + dz]).filter(([x, z]) => x >= 0 && z >= 0 && x < N && z < N && !g[z * N + x]);
-  const seen = dh >= 0 && dh <= WOLF.lose ? prey.find(([x, z]) => inSight(w.x, w.z, x, z)) : null;
-  if (w.state === 'roam' && seen && dh <= WOLF.see && w.rest <= 0 && !w.patrolOnly) { w.state = 'chase'; w.chaseT = 0; flashMark(w, '!'); sfx.ui('nope', 0.35); }
+  // a wolf sees you only in front of it (a narrow look ahead along where it walks, up to 3 steps, nothing in between):
+  // waiting beside its patrol line is safe; step out in front of it and it comes for you
+  const fx = Math.cos(w.facing), fz = -Math.sin(w.facing);
+  const looks = ([x, z]) => { const dx = x - w.x, dz = z - w.z, l = Math.hypot(dx, dz); return l <= WOLF.see && (l < 0.5 || (dx * fx + dz * fz) / l > 0.7) && inSight(w.x, w.z, x, z); };
+  const seen = dh >= 0 && dh <= WOLF.lose ? prey.find(p => w.state === 'chase' ? inSight(w.x, w.z, p[0], p[1]) : looks(p)) : null;
+  if (w.state === 'roam' && seen && w.rest <= 0) { w.state = 'chase'; w.chaseT = 0; w.wait = 0.35; flashMark(w, '!'); sfx.ui('nope', 0.35); return null; } // (a moment's surprise)
   if (w.state === 'chase') {
-    if (seen) { w.lastSeen = seen; w.trail = null; }
-    const giveUp = () => { w.state = 'roam'; w.rest = WOLF.rest; w.wait = 1.1; w.trail = null; flashMark(w, '?'); return null; };
-    if (dh < 0 || w.chaseT > WOLF.chaseMax) return giveUp();
-    if (!seen) {
-      if (!w.lastSeen || (w.x === w.lastSeen[0] && w.z === w.lastSeen[1])) return giveUp(); // reached the spot: nobody there
-      if (!w.trail) w.trail = distFrom([w.lastSeen]);
-      d = w.trail;
-    }
+    // round a corner or duck behind a wall and it loses you, then goes back to its patrol
+    if (!seen || dh < 0 || w.chaseT > WOLF.chaseMax) { w.state = 'roam'; w.rest = WOLF.rest; w.wait = 0.9; w.toRoute = null; flashMark(w, '?'); return null; }
     let best = null, bv = 1e9;
     for (const t of nb) { const v = d[t[1] * N + t[0]]; if (v >= 0 && v < bv) { bv = v; best = t; } }
     return best;
@@ -3082,6 +3084,7 @@ function updateWolves(dt, time) {
     preyNow = prey;
     if (k !== preyKey) { preyKey = k; preyDist = prey.length ? distFrom(prey) : null; }
   }
+  let stepped = false;
   for (const w of wolves) {
     let hop = 0;
     if (w.rest > 0) w.rest -= dt;
@@ -3093,7 +3096,7 @@ function updateWolves(dt, time) {
         if (nx) {
           w.fx = w.x; w.fz = w.z; [w.x, w.z] = nx; w.t = 0;
           w.stepTime = w.state === 'chase' ? WOLF.chase : WOLF.roam;
-          w.facing = Math.atan2(-(w.z - w.fz), w.x - w.fx);
+          w.facing = Math.atan2(-(w.z - w.fz), w.x - w.fx); stepped = true;
           if (w.pid !== undefined) net.send({ t: 'pos', x: w.x, z: w.z, p: w.pid, s: w.stepTime });
         } else if (w.wait <= 0) w.wait = 0.25 + Math.random() * 0.6; // stops and sniffs
       }
@@ -3102,6 +3105,7 @@ function updateWolves(dt, time) {
     animateActor(w, dt, time, hop, live && w.t < 1, w.state === 'chase');
     if (live && (mode === 'wolf' || mode === 'levels') && Math.hypot(w.root.position.x - player.position.x, w.root.position.z - player.position.z) < WOLF.catchR) wolfCaught(w);
   }
+  if (stepped && mode !== 'race') updateTargets(false); // (the stones follow the wolves too)
 }
 // moves an actor between its tiles and drives its walk (a run while chasing: leaning in, bigger hops)
 function animateActor(a, dt, time, hop, walking, running) {
@@ -3163,6 +3167,7 @@ async function startWolf(run = 0) {
     w.routeMesh = drawRoute(route, fungi); return w;
   });
   wolves = [...cross, ...spawnWolves(ch, wolfCount(run) - cross.length, { glow: fungi })];
+  updateTargets(true);
   ui.level.textContent = `MAP ${run + 1}`;
   show('play'); intro.t = 0; intro.warm = 3; intro.wave = false; intro.online = intro.hold = false;
   toast(run === 0 ? 'Find the key and reach the portal. Don’t let the wolves catch you!' : fungi ? 'The underworld: fungus wolves see in the dark' : `${wolfCount(run)} wolves this time`);

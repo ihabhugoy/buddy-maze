@@ -565,6 +565,47 @@
   #raceUI { position: fixed; inset: 0; pointer-events: none; }
   .rtag { position: absolute; left: 0; top: 0; padding: 4px 12px; border-radius: 999px; background: var(--c); color: #fff; font-weight: 900; font-size: 13px; box-shadow: 0 4px 10px rgba(0,0,0,.18); text-shadow: 0 1px 0 rgba(0,0,0,.2); white-space: nowrap; }
   .rtag.team { background: #fff; color: var(--c); text-shadow: none; }
+  .chestchip { gap: 6px; } .chestchip .ico { color: #e8823a; } .chestchip i { display: block; width: 46px; height: 7px; border-radius: 4px; background: linear-gradient(90deg, #ffc43d calc(var(--p, 0) * 100%), rgba(160,120,70,.18) 0); }
+  .tease { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 6px 0 4px; } .chip.tease { font-size: 13px; gap: 6px; } .chip.tease img { width: 26px; height: 26px; border-radius: 50%; }
+  .giftcard { text-align: center; } .giftcard p { margin: 4px 0 6px; color: var(--ink-soft); }
+  .giftbox { position: relative; width: 120px; height: 110px; margin: 10px auto 14px; cursor: pointer; animation: gwob 1.1s ease-in-out infinite; }
+  .giftbox .box { position: absolute; left: 10px; right: 10px; bottom: 0; height: 70px; border-radius: 14px; background: linear-gradient(90deg, #ff8c6b 0 42%, #ffd04d 42% 58%, #ff8c6b 58%); box-shadow: inset 0 -8px 0 rgba(0,0,0,.12); }
+  .giftbox .lid { position: absolute; left: 2px; right: 2px; top: 22px; height: 26px; border-radius: 12px; background: linear-gradient(90deg, #ff9f82 0 42%, #ffe07a 42% 58%, #ff9f82 58%); box-shadow: inset 0 -5px 0 rgba(0,0,0,.12); z-index: 2; transition: transform .45s cubic-bezier(.3,1.6,.5,1); }
+  .giftbox .bow { position: absolute; left: 50%; top: 0; width: 46px; height: 30px; margin-left: -23px; background: radial-gradient(circle at 30% 60%, #ffd04d 0 13px, transparent 14px), radial-gradient(circle at 70% 60%, #ffd04d 0 13px, transparent 14px); z-index: 3; transition: transform .45s cubic-bezier(.3,1.6,.5,1); }
+  .giftbox.open { animation: none; } .giftbox.open .lid { transform: translateY(-26px) rotate(-14deg); } .giftbox.open .bow { transform: translateY(-30px) rotate(-14deg); }
+  @keyframes gwob { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-5deg) scale(1.03); } 40% { transform: rotate(5deg); } 60% { transform: rotate(-3deg); } 80% { transform: rotate(2deg); } }
+  .giftcards { display: flex; justify-content: center; gap: 10px; min-height: 0; margin-bottom: 10px; } .giftcards:empty { display: none; }
+  .jcard.big { width: 74px; height: 92px; flex-direction: column; animation: cardin .5s cubic-bezier(.3,1.6,.5,1) both; } .jcard.big .ico { width: 38px; height: 38px; } .jcard.big small { font-size: 12px; color: var(--ink); }
+  @keyframes cardin { from { transform: translateY(40px) scale(.3) rotate(-25deg); opacity: 0; } }
+  #fog { position: fixed; left: 0; top: 0; width: 300vmax; height: 300vmax; z-index: 3; pointer-events: none; will-change: transform; }
+  #huntBar { position: fixed; top: calc(10px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: stretch; gap: 6px; pointer-events: none; }
+  #huntBar .hside, #huntBar .hmid { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 18px; background: #fffaf1; box-shadow: inset 0 -4px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); font-weight: 900; }
+  #huntBar .hside b { font-size: 22px; } #huntBar small { font-size: 11px; color: var(--ink-soft); }
+  #huntBar .wolves { color: #4f5d72; } #huntBar .animals { color: #4f9a3e; } #huntBar .wolves .ico, #huntBar .animals .ico { width: 20px; height: 20px; }
+  #huntBar .hmid { flex-direction: column; gap: 0; padding: 4px 14px; line-height: 1.1; } #huntBar .hmid b { font-size: 20px; } #huntBar .hmid b.hurry { color: #e8553c; animation: pulse .6s ease-in-out infinite; }
+  #hbPips { display: flex; gap: 8px; font-size: 10px; letter-spacing: 1px; } #hbPips i { font-style: normal; color: var(--c); }
+  body[data-mode="hunt"] .hud .left .chip, body[data-mode="hunt"] .hud .right { display: none !important; }
+  .phone #huntBar { top: calc(64px + env(safe-area-inset-top)); }
+  .bigcard { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; pointer-events: none; opacity: 0; transition: opacity .3s; }
+  .bigcard.on { opacity: 1; } .bigcard .card { text-align: center; padding: 18px 26px; transform: scale(.7); transition: transform .45s cubic-bezier(.3,1.6,.5,1); } .bigcard.on .card { transform: scale(1); }
+  .waitart { display: flex; justify-content: center; gap: 8px; margin-bottom: 6px; } .waitart img { width: 58px; height: 58px; border-radius: 50%; box-shadow: 0 0 0 3px #fff, 0 4px 10px rgba(0,0,0,.15); animation: hop 1s ease-in-out infinite; } .waitart img:nth-child(2) { animation-delay: .15s; } .waitart img:nth-child(3) { animation-delay: .3s; }
+  @keyframes hop { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-14px) rotate(-6deg); } }
+  .roundscore { display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 40px; font-weight: 900; margin: 6px 0; } .roundscore span { display: flex; align-items: center; gap: 6px; } .roundscore .ico { width: 30px; height: 30px; }
+  .roundnext { font-size: 20px; font-weight: 900; color: #e8823a; animation: pulse .8s ease-in-out infinite; margin: 4px 0 0; }
+  .gocard { text-align: center; overflow: visible; } .gosub { margin: 2px 0 8px; color: var(--ink-soft); font-size: 15px; } .golines { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-bottom: 12px; }
+  .goart { position: relative; height: 130px; margin: -70px auto 6px; display: flex; justify-content: center; align-items: flex-end; }
+  .goart img { width: calc(150px - var(--n) * 18px); margin: 0 -10px; border-radius: 50%; box-shadow: 0 0 0 5px #fff, 0 10px 24px rgba(80,50,20,.25); animation: gojump .9s cubic-bezier(.3,1.6,.5,1) both, gobob 1.6s ease-in-out infinite; animation-delay: calc(var(--i) * .12s), calc(.9s + var(--i) * .2s); }
+  #gameOver.lose .goart img { animation: gojump .9s cubic-bezier(.3,1.6,.5,1) both, gogrr 1.2s ease-in-out .9s infinite; }
+  @keyframes gojump { from { transform: translateY(80px) scale(.2) rotate(-30deg); opacity: 0; } }
+  @keyframes gobob { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-10px) rotate(3deg); } }
+  @keyframes gogrr { 0%, 100% { transform: rotate(0) scale(1); } 15% { transform: rotate(-8deg) scale(1.06); } 30% { transform: rotate(8deg) scale(1.06); } 45% { transform: rotate(0) scale(1); } }
+  #jokerBar { position: fixed; left: 14px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 5; display: flex; gap: 8px; }
+  .jcard { position: relative; width: 52px; height: 62px; border-radius: 16px; background: #fffaf1; color: var(--c); box-shadow: inset 0 -5px 0 color-mix(in srgb, var(--c) 35%, #d9c4a0), inset 0 0 0 3px var(--c), 0 6px 14px rgba(80,50,20,.18); display: grid; place-items: center; animation: jbob 2.4s ease-in-out infinite; }
+  .jcard .ico { width: 28px; height: 28px; margin-top: -4px; } .jcard b { position: absolute; right: -6px; top: -6px; min-width: 20px; height: 20px; border-radius: 10px; background: var(--c); color: #fff; font-size: 12px; display: grid; place-items: center; box-shadow: 0 0 0 2px #fff; }
+  .jcard:nth-child(2) { animation-delay: .3s; } .jcard:nth-child(3) { animation-delay: .6s; } .jcard:nth-child(4) { animation-delay: .9s; }
+  @keyframes jbob { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-4px) rotate(2deg); } }
+  .jfly { position: fixed; z-index: 60; pointer-events: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 14px 10px; border-radius: 20px; background: #fffaf1; color: var(--c); font-weight: 900; font-size: 15px; box-shadow: inset 0 0 0 4px var(--c), 0 12px 30px rgba(80,50,20,.3); }
+  .jfly .ico { width: 44px; height: 44px; }
   .goalarrow { position: fixed; z-index: 4; pointer-events: none; width: 38px; height: 38px; } .goalarrow path { fill: #ffc43d; } .goalarrow.blue path { fill: #5bb2f2; }
   .rarrow { position: absolute; left: 0; top: 0; width: 34px; height: 34px; filter: drop-shadow(0 3px 5px rgba(0,0,0,.25)); }
   .countdown { position: fixed; left: 0; right: 0; top: 28%; text-align: center; pointer-events: none; font-family: var(--title); font-size: 150px; line-height: 1; color: var(--leaf); text-shadow: var(--sticker); opacity: 0; }
@@ -793,6 +834,11 @@
   <symbol id="i-wind" viewBox="0 0 24 24"><path d="M3 9h10.5A2.5 2.5 0 1 0 11 6.5a1 1 0 0 1-2 0A4.5 4.5 0 1 1 13.5 11H3a1 1 0 0 1 0-2zm0 4h14.5a3.5 3.5 0 1 1-3.5 3.5 1 1 0 0 1 2 0 1.5 1.5 0 1 0 1.5-1.5H3a1 1 0 0 1 0-2z"/></symbol>
   <symbol id="i-lens" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 0 1 6 12l4.2 4.2a1.4 1.4 0 0 1-2 2L14.5 17a7.5 7.5 0 1 1-4-14zm0 2.8a4.7 4.7 0 1 0 0 9.4 4.7 4.7 0 0 0 0-9.4z"/></symbol>
   <symbol id="i-paw" viewBox="0 0 24 24"><ellipse cx="6" cy="9.5" rx="2.3" ry="2.9"/><ellipse cx="10" cy="5.6" rx="2.3" ry="3"/><ellipse cx="14.4" cy="5.6" rx="2.3" ry="3"/><ellipse cx="18.3" cy="9.6" rx="2.3" ry="2.9"/><path d="M12.2 11c2.6 0 5.6 3.4 5.6 6.2 0 2.2-1.6 3.3-3.4 3.3-1.1 0-1.4-.5-2.2-.5s-1.2.5-2.3.5c-1.8 0-3.3-1.1-3.3-3.3 0-2.8 3-6.2 5.6-6.2z"/></symbol>
+  <symbol id="i-lantern" viewBox="0 0 24 24"><path d="M9 2.5h6a1 1 0 0 1 0 2h-.5v1.2c2.4.9 4 3.1 4 5.8v6.2a3.8 3.8 0 0 1-3.8 3.8H9.3a3.8 3.8 0 0 1-3.8-3.8v-6.2c0-2.7 1.6-4.9 4-5.8V4.5H9a1 1 0 0 1 0-2zm3 7.2c-1 1.2-2 2.6-2 4.1a2 2 0 0 0 4 0c0-1.5-1-2.9-2-4.1z"/></symbol>
+  <symbol id="i-hammer" viewBox="0 0 24 24"><path d="M5.2 4.6l5.6-1.9a2 2 0 0 1 2 .5l1.5 1.5 1.3-1.3a1 1 0 0 1 1.4 0l2.4 2.4a1 1 0 0 1 0 1.4l-1.3 1.3.7.7a1 1 0 0 1 0 1.4l-1.6 1.6a1 1 0 0 1-1.4 0l-.7-.7-8.4 8.4a2 2 0 0 1-2.8 0l-.4-.4a2 2 0 0 1 0-2.8l8.4-8.4-1.2-1.2c-1.4-.6-3 .1-4.8.9-.7.3-1.3-.6-.8-1.2z"/></symbol>
+  <symbol id="i-snow" viewBox="0 0 24 24"><path d="M12 1.8a1.2 1.2 0 0 1 1.2 1.2v2.3l1.4-1.4a1.1 1.1 0 1 1 1.6 1.6l-3 3v2.4l2.1-1.2 1.1-4.1a1.1 1.1 0 1 1 2.2.6l-.5 1.9 2-1.2a1.2 1.2 0 1 1 1.2 2.1l-2 1.2 1.9.5a1.1 1.1 0 1 1-.6 2.2l-4.1-1.1-2.1 1.2 2.1 1.2 4.1-1.1a1.1 1.1 0 1 1 .6 2.2l-1.9.5 2 1.2a1.2 1.2 0 1 1-1.2 2.1l-2-1.2.5 1.9a1.1 1.1 0 1 1-2.2.6l-1.1-4.1-2.1-1.2v2.4l3 3a1.1 1.1 0 1 1-1.6 1.6l-1.4-1.4V21a1.2 1.2 0 0 1-2.4 0v-2.3l-1.4 1.4a1.1 1.1 0 1 1-1.6-1.6l3-3V13l-2.1 1.2-1.1 4.1a1.1 1.1 0 1 1-2.2-.6l.5-1.9-2 1.2a1.2 1.2 0 1 1-1.2-2.1l2-1.2-1.9-.5a1.1 1.1 0 1 1 .6-2.2l4.1 1.1L10.8 12 8.7 10.8l-4.1 1.1a1.1 1.1 0 1 1-.6-2.2l1.9-.5-2-1.2a1.2 1.2 0 1 1 1.2-2.1l2 1.2-.5-1.9a1.1 1.1 0 1 1 2.2-.6l1.1 4.1 2.1 1.2V8.5l-3-3a1.1 1.1 0 1 1 1.6-1.6l1.4 1.4V3A1.2 1.2 0 0 1 12 1.8z"/></symbol>
+  <symbol id="i-boot" viewBox="0 0 24 24"><path d="M7 2.5h6.5a1 1 0 0 1 1 1V11l4.6 2.1a3.5 3.5 0 0 1 2.1 3.2v1.2a1 1 0 0 1-1 1H4.5a1 1 0 0 1-1-1V15a3 3 0 0 1 2-2.8V3.5a1 1 0 0 1 1-1zM3.5 19.8h17.7a.9.9 0 0 1 0 1.8H3.5a.9.9 0 0 1 0-1.8zM1.8 6.5h3a.8.8 0 0 1 0 1.6h-3a.8.8 0 0 1 0-1.6zm-.6 3.4h3.6a.8.8 0 0 1 0 1.6H1.2a.8.8 0 0 1 0-1.6z"/></symbol>
+  <symbol id="i-gift" viewBox="0 0 24 24"><path d="M8.2 2.6c1.5-.5 2.9.6 3.8 2.2.9-1.6 2.3-2.7 3.8-2.2 1.6.5 2 2.5.9 3.6l-.4.4H20a1.5 1.5 0 0 1 1.5 1.5v2a1.5 1.5 0 0 1-1.5 1.5h-7.1V6.9h-1.8v4.7H4a1.5 1.5 0 0 1-1.5-1.5v-2A1.5 1.5 0 0 1 4 6.6h3.7l-.4-.4c-1.1-1.1-.7-3.1.9-3.6zM4.2 13.2h6.9v8.3H6.2a2 2 0 0 1-2-2zm8.7 0h6.9v6.3a2 2 0 0 1-2 2h-4.9z"/></symbol>
   <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 2.5a1.2 1.2 0 0 1 1.2 1.2V4h11.3a1 1 0 0 1 .8 1.6L16 9l2.3 3.4a1 1 0 0 1-.8 1.6H6.2v6.8a1.2 1.2 0 1 1-2.4 0V3.7A1.2 1.2 0 0 1 5 2.5z"/></symbol>
   <symbol id="i-star" viewBox="0 0 24 24"><path d="M11.1 2.6a1 1 0 0 1 1.8 0l2.4 4.9 5.4.8a1 1 0 0 1 .6 1.7l-3.9 3.8.9 5.4a1 1 0 0 1-1.5 1L12 17.7l-4.8 2.5a1 1 0 0 1-1.5-1l.9-5.4-3.9-3.8a1 1 0 0 1 .6-1.7l5.4-.8z"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M9.5 16.2 5.3 12a1.4 1.4 0 1 0-2 2l5.2 5.2a1.4 1.4 0 0 0 2 0L21.2 8.6a1.4 1.4 0 0 0-2-2z"/></symbol>
@@ -834,6 +880,11 @@
 </div>
 <button class="round peek" id="peek" aria-label="Look around (hold)"><svg class="ico"><use href="#i-eye"/></svg></button>
 <button class="round peek camzoom" id="camZoom" aria-label="Camera distance"><svg class="ico"><use href="#i-lens"/></svg><span id="camZoomLbl">1</span></button>
+<div id="fog" style="display:none"></div>
+<div id="huntBar" style="display:none"><span class="hside wolves"><svg class="ico"><use href="#i-paw"/></svg><small id="hbWolves">Wolves</small><b id="hbW">0</b></span><span class="hmid"><small id="hbRound">Round 1 of 3</small><b id="hbTime">2:00</b><span id="hbPips"></span></span><span class="hside animals"><b id="hbA">0</b><small id="hbAnimals">Animals</small><svg class="ico"><use href="#i-flag"/></svg></span></div>
+<div class="bigcard" id="waitCard"><div class="card"><div class="waitart"><img alt="" src="assets/story/sticker-frog.webp"><img alt="" src="assets/story/sticker-wolf.webp"><img alt="" src="assets/story/sticker-cat.webp"></div><h3>Waiting for everyone…</h3><p>The round starts as soon as every phone is ready</p></div></div>
+<div class="bigcard" id="roundCard"><div class="card"><h2 class="sticker" id="roundTitle">Round over</h2><div class="roundscore" id="roundScore"></div><p class="roundnext" id="roundNext">Switch sides!</p></div></div>
+<div id="jokerBar" style="display:none"></div>
 <div id="raceUI"></div>
 <svg id="goalArrow" class="rarrow goalarrow" viewBox="0 0 40 40" style="display:none"><path d="M34 20 L10 6 Q6 4 6 9 L6 31 Q6 36 10 34 Z" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/></svg>
 <div id="fader"></div>
@@ -849,6 +900,7 @@
   <div class="motes near"><i></i><i></i><i></i><i></i><i></i></div>
   <div class="counters">
     <span class="chip"><i class="cbadge honey"><svg class="ico"><use href="#i-star"/></svg></i><b id="starCount">0</b></span>
+    <span class="chip chestchip" id="chestChip"></span>
   </div>
   <div class="logo"><span class="word" id="logoA">Buddy</span><br><div class="sub">Remember the way</div></div>
   <div class="topbtns">
@@ -961,8 +1013,7 @@
       <button class="btn green" id="friendCopy" style="width:100%"><svg class="ico"><use href="#i-link"/></svg>Invite friends</button>
       <div class="codehint">or tell them the code <b id="friendCode">·····</b></div>
     </div>
-    <p class="huntonly huntrules">Animals find the 4 keys, then escape through the portal. Wolves catch them before the clock runs out!</p>
-    <div class="rc-row col huntonly"><span>You are</span><div class="seg" id="frRole"><button data-fr="role:animal">An animal</button><button data-fr="role:wolf">A wolf</button></div></div>
+    <p class="huntonly huntrules">Two teams, best of three. Wolves catch animals (a point each, but they only see a little way). Animals bring flags home to their corner (a point each). Swap sides every round!</p>
     <div class="lobby" id="lobby"></div>
     <div class="teamhint" id="teamHint">Tap a player to switch their team</div>
     <div class="ribbon" id="friendStatus">Getting ready…</div>
@@ -1020,6 +1071,31 @@
   </div>
 </section>
 
+<section class="screen modal" id="gameOver">
+  <div class="card pop gocard">
+    <div class="confetti"></div>
+    <div class="goart" id="goArt"></div>
+    <h2 class="sticker" id="goTitle">Game over</h2>
+    <p class="gosub" id="goSub"></p>
+    <div class="golines" id="goLines"></div>
+    <div class="row">
+      <button class="btn blue" data-go="title"><svg class="ico"><use href="#i-home"/></svg>Home</button>
+      <button class="btn green" id="goAgain"><svg class="ico"><use href="#i-redo"/></svg>Again</button>
+    </div>
+  </div>
+</section>
+
+<section class="screen modal" id="gift">
+  <div class="card pop giftcard">
+    <h2 class="sticker" id="giftTitle">A gift!</h2>
+    <p id="giftSub"></p>
+    <div class="giftbox" id="giftBox"><i class="lid"></i><i class="box"></i><i class="bow"></i></div>
+    <div class="giftcards" id="giftCards"></div>
+    <button class="btn yellow" id="giftOpen" style="width:100%">Open it!</button>
+    <button class="btn green" id="giftDone" style="width:100%;display:none">Yay!</button>
+  </div>
+</section>
+
 <section class="screen modal" id="win">
   <div class="card pop">
     <div class="confetti" id="confetti"></div>
@@ -1028,6 +1104,7 @@
     <div class="bigstars" id="winStars"><svg><use href="#i-star"/></svg><svg><use href="#i-star"/></svg><svg><use href="#i-star"/></svg></div>
     <div class="statrow" id="winStats"></div>
     <div class="unlock" id="unlockMsg"><span class="chip" id="unlockText"></span></div>
+    <div class="tease" id="winTease"></div>
     <div class="row">
       <button class="btn blue" data-go="worlds"><svg class="ico"><use href="#i-map"/></svg>Map</button>
       <button class="btn green" id="nextBtn">Next<svg class="ico"><use href="#i-next"/></svg></button>

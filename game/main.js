@@ -1004,7 +1004,23 @@ let maze, heights, vels, targets, shake, rotIdx, varIdx, twist, nudge, tint, ori
 let L = 0, steps = 0, elapsed = 0, won = false, viewW = parseFloat(params.get('zoom') || '3'), peek = false;
 let state = 'loading';
 const st = { gx: 0, gz: 0, fx: 0, fz: 0, tx: 0, tz: 0, t: 1, moving: false, facing: 0, bumpT: -1, bdx: 0, bdz: 0, idle: 0 };
-let heldDir = null, queued = null;
+let heldDir = null, queued = null, heldCands = null, queuedCands = null;
+// a quiet helping hand with the controls: a key or swipe that points between two tiles (the maze is a diamond on screen)
+// takes whichever of the two is open, keeping on the way you were going. It switches on bit by bit over your first
+// games (at first only for walls you can already see), so it feels like you got better, not like you're helped.
+let gamesPlayed = 0; try { gamesPlayed = +localStorage.getItem('buddy-games') || 0; } catch {}
+let lastDir = null;
+function pickDir(cands) {
+  if (!cands || !cands.length) return null;
+  const [a, b] = cands; if (!b) return a;
+  const door = d => maze.doors && maze.doors.some(o => o.x === st.gx + d[0] && o.z === st.gz + d[1]);
+  const open = d => door(d) || !isWall(st.gx + d[0], st.gz + d[1]);
+  const seen = d => { const x = st.gx + d[0], z = st.gz + d[1]; return x < 0 || z < 0 || x >= maze.N || z >= maze.N || targets[z * maze.N + x] > 0; };
+  const order = lastDir && b[0] === lastDir[0] && b[1] === lastDir[1] ? [b, a] : [a, b];
+  if (open(order[0])) return order[0];
+  if (open(order[1]) && (gamesPlayed >= 1 || seen(order[0]))) return order[1];
+  return order[0];
+}
 
 // a model's texture goes to a canvas (shrunk to keep phone memory in check) so its colors can be adjusted
 function canvasTexture(tex, size) {
@@ -1798,7 +1814,7 @@ function trimGPU() { // (every device: laptops held ~110 MB per world visited ot
 }
 function buildLevel(level, race = null, opts = {}) {
   L = level; mode = race ? race.kind || 'race' : 'levels'; pillarsDirty = true; shadowKick = 3;
-  clearWolves(); hunt.clear();
+  clearWolves(); hunt.clear(); joker.clear();
   stage = opts.stage || 'surface';
   const world = race ? (WORLDS.find(w => w.biome === race.biome) || { tint: [1, 1, 1], reveal: 2.1, icon: 'i-w-cave' }) : WORLDS[Math.floor(L / LEVELS_PER_WORLD)];
   const bName = race ? race.biome || 'woods' : stage === 'cave' ? 'cave' : world.biome;
@@ -1873,7 +1889,7 @@ function buildLevel(level, race = null, opts = {}) {
   st.gx = st.tx = st.fx = start[0]; st.gz = st.tz = st.fz = start[1];
   st.t = 1; st.moving = false;
   if (!opts.keep) { st.facing = -Math.PI / 4; steps = 0; elapsed = 0; }
-  won = false; heldDir = queued = null;
+  won = false; heldDir = queued = heldCands = queuedCands = null;
   if (opts.keep) { /* stats carry over through the doors */ }
   else if (isGateway(L) && !race) { // best path: to door A, through the cave by way of the key, then from door B to the portal
     const [a, b] = maze.doors, cave = genCaveMaze(L), [ca, cb] = cave.doors, k = keyTile(cave, ca.out, cb.out, keyDetour(L));
@@ -1902,6 +1918,7 @@ function buildLevel(level, race = null, opts = {}) {
   for (let k = 0; race && !race.online && k < raceCfg.mates; k++) rivals[rivals.length - 1 - k].team = true; // your teammates (the far corners first)
   updateTargets(true);
   wolfOver = false;
+  if (!race || race.kind === 'wolf') joker.place(Math.min(3, Math.max(1, Math.round(maze.N / 9)))); // (cards to find)
   if (!race && L >= 0) { // this level's patrolling wolves (fungus ones in the cave)
     const P = levelPlan(L), n = stage === 'cave' ? P.caveWolves : P.wolves, cave = stage === 'cave', at = L;
     if (n) loadChar(cave ? 'wolf_fungi' : 'wolf').then(ch => {
@@ -2535,7 +2552,7 @@ function tryMove(dx, dz) {
     if (st.bumpT < 0 || st.bumpT > 0.45) { st.bumpT = 0; st.bdx = dx; st.bdz = dz; }
     return false;
   }
-  st.fx = st.gx; st.fz = st.gz; st.tx = nx; st.tz = nz; st.t = 0; st.moving = true;
+  st.fx = st.gx; st.fz = st.gz; st.tx = nx; st.tz = nz; st.t = 0; st.moving = true; lastDir = [dx, dz];
   steps++; ui.steps.textContent = steps;
   if (mode === 'race' || mode === 'hunt') net.send({ t: 'pos', x: nx, z: nz });
   updateTargets(false);
@@ -2551,7 +2568,7 @@ function tryMove(dx, dz) {
 const warp = { t: -1, door: null, swapped: false, from: new THREE.Vector3(), to: new THREE.Vector3() };
 const WARP_IN = 0.45, WARP_DARK = 1.05, WARP_END = 1.75;
 function startWarp(door) {
-  warp.t = 0; warp.door = door; warp.swapped = false; heldDir = queued = null;
+  warp.t = 0; warp.door = door; warp.swapped = false; heldDir = queued = heldCands = queuedCands = null;
   warp.from.copy(worldPos(st.gx, st.gz)); warp.to.copy(worldPos(door.x, door.z));
   st.facing = Math.atan2(-(door.z - st.gz), door.x - st.gx);
   sfx.play('step', 0.62, 0, { maxDur: 0.26 });
@@ -2612,7 +2629,7 @@ function updatePlayer(dt, time) {
   }
   let x, z, y = 0, sq = 1;
   if (st.moving) {
-    st.t = Math.min(1, st.t + dt / (mode === 'hunt' && hunt.amWolf() ? WOLF.human : CFG.stepTime)); // (online wolves are a little quicker)
+    st.t = Math.min(1, st.t + dt / ((mode === 'hunt' && hunt.amWolf() ? WOLF.human : CFG.stepTime) * joker.speed())); // (online wolves are a little quicker)
     const e = st.t;
     x = st.fx + (st.tx - st.fx) * e; z = st.fz + (st.tz - st.fz) * e;
     // springy steps: a hop each step, stretched at the top and squashed on landing
@@ -2625,6 +2642,7 @@ function updatePlayer(dt, time) {
       sfx.play('step', 0.62, 0, { maxDur: 0.26 });
       const p = worldPos(st.gx, st.gz);
       footPuffs(p.x, p.z, st.tx - st.fx, st.tz - st.fz, 0.7);
+      joker.onStep(st.gx, st.gz);
       if (mode === 'hunt') hunt.onStep(st.gx, st.gz);
       else if (mode !== 'race' && keyAt && !hasKey && st.gx === keyAt[0] && st.gz === keyAt[1]) collectKey();
       if (mode !== 'hunt' && st.gx === goal[0] && st.gz === goal[1]) {
@@ -2632,7 +2650,7 @@ function updatePlayer(dt, time) {
         if (hasKey) return win();
         toast('The portal is asleep. Find the key!'); sfx.ui('nope', 0.3);
       }
-      const next = queued || heldDir; queued = null;
+      const next = queued || (queuedCands && pickDir(queuedCands)) || (heldCands ? pickDir(heldCands) : heldDir); queued = queuedCands = null;
       if (next) tryMove(next[0], next[1]);
     }
   } else {
@@ -2795,7 +2813,7 @@ function raceEnd(winner) {
   if (won) return;
   won = true;
   if (!winner) net.send({ t: 'win' }); else if (winner.bot && !winner.remote) net.send({ t: 'win', p: winner.pid });
-  heldDir = queued = null;
+  heldDir = queued = heldCands = queuedCands = null;
   const p = key.position;
   for (let i = 0; i < 18; i++) {
     const a = (i / 18) * Math.PI * 2;
@@ -2818,9 +2836,10 @@ function raceEnd(winner) {
 // the portal (on a door level's surface: to the door; in its cave: to the key, then the way back up)
 const _ga = new THREE.Vector3();
 function updateGoalArrow(time) {
-  const el = $('goalArrow'), on = (mode === 'levels' || mode === 'wolf') && state === 'play' && intro.t < 0 && !won && warp.t < 0;
+  const el = $('goalArrow'), on = (mode === 'levels' || mode === 'wolf' || mode === 'hunt') && state === 'play' && intro.t < 0 && !won && warp.t < 0;
   let tgt = null, gold = true;
-  if (on) {
+  if (on && mode === 'hunt') { const t = hunt.nextTarget(); if (t) { tgt = _ga.set(t[0] - origin, 0.4, t[1] - origin); gold = !hunt.carrying; } } // (gold: to a flag; blue: home with it)
+  else if (on) {
     if (keyAt && !hasKey && key.visible) tgt = key.position;
     else if (stage === 'cave' && maze.doors) { const d = maze.doors[1]; tgt = _ga.set(d.x - origin, 0.4, d.z - origin); gold = false; }
     else if (!hasKey && maze.doors && maze.doors.length) { const d = maze.doors[0]; tgt = _ga.set(d.x - origin, 0.4, d.z - origin); gold = false; }
@@ -3070,7 +3089,7 @@ function wolfStep(w, d, prey) {
   if (w.state === 'roam' && seen && w.rest <= 0) { w.state = 'chase'; w.chaseT = 0; w.wait = 0.35; flashMark(w, '!'); sfx.ui('nope', 0.35); return null; } // (a moment's surprise)
   if (w.state === 'chase') {
     // round a corner or duck behind a wall and it loses you, then goes back to its patrol
-    if (!seen || dh < 0 || w.chaseT > WOLF.chaseMax) { w.state = 'roam'; w.rest = WOLF.rest; w.wait = 0.9; w.toRoute = null; flashMark(w, '?'); return null; }
+    if (!seen || dh < 0 || w.chaseT > WOLF.chaseMax) { w.state = 'roam'; w.rest = WOLF.rest; w.wait = 1.4; w.lookT = 1.4; w.toRoute = null; flashMark(w, '?'); return null; } // (looks around, then back to its patrol)
     let best = null, bv = 1e9;
     for (const t of nb) { const v = d[t[1] * N + t[0]]; if (v >= 0 && v < bv) { bv = v; best = t; } }
     return best;
@@ -3103,7 +3122,7 @@ function updateWolves(dt, time) {
   wolfMoving = false;
   if (!wolves.length) return;
   glowU.uGlowT.value = time * 2.6;
-  const live = state === 'play' && intro.t < 0 && (mode === 'hunt' ? hunt.live() : !won && !wolfOver);
+  const live = state === 'play' && intro.t < 0 && (mode === 'hunt' ? hunt.live() : !won && !wolfOver) && !joker.frozen();
   if (live) {
     const prey = wolfPrey(), k = prey.map(p => p.join(',')).join(';');
     preyNow = prey;
@@ -3141,7 +3160,8 @@ function animateActor(a, dt, time, hop, walking, running) {
   const amp = a.U.uAmp.value;
   a.body.rotation.z = -(running ? 0.24 : 0.12) * amp + (1 - amp) * Math.sin(time * 1.6 + a.x) * 0.03;
   a.body.rotation.x = Math.sin(a.U.uPhase.value) * 0.07 * amp + (a.wait > 0 && !walking ? Math.sin(time * 9) * 0.05 : 0); // sniffing
-  let d = a.facing - a.root.rotation.y;
+  if (a.lookT > 0) a.lookT -= dt;
+  let d = a.facing + (a.lookT > 0 ? Math.sin((1.4 - a.lookT) * 7) * 1.1 : 0) - a.root.rotation.y; // (lost you: looking left and right)
   d = Math.atan2(Math.sin(d), Math.cos(d));
   a.root.rotation.y += d * Math.min(1, dt * 14);
   if (a.markT > 0) {
@@ -3152,14 +3172,14 @@ function animateActor(a, dt, time, hop, walking, running) {
 }
 function wolfCaught(w) {
   if (wolfOver || won) return;
-  wolfOver = true; heldDir = queued = null;
+  wolfOver = true; heldDir = queued = heldCands = queuedCands = null;
   w.facing = Math.atan2(-(player.position.z - w.root.position.z), player.position.x - w.root.position.x);
   st.bdx = Math.sign(w.root.position.x - player.position.x); st.bdz = st.bdx ? 0 : Math.sign(w.root.position.z - player.position.z); st.bumpT = 0; // knocked over
   flashMark(w, '!');
   let k = 0; const leap = setInterval(() => { k += 0.05; w.pounce = Math.sin(Math.min(1, k / 0.4) * Math.PI) * 0.35; if (k >= 0.4) { clearInterval(leap); w.pounce = 0; } }, 16);
   for (let i = 0; i < 14; i++) { const a = i / 14 * Math.PI * 2; spawnPuff(player.position.x, 0.4, player.position.z, Math.cos(a) * 1.3, rand(0.4, 1), Math.sin(a) * 1.3, rand(0.07, 0.11), STONE_DUST[i % STONE_DUST.length], 0.6); }
   sfx.play('bump', 0.8);
-  setTimeout(() => { if (mode === 'wolf') wolfEnd(false); else { toast('A wolf caught you! Try again'); play(L); } }, 1200);
+  setTimeout(() => { if (mode === 'wolf') { const n = wolfRun; if (n > wolfBest) { wolfBest = n; try { localStorage.setItem('buddy-wolf-best', n); } catch {} } gameOver({ win: false, title: 'Caught by a wolf!', sub: `${n} map${n === 1 ? '' : 's'} cleared · best ${wolfBest}`, art: ['sticker-wolf'], again: () => startWolf(0), againLabel: 'Try again' }); } else { toast('A wolf caught you! Try again'); play(L); } }, 1200);
 }
 function wolfEnd(cleared) {
   const n = wolfRun + (cleared ? 1 : 0);
@@ -3198,88 +3218,222 @@ async function startWolf(run = 0) {
   toast(run === 0 ? 'Find the key and reach the portal. Don’t let the wolves catch you!' : fungi ? 'The underworld: fungus wolves see in the dark' : `${wolfCount(run)} wolves this time`);
 }
 
+// ---------- jokers ----------
+// Little helper cards (like the boosters in Candy Crush): find one glowing on the floor, or win one, and tap it when
+// you need it. Lantern: a trail of light to where you're headed. Hammer: the stone in front of you sinks for good.
+// Snowflake: every wolf freezes for a while. Boots: you run faster for a moment. They're kept between games (up to 9).
+const JOKERS = {
+  light: { name: 'Lantern', icon: 'i-lantern', color: '#ffc43d', tip: 'a trail of light to where you’re going' },
+  smash: { name: 'Hammer', icon: 'i-hammer', color: '#ff8c6b', tip: 'sinks the stone in front of you' },
+  freeze: { name: 'Snowflake', icon: 'i-snow', color: '#6dbef0', tip: 'freezes the wolves for a while' },
+  dash: { name: 'Boots', icon: 'i-boot', color: '#9c84ee', tip: 'run faster for a moment' },
+};
+const joker = (() => {
+  let bag = [];
+  try { bag = JSON.parse(localStorage.getItem('buddy-jokers') || 'null') || ['light', 'smash']; } catch { bag = ['light', 'smash']; }
+  const save = () => { try { localStorage.setItem('buddy-jokers', JSON.stringify(bag)); } catch {} };
+  let pickups = [], trail = null, trailT = 0, frozenT = 0, dashT = 0;
+  // the card lying on the floor: a little golden card with a star, turning and glowing
+  const cardTex = (() => {
+    const c = document.createElement('canvas'); c.width = 96; c.height = 128; const x = c.getContext('2d');
+    const rr = (a, b, w, h, r) => { x.beginPath(); x.moveTo(a + r, b); x.arcTo(a + w, b, a + w, b + h, r); x.arcTo(a + w, b + h, a, b + h, r); x.arcTo(a, b + h, a, b, r); x.arcTo(a, b, a + w, b, r); x.closePath(); };
+    rr(6, 6, 84, 116, 16); x.fillStyle = '#fff6d8'; x.fill(); x.lineWidth = 7; x.strokeStyle = '#f2b636'; x.stroke();
+    x.translate(48, 64); x.beginPath(); for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2 - Math.PI / 2, r = i % 2 ? 12 : 27; x.lineTo(Math.cos(a) * r, Math.sin(a) * r); } x.closePath(); x.fillStyle = '#ffc43d'; x.fill(); x.lineWidth = 4; x.strokeStyle = '#e69a1c'; x.stroke();
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  })();
+  const cardMat = new THREE.SpriteMaterial({ map: cardTex, transparent: true });
+  const trailMat = new THREE.MeshBasicMaterial({ color: '#ffe58a', transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false });
+  const trailGeo = new THREE.CircleGeometry(0.09, 14).rotateX(-Math.PI / 2);
+  function render() {
+    const el = $('jokerBar'), counts = {};
+    for (const k of bag) counts[k] = (counts[k] || 0) + 1;
+    el.innerHTML = Object.keys(JOKERS).filter(k => counts[k]).map(k => `<button class="jcard" data-j="${k}" style="--c:${JOKERS[k].color}" aria-label="${JOKERS[k].name}"><svg class="ico"><use href="#${JOKERS[k].icon}"/></svg>${counts[k] > 1 ? `<b>${counts[k]}</b>` : ''}</button>`).join('');
+  }
+  function give(k, from) { // a new card flies into the bar
+    if (bag.length >= 9) return;
+    bag.push(k); save(); render();
+    const card = document.createElement('div'); card.className = 'jfly'; card.style.setProperty('--c', JOKERS[k].color);
+    card.innerHTML = `<svg class="ico"><use href="#${JOKERS[k].icon}"/></svg><span>${JOKERS[k].name}!</span>`;
+    const b = $('jokerBar').getBoundingClientRect(), x0 = from ? from.x : innerWidth / 2, y0 = from ? from.y : innerHeight / 2;
+    card.style.left = x0 + 'px'; card.style.top = y0 + 'px'; document.body.appendChild(card);
+    card.animate([{ transform: 'translate(-50%,-50%) scale(.3) rotate(-20deg)', opacity: 0 }, { transform: 'translate(-50%,-120%) scale(1.25) rotate(6deg)', opacity: 1, offset: 0.35 }, { transform: 'translate(-50%,-110%) scale(1.1) rotate(0)', opacity: 1, offset: 0.6 },
+      { transform: `translate(${b.left + 30 - x0}px, ${b.top + 20 - y0}px) translate(-50%,-50%) scale(.4)`, opacity: 0.2 }], { duration: 1300, easing: 'cubic-bezier(.3,.7,.3,1)' }).onfinish = () => card.remove();
+    sfx.ui('chime', 0.45);
+  }
+  // cards on the floor: in dead ends off the way, about one per 6x6 of maze (always the same tiles for everyone online)
+  function place(n) {
+    clear();
+    if (!maze || !n) return;
+    const { N, g } = maze, way = new Set(wayThrough().map(([x, z]) => z * N + x)), ends = [];
+    for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) {
+      const i = z * N + x; if (g[i] || way.has(i) || (keyAt && keyAt[0] === x && keyAt[1] === z) || (goal[0] === x && goal[1] === z) || (start[0] === x && start[1] === z)) continue;
+      const open = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dz]) => { const X = x + dx, Z = z + dz; return X >= 0 && Z >= 0 && X < N && Z < N && !g[Z * N + X]; }).length;
+      if (open === 1) ends.push([x, z]);
+    }
+    const step = Math.max(1, Math.floor(ends.length / n));
+    for (let k = 0; k < n && k * step < ends.length; k++) {
+      const [x, z] = ends[(k * step + Math.floor(step / 2)) % ends.length];
+      const s = new THREE.Sprite(cardMat); s.scale.set(0.3, 0.4, 1); s.position.set(x - origin, 0.5, z - origin); s.renderOrder = 6;
+      const glow = new THREE.Sprite(wolfHaloMat); glow.scale.setScalar(0.9); s.add(glow);
+      scene.add(s); pickups.push({ x, z, s, i: k });
+    }
+  }
+  function clear() { pickups.forEach(p => scene.remove(p.s)); pickups = []; if (trail) { scene.remove(trail); trail = null; } frozenT = dashT = 0; }
+  const randomKind = () => { const ks = wolves.length || mode === 'hunt' ? ['light', 'smash', 'freeze', 'dash'] : ['light', 'smash', 'dash', 'light']; return ks[Math.floor(Math.random() * ks.length)]; };
+  // stepping on a card picks it up
+  function onStep(x, z) {
+    const k = pickups.findIndex(p => p.x === x && p.z === z); if (k < 0) return;
+    const p = pickups[k]; scene.remove(p.s); pickups.splice(k, 1);
+    const v = p.s.position.clone().project(camera);
+    give(randomKind(), { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight });
+    for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2; spawnPuff(x - origin, 0.5, z - origin, Math.cos(a) * 1.1, rand(0.3, 0.9), Math.sin(a) * 1.1, rand(0.04, 0.07), i % 2 ? '#ffd04d' : '#ffffff', 0.6); }
+    if (mode === 'hunt') net.send({ t: 'jk', x, z });
+  }
+  function takenElsewhere(x, z) { const k = pickups.findIndex(p => p.x === x && p.z === z); if (k >= 0) { scene.remove(pickups[k].s); pickups.splice(k, 1); } }
+  // the stone in front of Buddy sinks for good (online, for everyone)
+  function smashAt(x, z, shared) {
+    const { N } = maze, i = z * N + x;
+    if (x <= 0 || z <= 0 || x >= N - 1 || z >= N - 1 || !maze.g[i] || (maze.empty && maze.empty[i]) || (maze.doors && maze.doors.some(d => d.x === x && d.z === z))) return false;
+    maze.g[i] = 0; pillarsDirty = true; updateTargets(false); preyKey = '';
+    for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; spawnPuff(x - origin, 0.5, z - origin, Math.cos(a) * 1.5, rand(0.4, 1.2), Math.sin(a) * 1.5, rand(0.08, 0.13), STONE_DUST[k % STONE_DUST.length], 0.7); }
+    sfx.play('bump', 0.7); sfx.play('rise', 0.4);
+    if (shared && mode === 'hunt') net.send({ t: 'smash', x, z });
+    return true;
+  }
+  function use(k) {
+    if (state !== 'play' || intro.t >= 0 || won || wolfOver) return;
+    const i = bag.indexOf(k); if (i < 0) return;
+    let ok = true;
+    if (k === 'light') {
+      const tgt = mode === 'hunt' ? hunt.nextTarget() : stage === 'cave' && maze.doors ? (keyAt && !hasKey ? keyAt : maze.doors[1].out) : keyAt && !hasKey ? keyAt : maze.doors && maze.doors.length && !hasKey ? maze.doors[0].out : goal;
+      const path = tgt ? pathTiles([st.gx, st.gz], tgt) : [];
+      if (trail) scene.remove(trail);
+      trail = new THREE.InstancedMesh(trailGeo, trailMat, Math.max(1, path.length * 2)); const M = new THREE.Matrix4(); let n = 0;
+      path.forEach((t, j) => { M.makeTranslation(t[0] - origin, 0.11, t[1] - origin); trail.setMatrixAt(n++, M); const u = path[j + 1]; if (u) { M.makeTranslation((t[0] + u[0]) / 2 - origin, 0.11, (t[1] + u[1]) / 2 - origin); trail.setMatrixAt(n++, M); } });
+      trail.count = n; trail.renderOrder = 5; trail.frustumCulled = false; scene.add(trail); trailT = 7; trailMat.opacity = 0.9;
+    } else if (k === 'smash') {
+      const d = [Math.round(Math.cos(st.facing)), Math.round(-Math.sin(st.facing))];
+      ok = smashAt(st.gx + d[0], st.gz + d[1], true);
+      if (!ok) toast('Face a stone to use the Hammer');
+    } else if (k === 'freeze') {
+      frozenT = 6; for (const w of wolves) { w.wait = Math.max(w.wait, 6); w.state = 'roam'; w.rest = 8; }
+      if (mode === 'hunt') net.send({ t: 'freeze' });
+      toast('The wolves are frozen!');
+    } else if (k === 'dash') { dashT = 5; toast('Zoom!'); }
+    if (!ok) return;
+    bag.splice(i, 1); save(); render(); sfx.ui('whoosh', 0.4);
+    const b = document.querySelector(`.jcard[data-j="${k}"]`); if (b) b.animate([{ transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: 300 });
+  }
+  return {
+    give, place, clear, onStep, use, render, smashAt, takenElsewhere,
+    get bag() { return bag; },
+    speed: () => dashT > 0 ? 0.62 : 1,
+    frozen: () => frozenT > 0,
+    freezeAll() { frozenT = 6; for (const w of wolves) { w.wait = Math.max(w.wait, 6); w.state = 'roam'; w.rest = 8; } },
+    update(dt) {
+      if (trailT > 0) { trailT -= dt; trailMat.opacity = Math.min(0.9, trailT / 1.5); if (trailT <= 0 && trail) { scene.remove(trail); trail = null; } }
+      if (frozenT > 0) frozenT -= dt; if (dashT > 0) dashT -= dt;
+      for (const p of pickups) { p.s.position.y = 0.5 + Math.sin(performance.now() / 300 + p.x) * 0.05; p.s.material.rotation = 0; }
+      $('jokerBar').style.display = state === 'play' && (mode === 'levels' || mode === 'wolf' || mode === 'hunt') ? '' : 'none';
+    },
+  };
+})();
 // ---------- Wolves vs Animals (online) ----------
-// Everyone picks a side in the lobby. The animals start in the corners: they must find the 4 keys hidden around the
-// maze (one deep in each quarter), then escape through the portal in the middle. The wolves start around the portal
-// and win if the clock runs out first. A caught animal is out for 5 seconds, then comes back at its corner (safe for
-// 2 more). The host keeps the score: it decides catches, keys and the end, and runs the computer wolves (they join if
-// nobody picked the wolves).
-const HUNT = { dur: 180, out: 5, safe: 2, keys: 4 };
+// Two teams, best of three rounds, swapping sides each round (team 1 are the wolves first). The wolves score a point
+// for every animal they catch; they see only a little way around them (fog). The animals score by capturing flags:
+// grab one of the 4 flags hidden in the corners of the maze and bring it home to your own corner. A caught animal
+// drops its flag (it goes back to its spot), is out for 5 seconds and comes back at its corner. Each round lasts two
+// minutes; the side with more points wins it. The host keeps the score and runs the computer wolves (they make up
+// a pack of at least two, and hunt you on your own when you practise alone).
+const HUNT = { dur: 120, out: 5, safe: 2, flags: 4, fog: 2.6 };
 const HUNT_CELLS = [12, 15, 18];
 let myRole = 'animal';
-try { myRole = localStorage.getItem('buddy-role') === 'wolf' ? 'wolf' : 'animal'; } catch {}
+const TEAM_NAMES = ['Team 1', 'Team 2'], TEAM_COLORS = ['#5bb2f2', '#ff8c6b'];
 const hunt = (() => {
   let S = null;
   const now = () => performance.now();
   const isOut = pid => S && S.out.has(pid) && now() < S.out.get(pid);
   const isSafe = pid => S && S.out.has(pid) && now() < S.out.get(pid) + HUNT.safe * 1000;
   const name = i => i === S.me ? 'You' : S.players[i].bot ? 'Computer wolf' : i === 0 ? 'Host' : 'Friend';
-  // where each animal or wolf is right now (world position) and on which tile
-  function posOf(i) {
-    if (i === S.me) return player.position;
-    const a = S.actors.get(i) || wolves.find(w => w.pid === i); return a && a.root.position;
-  }
-  function tileOf(i) {
-    if (i === S.me) return [st.moving ? st.tx : st.gx, st.moving ? st.tz : st.gz];
-    const a = S.actors.get(i) || wolves.find(w => w.pid === i); return a ? [a.x, a.z] : null;
-  }
-  // the keys: in each quarter, the dead end furthest from both the middle and the corner (the same on every phone)
-  function keyTiles(m, mid) {
-    const { N, g } = m, H = (N - 1) / 2, dMid = distFrom([mid]), out = [];
+  const role = i => S.players[i].role;
+  function posOf(i) { if (i === S.me) return player.position; const a = S.actors.get(i) || wolves.find(w => w.pid === i); return a && a.root.position; }
+  function tileOf(i) { if (i === S.me) return [st.moving ? st.tx : st.gx, st.moving ? st.tz : st.gz]; const a = S.actors.get(i) || wolves.find(w => w.pid === i); return a ? [a.x, a.z] : null; }
+  // the flags' spots: in each quarter, the dead end furthest from the middle (the same on every phone)
+  function flagTiles(m, mid) {
+    const { N, g } = m, H = (N - 1) / 2, dMid = distFrom([mid], m), out = [];
     for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
       let best = null, bs = -1;
       for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) {
         if (g[z * N + x] || Math.sign(x - H) !== sx || Math.sign(z - H) !== sz) continue;
         const open = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dz]) => { const X = x + dx, Z = z + dz; return X >= 0 && Z >= 0 && X < N && Z < N && !g[Z * N + X]; }).length;
-        const corner = Math.abs(x - H) + Math.abs(z - H), sc = dMid[z * N + x] * (open === 1 ? 1.5 : 1) - Math.max(0, corner - H * 1.4) * 2;
+        const corner = Math.abs(x - H) + Math.abs(z - H), sc = dMid[z * N + x] * (open === 1 ? 1.5 : 1) - Math.max(0, corner - H * 1.3) * 3;
         if (sc > bs) { bs = sc; best = [x, z]; }
       }
       out.push(best || [H + sx, H + sz]);
     }
     return out;
   }
+  // a little flag on a pole, in the animals' colors, waving
+  function makeFlag(color) {
+    const g = new THREE.Group();
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 0.62, 8), new THREE.MeshStandardMaterial({ color: '#8a6a4a', roughness: 0.8 }));
+    pole.position.y = 0.31;
+    const cloth = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.2, 6, 1), new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide, roughness: 0.7, emissive: color, emissiveIntensity: 0.15 }));
+    cloth.position.set(0.16, 0.5, 0);
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshStandardMaterial({ color: '#ffd04d', metalness: 0.3, roughness: 0.4 }));
+    knob.position.y = 0.63;
+    g.add(pole, cloth, knob); g.userData.cloth = cloth;
+    return g;
+  }
   function clear() {
-    if (S) { S.actors.forEach(dropActor); S.keyMeshes.forEach(k => { scene.remove(k); freeTree(k); }); }
-    S = null;
+    if (S) { S.actors.forEach(dropActor); S.flagMeshes.forEach(f => { scene.remove(f); freeTree(f); }); }
+    S = null; $('fog').style.display = 'none'; $('huntBar').style.display = 'none'; $('waitCard').classList.remove('on'); $('roundCard').classList.remove('on');
   }
   async function start(o) {
     const b = o.biome, fungi = b === 'cave';
+    o.players.forEach(p => { p.role = p.bot || p.team === o.wolfTeam ? 'wolf' : 'animal'; });
     $('busy').classList.add('on');
     if (!stoneSets[b]) await stoneSet(b);
     const chs = await Promise.all(o.players.map(p => loadChar(p.role === 'wolf' ? (fungi ? 'wolf_fungi' : 'wolf') : p.char || 'buddy')));
     $('busy').classList.remove('on');
     raceSize = 4;
     const rm = makeRaceMaze(mulberry32(o.seed), o.shape, o.cells), m = rm.maze, N = m.N, mid = rm.goal;
-    // the animals take the corners in player order; the wolves stand on the tiles nearest the portal
     const dMid = distFrom([mid], m), around = [];
     for (let i = 0; i < N * N; i++) if (dMid[i] > 0 && dMid[i] <= 4) around.push(i);
     around.sort((a, c) => dMid[a] - dMid[c] || a - c);
     let ai = 0, wi = 0;
     const tiles = o.players.map(p => p.role === 'wolf' ? (j => [j % N, (j / N) | 0])(around[wi++ % Math.max(1, around.length)]) : rm.entries[ai++ % rm.entries.length]);
     warp.t = -1; $('fader').style.opacity = 0;
-    buildLevel(-1, { maze: m, entries: [tiles[o.me]], goal: mid, keyAt: null, biome: b, kind: 'hunt', portal: true });
-    S = { o, me: o.me, host: o.me === 0, players: o.players, tiles, actors: new Map(), taken: Array(HUNT.keys).fill(-1), out: new Map(), endAt: 0, over: false, catches: 0, keyMeshes: [] };
-    S.keysAt = keyTiles(m, mid);
-    S.keyMeshes = S.keysAt.map(([x, z]) => { const k = makeKey(); k.position.set(x - origin, 0.55, z - origin); scene.add(k); return k; });
+    buildLevel(-1, { maze: m, entries: [tiles[o.me]], goal: mid, keyAt: null, biome: b, kind: 'hunt', portal: false });
+    S = { o, me: o.me, host: o.me === 0, players: o.players, tiles, actors: new Map(), out: new Map(), endAt: 0, over: false, pts: [0, 0], carry: Array(HUNT.flags).fill(-1), flagMeshes: [], catches: {}, caps: {} };
+    S.flagAt = flagTiles(m, mid);
+    S.flagMeshes = S.flagAt.map(([x, z], k) => { const f = makeFlag(['#ffd04d', '#7cc26b', '#f27ba6', '#9c84ee'][k]); f.position.set(x - origin, 0, z - origin); scene.add(f); return f; });
     if (player.userData.cid !== chs[o.me].id) setupPlayer(chs[o.me]);
     o.players.forEach((p, i) => {
       if (i === o.me) return;
       const wolfy = p.role === 'wolf';
-      if (p.bot && S.host) { // the host's computer wolves think for themselves (and tell everyone where they go)
+      if (p.bot && S.host) {
         const [w] = spawnWolves(chs[i], 1, { glow: fungi, from: [tiles[i]], minD: 0 });
-        Object.assign(w, { pid: i, x: tiles[i][0], z: tiles[i][1], fx: tiles[i][0], fz: tiles[i][1], home: distFrom([tiles[i]]), wait: 1.5 });
+        Object.assign(w, { pid: i, x: tiles[i][0], z: tiles[i][1], fx: tiles[i][0], fz: tiles[i][1], home: distFrom([tiles[i]]), wait: 1.5, route: null });
+        if (w.routeMesh) { scene.remove(w.routeMesh); w.routeMesh = null; }
         wolves.push(w);
       } else {
         const a = makeActor(chs[i], tiles[i], { glow: fungi && wolfy, scale: wolfy ? WOLF.size : 1, skinIdx: wolfy ? -1 : p.skin });
         a.pid = i; a.role = p.role; a.stepTime = wolfy ? WOLF.human : CFG.stepTime; S.actors.set(i, a);
       }
     });
-    hasKey = false; ui.level.textContent = `0/${HUNT.keys}`; // (keys found; the key chip sits beside it)
+    joker.place(4);
+    hasKey = false;
+    $('fog').style.display = this.amWolf() ? '' : 'none';
+    $('huntBar').style.display = '';
     show('play'); intro.t = 0; intro.warm = 3; intro.wave = false; lastCount = -1; intro.online = true; intro.hold = !intro.goAt;
     net.ready();
-    toast(o.players[o.me].role === 'wolf' ? 'You are a wolf: catch the animals before they escape!' : `Find the ${HUNT.keys} keys, then escape through the portal!`);
+    const mine = o.players[o.me];
+    toast(mine.role === 'wolf' ? 'You’re a wolf! Catch the animals: a point each' : 'You’re an animal! Bring flags home to your corner: a point each');
   }
-  // the host: a wolf touching an animal (that isn't out or just back) catches it
+  function sync(ev) { // the host tells everyone the flags and the score
+    if (S.host) net.send({ t: 'hs', carry: S.carry, pts: S.pts, ev });
+  }
   function referee() {
     const wolfIds = [], prey = [];
     S.players.forEach((p, i) => { if (p.role === 'wolf') wolfIds.push(i); else if (!isSafe(i)) prey.push(i); });
@@ -3287,19 +3441,24 @@ const hunt = (() => {
       const pv = posOf(v); if (!pv) continue;
       for (const w of wolfIds) { const pw = posOf(w); if (pw && Math.hypot(pw.x - pv.x, pw.z - pv.z) < WOLF.catchR) { caught(v, w); break; } }
     }
-    if (S.endAt && now() >= S.endAt) end('wolves');
+    if (S.endAt && now() >= S.endAt) roundEnd();
   }
   function caught(v, by) {
-    if (S.host) { S.catches++; net.send({ t: 'caught', v, by }); }
+    if (S.host) {
+      S.pts[0]++; S.catches[by] = (S.catches[by] || 0) + 1;
+      const k = S.carry.indexOf(v); if (k >= 0) S.carry[k] = -1;
+      net.send({ t: 'caught', v, by }); sync();
+    }
     S.out.set(v, now() + HUNT.out * 1000);
     const p = posOf(v);
     if (p) for (let i = 0; i < 14; i++) { const a = i / 14 * Math.PI * 2; spawnPuff(p.x, 0.4, p.z, Math.cos(a) * 1.3, rand(0.4, 1), Math.sin(a) * 1.3, rand(0.07, 0.11), STONE_DUST[i % STONE_DUST.length], 0.6); }
     const w = S.actors.get(by) || wolves.find(o => o.pid === by); if (w) flashMark(w, '!');
     sfx.play('bump', v === S.me ? 0.8 : 0.4);
+    if (by === S.me) { toast('Caught one! +1'); sfx.ui('chime', 0.4); }
     if (v === S.me) {
-      player.visible = false; heldDir = queued = null; st.moving = false;
+      player.visible = false; heldDir = queued = heldCands = queuedCands = null; st.moving = false;
       toast(`Caught! Back in ${HUNT.out} seconds…`);
-      setTimeout(() => { // back at my corner
+      setTimeout(() => {
         if (!S || S.over) return;
         const [x, z] = S.tiles[S.me];
         st.gx = st.tx = st.fx = x; st.gz = st.tz = st.fz = z; st.t = 1; st.moving = false;
@@ -3308,52 +3467,67 @@ const hunt = (() => {
       }, HUNT.out * 1000);
     } else { const a = S.actors.get(v); if (a) a.root.visible = false; }
   }
-  function take(k, pid) {
-    if (S.taken[k] >= 0) return;
-    S.taken[k] = pid;
-    if (S.host) net.send({ t: 'keys', k: S.taken, by: pid });
-    applyKeys(pid);
+  function grab(k, pid) { if (S.carry[k] >= 0 || S.carry.includes(pid) || isOut(pid)) return; S.carry[k] = pid; sync({ grab: pid }); applyFlags({ grab: pid }); }
+  function cap(pid) { const k = S.carry.indexOf(pid); if (k < 0) return; S.carry[k] = -1; S.pts[1]++; S.caps[pid] = (S.caps[pid] || 0) + 1; sync({ cap: pid }); applyFlags({ cap: pid }); }
+  function applyFlags(ev = {}) {
+    if (ev.cap !== undefined) { toast(`${ev.cap === S.me ? 'You' : name(ev.cap)} brought a flag home! +1`); sfx.ui('chime', 0.5); const p = posOf(ev.cap); if (p) for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2; spawnPuff(p.x, 0.5, p.z, Math.cos(a) * 1.4, rand(0.5, 1.3), Math.sin(a) * 1.4, rand(0.05, 0.09), i % 2 ? '#ffd04d' : '#ffffff', 0.7); } }
+    else if (ev.grab === S.me) toast('Got a flag! Run it home to your corner');
   }
-  function applyKeys(by) {
-    const n = S.taken.filter(t => t >= 0).length;
-    S.keyMeshes.forEach((km, k) => { km.visible = S.taken[k] < 0; });
-    ui.level.textContent = `${n}/${HUNT.keys}`;
-    if (by !== undefined) {
-      sfx.ui('chime', 0.4);
-      toast(n >= HUNT.keys ? 'All keys found! The portal is open: escape!' : `${by === S.me ? 'You' : name(by)} found a key! (${n}/${HUNT.keys})`);
-    }
-    hasKey = n >= HUNT.keys; $('keyHud').classList.toggle('got', hasKey);
-  }
-  function end(w, by) {
+  function roundEnd() {
     if (S.over) return;
-    S.over = true;
-    if (S.host) net.send({ t: 'end', w, by, c: S.catches });
-    heldDir = queued = null;
-    const mine = S.players[S.me].role === 'wolf' ? 'wolves' : 'animals', iWon = mine === w;
-    if (w === 'animals' && by !== undefined) { const p = posOf(by); if (p) for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; spawnPuff(p.x, 0.3, p.z, Math.cos(a) * 1.6, rand(0.5, 1.4), Math.sin(a) * 1.6, rand(0.06, 0.1), i % 2 ? '#f2c14e' : '#ffffff', 0.6); } }
-    if (iWon) confetti();
-    $('raceTitle').textContent = `${w === 'animals' ? 'Animals' : 'Wolves'} win!`;
-    $('raceStats').innerHTML = chip('i-key', `${S.taken.filter(t => t >= 0).length}/${HUNT.keys} keys`) + chip('i-paw', `${S.catches} caught`);
-    $('raceBadge').classList.toggle('gold', iWon);
-    $('raceBadge').innerHTML = `<svg class="ico"><use href="#${w === 'animals' ? 'i-portal' : 'i-paw'}"/></svg>`;
-    $('raceRank').innerHTML = S.players.map((p, i) => `<li class="${i === S.me ? 'me' : ''}"><b>${p.role === 'wolf' ? 'Wolf' : 'Animal'}</b><i style="background:${p.role === 'wolf' ? '#6f7f95' : SKINS[p.skin]}"></i>${name(i)}${S.taken.includes(i) ? ' · found a key' : ''}</li>`).join('');
-    $('raceAgain').innerHTML = '<svg class="ico"><use href="#i-redo"/></svg>Again';
-    setTimeout(() => show('raceEnd'), 900);
+    const side = S.pts[0] > S.pts[1] ? 'wolves' : S.pts[1] > S.pts[0] ? 'animals' : 'draw';
+    const team = side === 'draw' ? -1 : side === 'wolves' ? S.o.wolfTeam : 1 - S.o.wolfTeam;
+    const wins = S.o.wins.slice(); if (team >= 0) wins[team]++;
+    const mvp = Object.entries({ ...S.catches, ...S.caps }).sort((a, b) => b[1] - a[1])[0];
+    const res = { t: 'rend', side, team, pts: S.pts, wins, round: S.o.round, mvp: mvp ? +mvp[0] : -1 };
+    if (S.host) net.send(res);
+    showRound(res);
+  }
+  function showRound(r) {
+    if (S.over) return;
+    S.over = true; heldDir = queued = heldCands = queuedCands = null;
+    const last = r.wins[0] >= 2 || r.wins[1] >= 2 || r.round + 1 >= S.o.bestOf;
+    const mineTeam = S.players[S.me].team;
+    $('roundTitle').textContent = r.side === 'draw' ? 'A draw!' : `${r.side === 'wolves' ? 'Wolves' : 'Animals'} win round ${r.round + 1}!`;
+    $('roundScore').innerHTML = `<span><svg class="ico"><use href="#i-paw"/></svg>${r.pts[0]}</span><b>:</b><span>${r.pts[1]}<svg class="ico"><use href="#i-flag"/></svg></span>`;
+    $('roundNext').textContent = last ? '' : 'Switch sides!';
+    $('roundCard').classList.add('on');
+    if (r.team === mineTeam) confetti();
+    setTimeout(() => {
+      $('roundCard').classList.remove('on');
+      if (last) return matchEnd(r);
+      if (S.host) net.nextRound(r.round + 1, r.wins);
+    }, 4200);
+  }
+  function matchEnd(r) {
+    const solo = S.o.bestOf === 1, mineTeam = S.players[S.me].team;
+    const winner = r.wins[0] === r.wins[1] ? -1 : r.wins[0] > r.wins[1] ? 0 : 1;
+    const iWon = solo ? r.side === 'animals' : winner === mineTeam;
+    gameOver({
+      win: iWon,
+      title: solo ? (r.side === 'draw' ? 'A draw!' : iWon ? 'You outfoxed the wolves!' : 'The wolves win!') : winner < 0 ? 'It’s a tie!' : winner === mineTeam ? 'Your team wins!' : `${TEAM_NAMES[winner]} wins!`,
+      sub: solo ? `${r.pts[1]} flag${r.pts[1] === 1 ? '' : 's'} home · caught ${r.pts[0]} time${r.pts[0] === 1 ? '' : 's'}` : `${TEAM_NAMES[0]} ${r.wins[0]} – ${r.wins[1]} ${TEAM_NAMES[1]}`,
+      art: iWon ? ['sticker-frog', 'sticker-fennec', 'sticker-bear', 'sticker-cat'] : ['sticker-wolf'],
+      lines: [r.mvp >= 0 && S.players[r.mvp] ? `Star of the round: ${name(r.mvp)}` : ''],
+      again: () => net.again(), againLabel: 'Rematch',
+    });
   }
   return {
     start, clear,
     get on() { return !!S; },
-    get keysAt() { return S && S.keysAt; },
-    amWolf: () => !!S && S.players[S.me].role === 'wolf',
+    get carrying() { return !!S && S.carry.includes(S.me); },
+    get flagAt() { return S && S.flagAt; }, get pts() { return S && S.pts; }, _end() { if (S) S.endAt = now() - 1; }, _forceWolf() { if (S) S.players[S.me].role = 'wolf'; },
+    amWolf: () => !!S && role(S.me) === 'wolf',
     live: () => !!S && !S.over && state === 'play' && intro.t < 0,
     canMove: () => !S || (!S.over && !isOut(S.me)),
     preyTiles: () => S ? S.players.map((p, i) => p.role !== 'wolf' && !isSafe(i) ? tileOf(i) : null).filter(Boolean) : [],
-    // my step ended: as an animal, a key under my feet is mine; with every key found, the portal is the way out
+    nextTarget: () => { if (!S || role(S.me) === 'wolf') return null; if (S.carry.includes(S.me)) return S.tiles[S.me]; let best = null, bd = 1e9; S.flagAt.forEach((f, k) => { if (S.carry[k] < 0) { const d = Math.abs(f[0] - st.gx) + Math.abs(f[1] - st.gz); if (d < bd) { bd = d; best = f; } } }); return best; },
     onStep(x, z) {
-      if (!S || S.over || S.players[S.me].role === 'wolf' || isOut(S.me)) return;
-      const k = S.keysAt.findIndex(([kx, kz], i) => kx === x && kz === z && S.taken[i] < 0);
-      if (k >= 0) { if (S.host) take(k, S.me); else net.send({ t: 'grab', k }); }
-      if (x === goal[0] && z === goal[1]) { if (hasKey) { if (S.host) end('animals', S.me); else net.send({ t: 'esc' }); } else toast(`The portal opens once all ${HUNT.keys} keys are found`); }
+      if (!S || S.over || role(S.me) === 'wolf' || isOut(S.me)) return;
+      const k = S.flagAt.findIndex(([fx, fz], i) => fx === x && fz === z && S.carry[i] < 0);
+      if (k >= 0 && !S.carry.includes(S.me)) { if (S.host) grab(k, S.me); else net.send({ t: 'grab', k }); }
+      const [hx, hz] = S.tiles[S.me];
+      if (x === hx && z === hz && S.carry.includes(S.me)) { if (S.host) cap(S.me); else net.send({ t: 'cap' }); }
     },
     onMsg(m) {
       if (!S) return;
@@ -3364,26 +3538,66 @@ const hunt = (() => {
         a.facing = Math.atan2(-(a.z - a.fz), a.x - a.fx);
       }
       else if (m.t === 'caught') caught(m.v, m.by);
-      else if (m.t === 'keys') { const before = S.taken.filter(t => t >= 0).length; S.taken = m.k; if (S.taken.filter(t => t >= 0).length !== before) applyKeys(m.by); }
-      else if (m.t === 'end') { S.catches = m.c ?? S.catches; end(m.w, m.by); }
-      else if (S.host && m.t === 'grab' && !isOut(m.p)) take(m.k, m.p);
-      else if (S.host && m.t === 'esc' && hasKey && !isOut(m.p)) end('animals', m.p);
+      else if (m.t === 'hs') { S.carry = m.carry; S.pts = m.pts; applyFlags(m.ev || {}); }
+      else if (m.t === 'rend') showRound(m);
+      else if (m.t === 'jk') joker.takenElsewhere(m.x, m.z);
+      else if (m.t === 'smash') joker.smashAt(m.x, m.z, false);
+      else if (m.t === 'freeze') { joker.freezeAll(); if (role(S.me) === 'wolf') { S.out.set(S.me, now() + 4000); toast('Brrr! You’re frozen for a moment'); } }
+      else if (S.host && m.t === 'grab') grab(m.k, m.p);
+      else if (S.host && m.t === 'cap') cap(m.p);
     },
     update(dt, time) {
       if (!S) return;
-      if (!S.endAt && intro.t < 0 && state === 'play') S.endAt = now() + HUNT.dur * 1000; // (every phone's countdown ends together)
-      if (S.endAt) ui.time.textContent = fmt(Math.max(0, Math.ceil((S.endAt - now()) / 1000)));
-      const live = this.live();
+      if (!S.endAt && intro.t < 0 && state === 'play') S.endAt = now() + HUNT.dur * 1000;
+      $('waitCard').classList.toggle('on', state === 'play' && intro.hold);
+      const left = S.endAt ? Math.max(0, Math.ceil((S.endAt - now()) / 1000)) : HUNT.dur;
+      const bar = `${S.o.round + 1}|${S.o.bestOf}|${S.pts}|${left}|${S.o.wins}`;
+      if (bar !== S.bar) {
+        S.bar = bar;
+        const wt = S.o.wolfTeam, mine = S.players[S.me];
+        $('hbW').textContent = S.pts[0]; $('hbA').textContent = S.pts[1]; $('hbTime').textContent = fmt(left);
+        $('hbTime').classList.toggle('hurry', left <= 15);
+        $('hbRound').textContent = S.o.bestOf > 1 ? `Round ${S.o.round + 1} of ${S.o.bestOf}` : 'Practice';
+        $('hbWolves').textContent = S.o.bestOf > 1 ? TEAM_NAMES[wt] : 'Wolves'; $('hbAnimals').textContent = S.o.bestOf > 1 ? TEAM_NAMES[1 - wt] : 'You';
+        $('hbPips').innerHTML = S.o.bestOf > 1 ? [0, 1].map(t => `<i style="--c:${TEAM_COLORS[t]}">${'●'.repeat(S.o.wins[t])}${'○'.repeat(2 - S.o.wins[t])}</i>`).join('') : '';
+        $('huntBar').classList.toggle('iwolf', mine.role === 'wolf');
+      }
+      const amWolf = role(S.me) === 'wolf', mePos = player.position;
       for (const a of S.actors.values()) {
         let hop = 0;
         if (a.t < 1) { a.t = Math.min(1, a.t + dt / a.stepTime); hop = Math.abs(Math.sin(a.U.uPhase.value)) * (a.role === 'wolf' ? 0.06 : 0.05); wolfMoving = true; }
         animateActor(a, dt, time, hop, a.t < 1, a.role === 'wolf');
+        if (amWolf && a.role !== 'wolf' && !isOut(a.pid)) a.root.visible = Math.hypot(a.root.position.x - mePos.x, a.root.position.z - mePos.z) < HUNT.fog + 0.4; // (wolves only see so far)
       }
-      S.keyMeshes.forEach((k, i) => { k.userData.spin.rotation.y = time * 1.6 + i; k.position.y = 0.55 + Math.sin(time * 2.2 + i) * 0.04; });
-      if (live && S.host) referee();
+      // flags: on their spot, or carried over the head of whoever has them
+      S.flagMeshes.forEach((f, k) => {
+        const c = S.carry[k], p = c >= 0 ? posOf(c) : null;
+        if (p) f.position.set(p.x, CFG.charH + 0.05, p.z); else f.position.set(S.flagAt[k][0] - origin, 0, S.flagAt[k][1] - origin);
+        f.visible = !(amWolf && Math.hypot(f.position.x - mePos.x, f.position.z - mePos.z) > HUNT.fog + 0.4);
+        f.userData.cloth.rotation.y = Math.sin(time * 4 + k) * 0.35;
+      });
+      if (amWolf) { // the fog follows you: a clear circle around you, dark beyond
+        _rp.copy(mePos).project(camera); const x = (_rp.x + 1) / 2 * innerWidth, y = (1 - _rp.y) / 2 * innerHeight;
+        _ga.copy(mePos); _ga.x += HUNT.fog; _ga.project(camera); const r = Math.max(40, Math.abs((_ga.x - _rp.x) / 2 * innerWidth));
+        if (Math.abs(r - (S.fogR || 0)) > 4) { S.fogR = r; $('fog').style.background = `radial-gradient(circle at 50% 50%, rgba(12,10,24,0) ${r * 0.62}px, rgba(12,10,24,.7) ${r}px, rgba(12,10,24,.97) ${r * 1.25}px)`; }
+        $('fog').style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+      }
+      if (this.live() && S.host) referee();
     },
   };
 })();
+// the end of a run or a match: a big card with the stickers bouncing, confetti for a win
+function gameOver({ win, title, sub, art = [], lines = [], again, againLabel = 'Again' }) {
+  $('goTitle').textContent = title; $('goSub').textContent = sub || '';
+  $('goArt').innerHTML = art.map((a, i) => `<img alt="" src="assets/story/${a}.webp" style="--i:${i};--n:${art.length}">`).join('');
+  $('goLines').innerHTML = lines.filter(Boolean).map(l => `<span class="chip">${l}</span>`).join('');
+  $('gameOver').classList.toggle('lose', !win);
+  $('goAgain').innerHTML = `<svg class="ico"><use href="#i-redo"/></svg>${againLabel}`;
+  $('goAgain').onclick = again;
+  if (win) confetti();
+  sfx.ui(win ? 'chime' : 'nope', 0.5);
+  show('gameOver');
+}
 // a race: on your own against computer Buddies, or online against a friend (same seed, same maze, opposite corners)
 async function startRace(online = null) {
   await myChar();
@@ -3408,10 +3622,10 @@ async function startRace(online = null) {
 }
 
 function win() {
-  if (mode === 'wolf') { won = true; enterT = 0; sfx.ui('whoosh', 0.45); heldDir = queued = null; confetti(); return setTimeout(() => wolfEnd(true), 900); }
+  if (mode === 'wolf') { won = true; enterT = 0; sfx.ui('whoosh', 0.45); heldDir = queued = heldCands = queuedCands = null; confetti(); return setTimeout(() => wolfEnd(true), 900); }
   won = true; enterT = 0;
   sfx.ui('whoosh', 0.45);
-  heldDir = queued = null;
+  heldDir = queued = heldCands = queuedCands = null;
   const p = portal.position.clone().setY(0.45);
   for (let i = 0; i < 18; i++) {
     const a = (i / 18) * Math.PI * 2;
@@ -3435,18 +3649,71 @@ function win() {
   setTimeout(async () => {
     if (friend) await tell(found);
     show('win');
-    starEls.forEach((e, i) => setTimeout(() => i < stars && e.classList.add('on'), 350 + i * 260));
+    starEls.forEach((e, i) => setTimeout(() => { if (i < stars) { e.classList.add('on'); sfx.ui('chime', 0.25 + i * 0.08); } }, 350 + i * 260));
+    // now and then a surprise: a bonus card (more likely for three stars)
+    if (Math.random() < (stars === 3 ? 0.55 : 0.3)) setTimeout(() => { const ks = Object.keys(JOKERS).filter(k => k !== 'freeze' || L >= 9); joker.give(ks[Math.floor(Math.random() * ks.length)]); toast('Lucky! A bonus card'); }, 1400);
+    $('winTease').innerHTML = rewards.tease(L);
   }, 700);
 }
 const fmt = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 const chip = (icon, text) => `<span class="chip"><svg class="ico"><use href="#${icon}"/></svg>${text}</span>`;
+// ---------- rewards: a gift every day (bigger the more days in a row), a chest every 10 stars, and a peek at what's next
+const rewards = (() => {
+  const get = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+  const put = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+  const today = () => new Date().toDateString();
+  const totalStars = () => Array.from({ length: TOTAL_LEVELS }, (_, k) => save.stars(k)).reduce((a, b) => a + b, 0);
+  let busy = false;
+  function open({ title, sub, cards }) { // the gift card: a present that wobbles, pops open when tapped, cards fly out
+    busy = true;
+    $('giftTitle').textContent = title; $('giftSub').textContent = sub;
+    $('giftBox').classList.remove('open'); $('giftOpen').style.display = ''; $('giftDone').style.display = 'none';
+    $('giftCards').innerHTML = '';
+    show('gift');
+    $('giftOpen').onclick = $('giftBox').onclick = () => {
+      if ($('giftBox').classList.contains('open')) return;
+      $('giftBox').classList.add('open'); $('giftOpen').style.display = 'none'; sfx.ui('whoosh', 0.5); confetti();
+      $('giftCards').innerHTML = cards.map((k, i) => `<span class="jcard big" style="--c:${JOKERS[k].color};animation-delay:${0.15 * i}s"><svg class="ico"><use href="#${JOKERS[k].icon}"/></svg><small>${JOKERS[k].name}</small></span>`).join('');
+      cards.forEach((k, i) => setTimeout(() => { joker.give(k); }, 500 + i * 250));
+      setTimeout(() => { $('giftDone').style.display = ''; }, 700 + cards.length * 250);
+    };
+    $('giftDone').onclick = () => { busy = false; show('title'); setTimeout(check, 400); };
+  }
+  const pick = n => Array.from({ length: n }, () => { const ks = Object.keys(JOKERS); return ks[Math.floor(Math.random() * ks.length)]; });
+  function check() { // on the title: today's gift first, then any star chest earned
+    if (busy || state !== 'title') return;
+    const last = get('buddy-gift-day', ''), streak0 = get('buddy-streak', 0);
+    if (last !== today()) {
+      const yesterday = new Date(Date.now() - 864e5).toDateString(), streak = last === yesterday ? streak0 + 1 : 1;
+      put('buddy-gift-day', today()); put('buddy-streak', streak);
+      return open({ title: streak > 1 ? `Day ${streak} in a row!` : 'A gift for today!', sub: streak >= 7 ? 'A whole week! Here\u2019s a big one' : `Come back tomorrow for day ${streak + 1}: an even bigger gift`, cards: pick(streak >= 7 ? 3 : streak >= 3 ? 2 : 1) });
+    }
+    const chests = get('buddy-chests', 0), stars = totalStars();
+    if (stars >= (chests + 1) * 10) { put('buddy-chests', chests + 1); return open({ title: 'Star chest!', sub: `${(chests + 1) * 10} stars collected`, cards: pick(2) }); }
+    chip();
+  }
+  function chip() { // the title's little progress chip toward the next chest
+    const chests = get('buddy-chests', 0), stars = totalStars(), next = (chests + 1) * 10;
+    $('chestChip').innerHTML = `<svg class="ico"><use href="#i-gift"/></svg><b>${stars}/${next}</b><i style="--p:${Math.min(1, (stars - chests * 10) / 10)}"></i>`;
+  }
+  // what's coming: the next friend to find, and how close the next chest is
+  function tease(L) {
+    const fi = Math.floor(L / LEVELS_PER_WORLD), lastOfWorld = (fi + 1) * LEVELS_PER_WORLD, f = FRIENDS[fi];
+    const chests = get('buddy-chests', 0), left = (chests + 1) * 10 - totalStars();
+    const a = f && !story.seen(`found-${f.id}`) && L + 1 < lastOfWorld ? `<span class="chip tease"><img alt="" src="${f.sticker}">${f.name} is waiting at level ${lastOfWorld}</span>` : '';
+    const b = left > 0 ? `<span class="chip tease"><svg class="ico"><use href="#i-gift"/></svg>${left} more star${left > 1 ? 's' : ''} to a chest</span>` : `<span class="chip tease"><svg class="ico"><use href="#i-gift"/></svg>A chest is ready on the title!</span>`;
+    return a + b;
+  }
+  return { check, chip, tease };
+})();
 // a little burst of paper confetti behind the win card
 function confetti() {
   const COL = ['#6cc15a', '#ffc64a', '#ff8c6b', '#6dbef0', '#f27ba6', '#9c84ee'];
-  $('confetti').innerHTML = Array.from({ length: 26 }, (_, i) => {
+  const html = Array.from({ length: 26 }, (_, i) => {
     const a = (i / 26) * Math.PI * 2 + Math.random() * 0.3, d = 140 + Math.random() * 120;
     return `<i style="--c:${COL[i % COL.length]};--x:${Math.cos(a) * d * 1.3}px;--y:${Math.sin(a) * d - 60}px;--r:${Math.random() * 720 - 360}deg;--w:${0.75 + Math.random() * 0.2}s"></i>`;
   }).join('');
+  document.querySelectorAll('.confetti').forEach(el => { el.innerHTML = html; });
 }
 
 // ---------- playing with a friend: a short code (or a link) connects two browsers directly (PeerJS) ----------
@@ -3526,16 +3793,16 @@ const net = (() => {
   // the lobby list: who's in, and (for the host) the Start button
   function lobby() {
     const size = host ? raceCfg.size : Math.max(players.length, 2), humans = players.filter(p => !p.bot).length;
-    $('friend').classList.toggle('teams', mode === 'teams' && game !== 'hunt');
+    $('friend').classList.toggle('teams', mode === 'teams' || game === 'hunt');
     $('friend').classList.toggle('hunt', game === 'hunt');
     document.querySelectorAll('#frRole button').forEach(b => b.classList.toggle('on', b.dataset.fr === 'role:' + ((players[me] && players[me].role) || myRole)));
     const others = players.filter((_, i) => i !== me);
     Promise.all(others.map(p => loadChar(game === 'hunt' && p.role === 'wolf' ? 'wolf' : p.char || 'buddy'))).then(chs => { if (state === 'friend') face.setCrew(chs.map((ch, k) => ({ ch, skin: others[k].skin }))); });
-    $('lobby').innerHTML = players.map((p, i) => `<span class="lp" data-pi="${i}"><i style="--c:${SKINS[p.skin]}"></i>${i === me ? 'You' : p.bot ? 'Computer' : i === 0 ? 'Host' : 'Friend'}${game === 'hunt' ? `<em style="--t:${p.role === 'wolf' ? '#6f7f95' : '#7cc26b'}">${p.role === 'wolf' ? 'Wolf' : 'Animal'}</em>` : mode === 'teams' ? `<em style="--t:${TEAM[p.team]}">${TEAM_NAME[p.team]}</em>` : ''}</span>`).join('')
+    $('lobby').innerHTML = players.map((p, i) => `<span class="lp" data-pi="${i}"><i style="--c:${SKINS[p.skin]}"></i>${i === me ? 'You' : p.bot ? 'Computer' : i === 0 ? 'Host' : 'Friend'}${game === 'hunt' ? `<em style="--t:${TEAM_COLORS[p.team]}">${TEAM_NAMES[p.team]}</em>` : mode === 'teams' ? `<em style="--t:${TEAM[p.team]}">${TEAM_NAME[p.team]}</em>` : ''}</span>`).join('')
       + Array.from({ length: Math.max(0, size - players.length) }, () => '<span class="lp empty"><i></i>…</span>').join('');
-    $('friendStart').disabled = !(host && (game === 'hunt' ? players.some(p => p.role !== 'wolf') : players.length > 1));
+    $('friendStart').disabled = !(host && (game === 'hunt' || players.length > 1));
     $('friendStart').style.display = host ? '' : 'none';
-    if (host && game === 'hunt') status(!players.some(p => p.role !== 'wolf') ? 'Someone has to be an animal!' : !players.some(p => p.role === 'wolf') ? 'Nobody is a wolf: computer wolves will hunt you. Press Start!' : 'Press Start when everyone has picked a side.');
+    if (host && game === 'hunt') status(humans < 2 ? 'Invite friends for team play, or press Start to practise against computer wolves.' : 'Two teams, swapping sides each round, best of three. Tap a player to change their team. Press Start!');
     else if (host) status(humans > 1 ? `${humans - 1} friend${humans > 2 ? 's' : ''} joined! Press Start when everyone is in.` : players.length > 1 ? 'Invite friends, or press Start to play with computer Buddies.' : 'Press Invite friends and send the link.');
     else status('Waiting for the host to start…');
   }
@@ -3551,7 +3818,7 @@ const net = (() => {
     lobby();
     live().forEach((c, i) => c.send({ t: 'lobby', players, you: i + 1, mode, game }));
   }
-  function toggleTeam(i) { if (!host || mode !== 'teams' || !players[i]) return; players[i].team ^= 1; lobby(); live().forEach((c, k) => c.send({ t: 'lobby', players, you: k + 1, mode })); }
+  function toggleTeam(i) { if (!host || (mode !== 'teams' && game !== 'hunt') || !players[i]) return; players[i].team ^= 1; lobby(); live().forEach((c, k) => c.send({ t: 'lobby', players, you: k + 1, mode })); }
   // the host measures each friend's round trip all along, so the start can make up for it
   let readyAt = new Set(), goTimer = 0;
   setInterval(() => { if (host) for (const c of live()) c.send({ t: 'ping', s: performance.now() }); }, 2000);
@@ -3577,14 +3844,18 @@ const net = (() => {
     live().forEach((c, i) => c.send({ ...setup, you: i + 1 }));
     begin({ ...setup, you: 0 });
   }
-  // Wolves vs Animals: the sides from the lobby, computer wolves if nobody picked the wolves, a big maze
-  function startHunt() {
+  // Wolves vs Animals: the lobby's two teams (alternating, the host can swap anyone), team 1 the wolves in round 1,
+  // swapping every round, best of three. Alone: one practice round as an animal against computer wolves.
+  // Computer wolves make the pack at least two.
+  function startHunt(round = 0, wins = [0, 0]) {
     syncLobby();
-    if (!players.some(p => p.role !== 'wolf')) return status('Someone has to be an animal!');
-    const all = players.some(p => p.role === 'wolf') ? players : [...players, ...Array.from({ length: players.length > 2 ? 2 : 1 }, () => ({ skin: 0, char: 'wolf', role: 'wolf', bot: true }))];
+    const humans = players.filter(p => !p.bot).map(p => ({ ...p })), solo = humans.length < 2;
+    if (solo) humans.forEach(p => { p.team = 1; });
+    const wolfTeam = solo ? 0 : round % 2, pack = humans.filter(p => p.team === wolfTeam).length;
+    const all = [...humans, ...Array.from({ length: Math.max(0, 2 - pack) }, () => ({ skin: 0, char: 'wolf', team: wolfTeam, bot: true }))];
     readyAt = new Set(); clearTimeout(goTimer); goTimer = setTimeout(go, 20000);
     const shape = raceCfg.shape === 'random' ? RACE_SHAPES[Math.floor(Math.random() * RACE_SHAPES.length)] : raceCfg.shape;
-    const setup = { t: 'setup', game: 'hunt', seed: (Math.random() * 1e9) | 0, biome: raceCfg.biome, shape, cells: HUNT_CELLS[raceCfg.map ?? 2], players: all };
+    const setup = { t: 'setup', game: 'hunt', seed: (Math.random() * 1e9) | 0, biome: raceCfg.biome, shape, cells: HUNT_CELLS[raceCfg.map ?? 2], players: all, round, wins, wolfTeam, bestOf: solo ? 1 : 3 };
     live().forEach((c, i) => c.send({ ...setup, you: i + 1 }));
     begin({ ...setup, you: 0 });
   }
@@ -3595,7 +3866,8 @@ const net = (() => {
       if (m.t === 'hello') { if (live().length > raceCfg.size - 1) { c.send({ t: 'full' }); return; } c.skin = m.skin; c.char = m.char; c.role = m.role; syncLobby(); for (let k = 1; k <= 5; k++) setTimeout(() => c.open && c.send({ t: 'ping', s: performance.now() }), k * 300); }
       else if (m.t === 'pos' || m.t === 'win') { toAll(m, c); remote(m); } // pass it on to the others too
       else if (m.t === 'role') { c.role = m.r === 'wolf' ? 'wolf' : 'animal'; syncLobby(); }
-      else if (m.t === 'grab' || m.t === 'esc') remote(m); // (Wolves vs Animals: the host decides)
+      else if (m.t === 'grab' || m.t === 'cap') remote(m); // (Wolves vs Animals: the host decides)
+      else if (m.t === 'jk' || m.t === 'smash' || m.t === 'freeze') { toAll(m, c); remote(m); } // (cards picked up and used, for everyone)
       else if (m.t === 'pong') {
         const r = performance.now() - m.s; c.rtt = c.rtt ? c.rtt * 0.7 + r * 0.3 : r;
         if (!(c.best <= r * 1.2)) { c.best = r; c.off = m.g - (m.s + r / 2); } // their clock minus mine
@@ -3722,6 +3994,7 @@ const net = (() => {
     setRole(r) { myRole = r; try { localStorage.setItem('buddy-role', r); } catch {} if (host) syncLobby(); else { send({ t: 'role', r }); if (players[me]) players[me].role = r; lobby(); } },
     get isHost() { return host; },
     again() { if (host) start(); else { send({ t: 'again' }); toast('Asked the host for a rematch'); } },
+    nextRound(r, wins) { if (host) startHunt(r, wins); },
     copy() { // the share sheet where there is one (phones, Macs), else copy the link
       // inside a game page (itch.io) the link can't carry the code: send the page and the code instead
       const framed = window.top !== window, page = framed ? (document.referrer || '') : '';
@@ -3922,10 +4195,10 @@ const coach = (() => {
 
 // ---------- menus ----------
 function show(name) {
-  if (name !== state) { if (['pause', 'settings', 'race', 'win', 'raceEnd'].includes(name)) sfx.ui('modal', 0.4); else if (name === 'worlds' || name === 'outfit') sfx.ui('whoosh', 0.3); }
+  if (name !== state) { if (['pause', 'settings', 'race', 'win', 'raceEnd', 'gameOver'].includes(name)) sfx.ui('modal', 0.4); else if (name === 'worlds' || name === 'outfit') sfx.ui('whoosh', 0.3); }
   state = name;
   document.body.dataset.state = name;
-  if (['play', 'worlds', 'pause', 'win', 'raceEnd'].includes(name)) face.sleep();
+  if (['play', 'worlds', 'pause', 'win', 'raceEnd', 'gameOver'].includes(name)) face.sleep();
   for (const el of document.querySelectorAll('.screen')) el.classList.toggle('show', el.id === name);
   if (name === 'worlds') renderMap();
   if (name === 'title') {
@@ -3937,6 +4210,8 @@ function show(name) {
     $('contArt').style.setProperty('--wc', wd.card);
     doorPreview(wd.biome).then(url => { $('contArt').innerHTML = `<img alt="" src="${url}">`; });
   }
+  if (name === 'title') { rewards.chip(); setTimeout(() => rewards.check(), 700); }
+  if (name === 'gift') $('title').classList.add('show'); // (the gift opens over the title)
   if (['title', 'outfit', 'race', 'friend'].includes(name)) $(name).querySelector('.faceSlot').appendChild($('faceCanvas'));
   if (name === 'title' || name === 'outfit') face.setCrew([]);
   if (name === 'race') raceCrew();
@@ -3944,13 +4219,15 @@ function show(name) {
   if ((name === 'settings' || name === 'help') && (name === 'settings' ? settingsBack : helpBack) === 'title') $('title').classList.add('show'); // these panels sit over the title
   if (name === 'race') renderRaceSetup();
   if (name === 'pause') $('pauseInfo').textContent = mode === 'wolf' ? `Wolf Chase · map ${wolfRun + 1} · ${wolves.length} wolves` : mode === 'hunt' ? 'Wolves vs Animals' : mode === 'race' ? (raceTeam ? `Team race · ${raceCfg.mates + 1} vs ${raceSize - raceCfg.mates - 1}` : `Race · ${raceSize} Buddies`) : `${WORLDS[Math.floor(L / LEVELS_PER_WORLD)].name} · level ${L + 1}`;
-  if (name !== 'play') heldDir = queued = null;
-  sfx.setScene(name === 'play' || name === 'pause' || name === 'win' || name === 'raceEnd');
+  if (name !== 'play') heldDir = queued = heldCands = queuedCands = null;
+  sfx.setScene(name === 'play' || name === 'pause' || name === 'win' || name === 'raceEnd' || name === 'gameOver');
+  document.body.dataset.mode = mode;
 }
 // (after playing a wolf online, you are yourself again)
 const myChar = async () => { if (player.userData.cid !== charId) setupPlayer(await loadChar(charId)); };
 async function play(level) {
   await myChar();
+  gamesPlayed++; try { localStorage.setItem('buddy-games', gamesPlayed); } catch {}
   const b = levelBiome(level);
   if (!stoneSets[b]) { $('busy').classList.add('on'); await stoneSet(b); $('busy').classList.remove('on'); } // first visit to a biome
   warp.t = -1; $('fader').style.opacity = 0;
@@ -4042,7 +4319,7 @@ $('map').addEventListener('click', e => {
 });
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-go]'); if (!b) return;
-  if (b.dataset.go === 'title' && mode === 'race') net.leave();
+  if (b.dataset.go === 'title' && (mode === 'race' || mode === 'hunt')) net.leave();
   show(b.dataset.go);
 });
 $('playBtn').addEventListener('click', () => show('worlds')); // adventure opens the map
@@ -4183,6 +4460,9 @@ $('pauseSoundBtn').addEventListener('click', () => openSettings('pause'));
 $('settingsDone').addEventListener('click', () => show(settingsBack));
 $('outfitBtn').addEventListener('click', () => show('outfit'));
 $('raceBtn').addEventListener('click', () => show('race'));
+$('jokerBar').addEventListener('click', e => { const b = e.target.closest('[data-j]'); if (b) joker.use(b.dataset.j); });
+addEventListener('keydown', e => { const k = { Digit1: 'light', Digit2: 'smash', Digit3: 'freeze', Digit4: 'dash', KeyQ: 'light', KeyE: 'smash' }[e.code]; if (k && state === 'play') joker.use(k); });
+joker.render();
 $('wolfBtn').addEventListener('click', () => startWolf(0));
 // race setup screen: steppers for Buddies and teammates, a choice of rival speed, and a preview of the teams
 function renderRaceSetup() {
@@ -4769,17 +5049,19 @@ const atmosphere = (() => {
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 function screenToGrid(sx, sy) {
   const base = player.position.clone().project(camera);
-  let best = null, bestDot = -2;
+  let best = null, bestDot = -2, second = null, secondDot = -2;
   const len = Math.hypot(sx, sy);
   for (const d of DIRS) {
     const p = player.position.clone().add(new THREE.Vector3(d[0], 0, d[1])).project(camera);
     let vx = (p.x - base.x) * innerWidth, vy = -(p.y - base.y) * innerHeight;
     const l = Math.hypot(vx, vy);
     const dot = (vx / l) * (sx / len) + (vy / l) * (sy / len);
-    if (dot > bestDot) { bestDot = dot; best = d; }
+    if (dot > bestDot) { second = best; secondDot = bestDot; bestDot = dot; best = d; } else if (dot > secondDot) { secondDot = dot; second = d; }
   }
+  swipeCands = secondDot > 0.45 ? [best, second] : [best]; // (a swipe between two ways: either will do)
   return best;
 }
+let swipeCands = null;
 const pointers = new Map();
 let anchor = null, pinch0 = 0, viewW0 = viewW;
 const cv = renderer.domElement;
@@ -4802,26 +5084,28 @@ cv.addEventListener('pointermove', e => {
   const dx = e.clientX - anchor.x, dy = e.clientY - anchor.y;
   if (Math.hypot(dx, dy) > 22) {
     const d = screenToGrid(dx, dy);
-    if (!heldDir || d[0] !== heldDir[0] || d[1] !== heldDir[1]) { heldDir = d; tryMove(d[0], d[1]); }
+    if (!heldDir || d[0] !== heldDir[0] || d[1] !== heldDir[1]) { heldDir = d; heldCands = swipeCands; if (st.moving) queuedCands = swipeCands; else { const c = pickDir(swipeCands); tryMove(c[0], c[1]); } }
     anchor = { x: e.clientX, y: e.clientY };
   }
 });
-const endPointer = e => { pointers.delete(e.pointerId); if (pointers.size === 0) { heldDir = null; anchor = null; } };
+const endPointer = e => { pointers.delete(e.pointerId); if (pointers.size === 0) { heldDir = heldCands = null; anchor = null; } };
 cv.addEventListener('pointerup', endPointer);
 cv.addEventListener('pointercancel', endPointer);
 cv.addEventListener('wheel', e => { viewW = THREE.MathUtils.clamp(viewW * Math.exp(e.deltaY * 0.001), 2.5, 30); }, { passive: true });
 
 // keys follow the screen: the camera looks down a diagonal, so each key takes the neighbouring tile that sits
 // in its direction on screen (up = the tile up-left, right = up-right, down = down-right, left = down-left)
-const KEYS = { ArrowUp: [-1, 0], KeyW: [-1, 0], ArrowRight: [0, -1], KeyD: [0, -1], ArrowDown: [1, 0], KeyS: [1, 0], ArrowLeft: [0, 1], KeyA: [0, 1] };
+const UPK = [[-1, 0], [0, -1]], RIGHTK = [[0, -1], [1, 0]], DOWNK = [[1, 0], [0, 1]], LEFTK = [[0, 1], [-1, 0]]; // (up-left / up-right ...)
+const KEYS = { ArrowUp: UPK, KeyW: UPK, ArrowRight: RIGHTK, KeyD: RIGHTK, ArrowDown: DOWNK, KeyS: DOWNK, ArrowLeft: LEFTK, KeyA: LEFTK };
 addEventListener('keydown', e => {
   if (e.code === 'Escape' && (state === 'play' || state === 'pause')) return show(state === 'play' ? 'pause' : 'play');
   const d = KEYS[e.code]; if (!d || state !== 'play') return;
   e.preventDefault();
   if (e.repeat) return;
-  heldDir = d; tryMove(d[0], d[1]);
+  heldCands = d; heldDir = d[0];
+  if (st.moving) queuedCands = d; else { const c = pickDir(d); tryMove(c[0], c[1]); }
 });
-addEventListener('keyup', e => { const d = KEYS[e.code]; if (d && heldDir === d) heldDir = null; });
+addEventListener('keyup', e => { const d = KEYS[e.code]; if (d && heldCands === d) heldDir = heldCands = null; });
 
 // camera distance button: close -> medium -> wide (wide is still much closer than the full zoom-out)
 const CAM_STEPS = [4.4, 6.2, 8.6]; // the view's height in tiles (the screen is wide)
@@ -4896,6 +5180,7 @@ function frame(now = performance.now()) {
   updatePlayer(dt, time);
   updateRivals(dt, time);
   updateWolves(dt, time);
+  joker.update(dt);
   if (mode === 'hunt') hunt.update(dt, time);
   updateWarp(dt);
   updatePillars(dt, time);

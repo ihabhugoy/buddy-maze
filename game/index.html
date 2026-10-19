@@ -601,47 +601,55 @@
   @keyframes gogrr { 0%, 100% { transform: rotate(0) scale(1); } 15% { transform: rotate(-8deg) scale(1.06); } 30% { transform: rotate(8deg) scale(1.06); } 45% { transform: rotate(0) scale(1); } }
 
 
-  /* ---------- home: a lobby in the spirit of Fortnite (top tabs, a mode card and a big slanted PLAY), in Buddy's colors ---------- */
-  #title .lshade { position: absolute !important; inset: auto 0 0 0; height: 42%; background: linear-gradient(180deg, rgba(60,40,15,0), rgba(60,40,15,.16)); pointer-events: none; z-index: 1; }
-  #title .lbar { position: absolute !important; z-index: 5; left: 18px; right: 18px; top: calc(14px + env(safe-area-inset-top)); display: flex; align-items: center; gap: 14px; }
-  .ltabs { display: flex; gap: 6px; margin: 0 auto; padding: 5px; border-radius: 22px; background: rgba(255,250,241,.82); box-shadow: inset 0 0 0 2px var(--edge), var(--shadow-s); }
-  .navtab { position: relative; padding: 10px 22px 11px; border-radius: 16px; font-family: var(--title); font-weight: 400; font-size: 20px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); transform: skewX(-8deg); transition: background .15s, color .15s, transform .2s var(--bounce); }
-  .navtab > span { display: flex; flex-direction: column; align-items: center; line-height: 1; transform: skewX(8deg); } .navtab small { font-family: Nunito, system-ui; font-size: 10px; letter-spacing: .02em; text-transform: none; margin-top: 2px; }
-  .navtab:hover { color: var(--ink); transform: skewX(-8deg) translateY(-2px); }
-  .navtab.on, .navtab.sel { background: linear-gradient(180deg, #ffd85c, #ffc23a); color: #6b4a12; box-shadow: inset 0 -4px 0 #e3a21f; }
-  .lright { display: flex; align-items: center; gap: 8px; } .lright .round { width: 46px; height: 46px; border-radius: 15px; color: var(--ink-soft); position: relative; }
-  .lright .chip { font-size: 15px; }
-  .lleft { position: absolute !important; z-index: 3; left: 26px; top: calc(96px + env(safe-area-inset-top)); width: min(330px, 30vw); display: flex; flex-direction: column; gap: 14px; }
+  /* ---------- home: a lobby laid out like Fortnite's (a top bar on every menu, quests, a mode card and a big Play), in
+     Buddy's own bubbly style ---------- */
+  #title .lshade { position: absolute !important; inset: auto 0 0 0; height: 40%; background: linear-gradient(180deg, rgba(60,40,15,0), rgba(60,40,15,.12)); pointer-events: none; z-index: 1; }
+  #topbar { position: fixed; z-index: 40; left: 18px; right: 18px; top: calc(14px + env(safe-area-inset-top)); display: none; align-items: center; gap: 14px; pointer-events: none; }
+  #topbar.on { display: flex; } #topbar > * { pointer-events: auto; }
+  .ltabs { display: flex; gap: 6px; margin: 0 auto; padding: 6px; border-radius: 24px; background: var(--card); box-shadow: inset 0 -4px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); }
+  .navtab { padding: 9px 22px 11px; border-radius: 18px; font-size: 17px; font-weight: 900; color: var(--ink-soft); transition: background .15s, color .15s, transform .25s var(--bounce); }
+  .navtab > span { display: flex; flex-direction: column; align-items: center; line-height: 1.05; } .navtab small { font-size: 10px; font-weight: 800; opacity: .8; }
+  .navtab:hover { color: var(--ink); transform: translateY(-2px); }
+  .navtab.on { background: var(--honey); color: var(--honey-ink); box-shadow: inset 0 -4px 0 var(--honey-lip); }
+  .lright { display: flex; align-items: center; gap: 8px; } .lright .round { width: 46px; height: 46px; border-radius: 16px; color: var(--ink-soft); position: relative; }
+  .lleft { position: absolute !important; z-index: 3; left: 26px; top: calc(96px + env(safe-area-inset-top)); width: min(320px, 30vw); display: flex; flex-direction: column; gap: 14px; }
   #title .lleft .logo { position: static !important; text-align: left; animation: rise .7s ease-out both; } #title .lleft .logo .word { font-size: clamp(56px, 6vw, 96px); } #title .lleft .logo .sub { margin-top: 8px; font-size: 12px; }
-  .quests { padding: 12px 14px 8px; border-radius: 22px; background: rgba(255,250,241,.9); box-shadow: inset 0 -5px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); transform: skewY(-2deg); animation: fadeup .5s .15s var(--spring) both; }
-  .quests > * { transform: skewY(2deg); } .qhead { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; } .qhead b { font-family: var(--title); font-weight: 400; font-size: 20px; letter-spacing: .03em; text-transform: uppercase; color: #e8823a; } .qhead small { font-size: 11px; color: var(--ink-soft); }
+  .quests { padding: 12px 14px 8px; border-radius: 24px; background: var(--card); box-shadow: inset 0 -5px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); animation: fadeup .5s .15s var(--spring) both; }
+  .qhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; } .qhead .ribbon { margin: 0; } .qhead small { font-size: 11px; color: var(--ink-soft); }
   .quest { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 4px 10px; padding: 7px 0; border-top: 2px dashed rgba(200,165,115,.25); } .quest:first-child { border-top: 0; }
-  .quest > i { grid-row: span 2; width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; background: var(--c); color: #fff; } .quest > i .ico { width: 19px; height: 19px; }
-  .quest span { font-size: 13px; font-weight: 900; } .quest .qbar { grid-column: 2; height: 8px; border-radius: 4px; background: rgba(160,120,70,.16); overflow: hidden; } .quest .qbar u { display: block; height: 100%; background: linear-gradient(90deg, #ffd85c, #ffb02e); border-radius: 4px; }
+  .quest > i { grid-row: span 2; width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center; background: var(--c); color: #fff; box-shadow: inset 0 -3px 0 rgba(0,0,0,.14); } .quest > i .ico { width: 19px; height: 19px; }
+  .quest span { font-size: 14px; font-weight: 900; } .quest .qbar { grid-column: 2; height: 8px; border-radius: 4px; background: rgba(160,120,70,.16); overflow: hidden; } .quest .qbar u { display: block; height: 100%; background: var(--honey); border-radius: 4px; }
   .quest em { grid-row: span 2; font-style: normal; font-size: 12px; font-weight: 900; color: var(--ink-soft); display: flex; align-items: center; gap: 3px; } .quest em .ico { width: 16px; height: 16px; color: #e8823a; }
-  .quest.done { opacity: .6; } .quest.done .qbar u { background: linear-gradient(90deg, #8fd16f, #5fb54f); } .quest.done em { color: #4f9a3e; }
-  .lplay { position: absolute !important; z-index: 4; right: 30px; bottom: calc(28px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); width: 330px; display: flex; flex-direction: column; gap: 10px; }
-  .modecard { display: flex; align-items: center; gap: 12px; padding: 10px 14px 12px 10px; border-radius: 22px; background: rgba(255,250,241,.95); box-shadow: inset 0 -5px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); text-align: left; transform: skewX(-6deg); transition: transform .2s var(--bounce); animation: fadeup .5s .1s var(--spring) both; }
-  .modecard > * { transform: skewX(6deg); } .modecard:hover { transform: skewX(-6deg) translateY(-3px); }
-  .modecard .art { width: 66px; height: 66px; border-radius: 18px; overflow: hidden; background: #f3e7d2; flex: none; display: grid; place-items: center; } .modecard .art img { width: 100%; height: 100%; object-fit: cover; } .modecard .art .ico { width: 34px; height: 34px; color: #fff; }
-  .modecard .mtext { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; } .modecard small { font-size: 11px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .06em; } .modecard b { font-family: var(--title); font-weight: 400; font-size: 26px; text-transform: uppercase; letter-spacing: .03em; } .modecard em { font-style: normal; font-size: 13px; color: var(--ink-soft); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .quest.done { opacity: .65; } .quest.done .qbar u { background: var(--leaf); } .quest.done em { color: #4f9a3e; }
+  .lplay { position: absolute !important; z-index: 4; right: 30px; bottom: calc(28px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); width: 320px; display: flex; flex-direction: column; gap: 12px; }
+  .modecard { display: flex; align-items: center; gap: 12px; padding: 10px 14px 13px 10px; border-radius: 24px; background: var(--card); box-shadow: inset 0 -5px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); text-align: left; transition: transform .25s var(--bounce); animation: fadeup .5s .1s var(--spring) both; }
+  .modecard:hover { transform: translateY(-3px); } .modecard:active { transform: scale(.98); }
+  .modecard .art { width: 64px; height: 64px; border-radius: 20px; overflow: hidden; background: var(--well); flex: none; display: grid; place-items: center; } .modecard .art img { width: 100%; height: 100%; object-fit: cover; } .modecard .art .ico { width: 32px; height: 32px; color: #fff; }
+  .modecard .mtext { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; } .modecard small { font-size: 11px; color: var(--ink-soft); font-weight: 800; }
+  .modecard b { font-family: var(--title); font-weight: 400; font-size: 24px; color: var(--ink); } .modecard em { font-style: normal; font-size: 13px; color: var(--ink-soft); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .modecard > .ico { margin-left: auto; width: 22px; height: 22px; color: var(--coral); animation: nudge .9s ease-in-out infinite; }
-  #title .playbig { width: 100%; min-width: 0; justify-content: center; padding: 14px 20px 20px; border-radius: 24px; transform: skewX(-6deg); }
-  #title .playbig b { font-size: 54px; transform: skewX(6deg); letter-spacing: .08em; } #title .playbig:hover { transform: skewX(-6deg) translateY(-3px) scale(1.02); } #title .playbig:active { transform: skewX(-6deg) translateY(3px) scale(.98); }
+  #title .playbig { width: 100%; font-size: 30px; padding: 16px 20px 21px; border-radius: 26px; animation: bob 2.6s ease-in-out infinite; } #title .playbig .ico { width: 30px; height: 30px; }
   .modepick { max-width: 560px; } .mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
-  .mopt { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 10px 14px; border-radius: 22px; background: #fffaf1; box-shadow: inset 0 -5px 0 var(--lip), inset 0 0 0 3px var(--c), var(--shadow-s); transition: transform .2s var(--bounce); } .mopt:hover { transform: translateY(-3px) rotate(-1deg); }
-  .mopt .mart { width: 74px; height: 74px; border-radius: 22px; overflow: hidden; display: grid; place-items: center; background: var(--c); color: #fff; box-shadow: 0 0 0 3px #fff; } .mopt .mart img { width: 100%; height: 100%; object-fit: cover; } .mopt .mart .ico { width: 38px; height: 38px; }
-  .mopt b { font-family: var(--title); font-weight: 400; font-size: 21px; text-transform: uppercase; } .mopt small { font-size: 12px; color: var(--ink-soft); } .mopt .new { position: absolute; right: 8px; top: -8px; padding: 3px 9px 4px; border-radius: 9px; background: #ff5a4e; color: #fff; font-style: normal; font-size: 11px; font-weight: 900; transform: rotate(6deg); }
+  .mopt { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 10px; border-radius: 24px; background: var(--card); box-shadow: inset 0 -5px 0 var(--lip), inset 0 0 0 3px var(--c), var(--shadow-s); transition: transform .25s var(--bounce); } .mopt:hover { transform: translateY(-3px); }
+  .mopt .mart { width: 74px; height: 74px; border-radius: 24px; overflow: hidden; display: grid; place-items: center; background: var(--c); color: #fff; box-shadow: 0 0 0 3px #fff; } .mopt .mart img { width: 100%; height: 100%; object-fit: cover; } .mopt .mart .ico { width: 38px; height: 38px; }
+  .mopt b { font-family: var(--title); font-weight: 400; font-size: 21px; color: var(--ink); } .mopt small { font-size: 12px; color: var(--ink-soft); font-weight: 800; } .mopt .new { position: absolute; right: 8px; top: -8px; padding: 3px 9px 4px; border-radius: 9px; background: #ff5a4e; color: #fff; font-style: normal; font-size: 11px; font-weight: 900; transform: rotate(6deg); }
+  /* the other menus sit under the top bar: their own back buttons and titles make way for it */
+  body.barred .pagehead, body.barred #worlds .maptop > .round { display: none !important; }
+  body.barred #worlds .maptop { top: calc(84px + env(safe-area-inset-top)); }
+  body.barred .page .card { top: calc(50% + 34px); max-height: calc(100vh - 150px); }
   @media (max-width: 760px) {
-    #title .lbar { left: 10px; right: 10px; flex-wrap: wrap; gap: 8px; }
-    #title .lbar .profile { padding: 4px 10px 4px 4px; } .profile .avatar { width: 40px; height: 40px; } .profile b { font-size: 14px; } .profile .xp { width: 64px; }
-    .lright { margin-left: auto; gap: 5px; } .lright .chip { font-size: 13px; padding: 4px 8px; } .lright .chestchip { display: none; } .lright #helpBtn, .lright #installBtn { display: none; } .lright .round { width: 40px; height: 40px; }
-    .ltabs { order: 3; width: 100%; margin: 0; justify-content: space-between; padding: 4px; } #title .navtab { flex: 1; padding: 8px 4px 9px !important; font-size: 15px !important; gap: 0 !important; background: none; box-shadow: none; flex-direction: row !important; color: var(--ink-soft) !important; } #title .navtab.on { background: linear-gradient(180deg, #ffd85c, #ffc23a); box-shadow: inset 0 -4px 0 #e3a21f; color: #6b4a12 !important; } #title .navtab small { display: none; }
+    #topbar { left: 10px; right: 10px; flex-wrap: wrap; gap: 8px; }
+    #topbar .profile { padding: 4px 10px 4px 4px; } .profile .avatar { width: 40px; height: 40px; } .profile b { font-size: 14px; } .profile .xp { width: 64px; }
+    .lright { margin-left: auto; gap: 5px; } .lright .chip { font-size: 13px; padding: 4px 8px; } .lright .chestchip, .lright #helpBtn, .lright #installBtn { display: none; } .lright .round { width: 40px; height: 40px; border-radius: 14px; }
+    .ltabs { order: 3; width: 100%; margin: 0; padding: 4px; } #topbar .navtab { flex: 1; padding: 8px 4px 9px; font-size: 14px; } #topbar .navtab small { display: none; }
     .lleft { left: 12px; right: 12px; width: auto; top: calc(124px + env(safe-area-inset-top)); } #title .lleft .logo { text-align: center; } #title .lleft .logo .word { font-size: 50px; } #title .lleft .logo .sub { font-size: 10px; }
-    .quests { position: fixed; left: 12px; right: 12px; bottom: calc(186px + env(safe-area-inset-bottom)); padding: 8px 12px 4px; } .quest { padding: 4px 0; } .quest:not(:first-child) { display: none; } .qhead { margin-bottom: 2px; } .qhead b { font-size: 15px; }
-    .lplay { left: 12px; right: 12px; width: auto; bottom: calc(14px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); gap: 8px; } .modecard { padding: 8px 12px 10px 8px; } .modecard .art { width: 52px; height: 52px; } .modecard b { font-size: 21px; }
-    #title .playbig { padding: 10px 20px 15px; } #title .playbig b { font-size: 42px; }
+    .quests { position: fixed; left: 12px; right: 12px; bottom: calc(176px + env(safe-area-inset-bottom)); padding: 8px 12px 4px; } .quest { padding: 4px 0; } .quest:not(:first-child) { display: none; } .qhead { margin-bottom: 2px; }
+    .lplay { left: 12px; right: 12px; width: auto; bottom: calc(14px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); gap: 8px; } .modecard { padding: 8px 12px 10px 8px; } .modecard .art { width: 52px; height: 52px; } .modecard b { font-size: 20px; }
+    #title .playbig { font-size: 26px; padding: 12px 20px 17px; }
     #title .faceSlot { top: calc(186px + env(safe-area-inset-top)) !important; bottom: calc(262px + env(safe-area-inset-bottom)) !important; left: 0 !important; right: 0 !important; height: auto; }
+    body.barred .page .card { top: auto; max-height: none; }
+    body.barred .page .faceSlot { top: calc(110px + env(safe-area-inset-top)) !important; }
+    body.barred #worlds .maptop { top: calc(118px + env(safe-area-inset-top)); }
   }
   /* (previous hub layout, unused now) */
   #title .hubtop { position: absolute !important; z-index: 4; left: 22px; right: 22px; top: calc(16px + env(safe-area-inset-top)); display: flex; align-items: center; gap: 12px; }
@@ -986,21 +994,14 @@
 <div class="countdown" id="countdown"></div>
 <div class="toast" id="toast"><span class="chip"></span></div>
 <div class="story" id="story"></div>
-<div class="coach" id="coach"><div class="talk"><div class="tpic" id="coachPic"></div><div class="tbub"><h4 id="coachTitle"></h4><p class="ttext" id="coachText"></p><div class="dots" id="coachDots"></div></div></div></div>
-
-<section class="screen warm" id="title">
-  <div class="motes"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-  <div class="faceSlot"><canvas id="faceCanvas"></canvas></div>
-  <div class="motes near"><i></i><i></i><i></i><i></i><i></i></div>
-  <div class="lshade"></div>
-  <header class="lbar">
+<header class="lbar" id="topbar">
     <button class="profile" id="profileBtn" aria-label="Your character">
       <span class="avatar"><img id="profilePic" alt=""></span>
       <span class="pinfo"><b id="profileName">Buddy</b><span class="xp"><i id="xpFill"></i></span><small id="xpText">Level 1</small></span>
     </button>
     <nav class="ltabs" id="sideMenu">
       <button class="navtab on" id="tabPlay"><span>Play</span></button>
-      <button class="navtab" id="outfitBtn"><span>Locker</span></button>
+      <button class="navtab" id="outfitBtn"><span>Outfit</span></button>
       <button class="navtab" id="playBtn"><span>Map<small id="playSub2">Level 1</small></span></button>
       <button class="navtab" id="friendMenuBtn"><span>Friends</span></button>
     </nav>
@@ -1013,16 +1014,24 @@
       <button class="round" id="settingsBtn" aria-label="Settings"><svg class="ico"><use href="#i-gear"/></svg></button>
     </div>
   </header>
+<div class="coach" id="coach"><div class="talk"><div class="tpic" id="coachPic"></div><div class="tbub"><h4 id="coachTitle"></h4><p class="ttext" id="coachText"></p><div class="dots" id="coachDots"></div></div></div></div>
+
+<section class="screen warm" id="title">
+  <div class="motes"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="faceSlot"><canvas id="faceCanvas"></canvas></div>
+  <div class="motes near"><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="lshade"></div>
+
   <div class="lleft">
     <div class="logo"><span class="word" id="logoA">Buddy</span><br><div class="sub">Remember the way</div></div>
     <div class="quests" id="quests">
-      <div class="qhead"><b>Daily quests</b><small id="questReset">New ones tomorrow</small></div>
+      <div class="qhead"><span class="ribbon">Daily quests</span><small id="questReset">New ones tomorrow</small></div>
       <div id="questList"></div>
     </div>
   </div>
   <div class="lplay">
-    <button class="modecard" id="modeCard"><span class="art" id="contArt"></span><span class="mtext"><small>Mode · tap to change</small><b id="modeName">Adventure</b><em><span id="advSub"><span id="playSub">Level 1</span> · <span id="worldNameCard">Mossy Woods</span></span><span id="modeSub"></span></em></span><svg class="ico"><use href="#i-next"/></svg></button>
-    <button class="playbig" id="contBtn"><b>PLAY</b></button>
+    <button class="modecard" id="modeCard"><span class="art" id="contArt"></span><span class="mtext"><small>Tap to change mode</small><b id="modeName">Adventure</b><em><span id="advSub"><span id="playSub">Level 1</span> · <span id="worldNameCard">Mossy Woods</span></span><span id="modeSub"></span></em></span><svg class="ico"><use href="#i-next"/></svg></button>
+    <button class="btn yellow playbig" id="contBtn"><svg class="ico"><use href="#i-play"/></svg>Play</button>
   </div>
   <div class="hidden-ev" hidden><button id="wolfBtn"></button><button id="raceBtn"></button><span id="wolfBestTxt"></span></div>
 </section>

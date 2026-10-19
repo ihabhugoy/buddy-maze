@@ -4088,7 +4088,7 @@ const net = (() => {
 })();
 const openFriend = () => { $('friend').classList.remove('guest', 'joining'); document.querySelectorAll('#frTabs span').forEach((t, i) => t.classList.toggle('on', i === 0)); $('friendTitle').textContent = 'Play with friends'; renderRaceSetup(); show('friend'); net.host(); };
 $('friendBtn').addEventListener('click', openFriend);
-$('friendMenuBtn').addEventListener('click', openFriend);
+$('friendMenuBtn').addEventListener('click', () => { if (state !== 'friend') openFriend(); });
 $('friend').addEventListener('click', e => {
   const tab = e.target.closest('[data-tab]');
   if (tab) { // Invite (host) or Join with code
@@ -4311,6 +4311,10 @@ function show(name) {
   if (name !== 'play') heldDir = queued = heldCands = queuedCands = null;
   sfx.setScene(name === 'play' || name === 'pause' || name === 'win' || name === 'raceEnd' || name === 'gameOver');
   document.body.dataset.mode = mode;
+  const barred = ['title', 'outfit', 'worlds', 'friend', 'race', 'modes', 'gift'].includes(name);
+  $('topbar').classList.toggle('on', barred); document.body.classList.toggle('barred', barred);
+  const tab = { title: 'tabPlay', modes: 'tabPlay', gift: 'tabPlay', race: 'tabPlay', outfit: 'outfitBtn', worlds: 'playBtn', friend: 'friendMenuBtn' }[name];
+  document.querySelectorAll('#topbar .navtab').forEach(t => t.classList.toggle('on', t.id === tab));
 }
 // (after playing a wolf online, you are yourself again)
 const myChar = async () => { if (player.userData.cid !== charId) setupPlayer(await loadChar(charId)); };
@@ -4411,7 +4415,7 @@ document.addEventListener('click', e => {
   if (b.dataset.go === 'title' && (mode === 'race' || mode === 'hunt')) net.leave();
   show(b.dataset.go);
 });
-$('playBtn').addEventListener('click', () => show('worlds')); // adventure opens the map
+$('playBtn').addEventListener('click', () => { fromLobby(); show('worlds'); }); // the adventure map
 $('contBtn').addEventListener('click', e => { e.stopPropagation(); lobbyMode.go(); });
 // the lobby's mode card: what PLAY starts (remembered); tap it to choose another
 const lobbyMode = (() => {
@@ -4436,7 +4440,9 @@ const lobbyMode = (() => {
   };
 })();
 $('modeCard').addEventListener('click', () => show('modes'));
-$('tabPlay').addEventListener('click', () => {});
+// the tabs: leaving the friends lobby by a tab leaves the lobby too
+const fromLobby = () => { if (state === 'friend') net.leave(); };
+$('tabPlay').addEventListener('click', () => { fromLobby(); show('title'); });
 $('modes').addEventListener('click', e => { const b = e.target.closest('[data-mode]'); if (b) lobbyMode.set(b.dataset.mode); else if (e.target.id === 'modes') show('title'); });
 // soft UI sounds: a little pop on every button, a breath of a hover on menu items
 document.addEventListener('click', e => {
@@ -4571,7 +4577,7 @@ addEventListener('keydown', e => {
 addEventListener('blur', () => { if (state === 'play' && !net.online) show('pause'); });
 $('pauseSoundBtn').addEventListener('click', () => openSettings('pause'));
 $('settingsDone').addEventListener('click', () => show(settingsBack));
-$('outfitBtn').addEventListener('click', () => show('outfit'));
+$('outfitBtn').addEventListener('click', () => { fromLobby(); show('outfit'); });
 $('profileBtn').addEventListener('click', () => show('outfit'));
 $('raceBtn').addEventListener('click', () => show('race'));
 $('jokerBar').addEventListener('click', e => { const b = e.target.closest('[data-j]'); if (b) joker.use(b.dataset.j); });

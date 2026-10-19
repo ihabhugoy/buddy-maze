@@ -4861,12 +4861,12 @@ const face = (() => {
       cam.aspect = w / h;
       // the whole character on its pedestal, a little from above
       // with friends behind, pull back so the whole group fits
-      // (on a phone's title the canvas is just the gap between the logo and the buttons: fill it)
+      // (on a phone's title the canvas is the gap between the logo and the panels: the whole character, standing in it)
       const tight = !crew.length && canvas.closest('#title') && innerWidth / innerHeight < 1.25;
-      const wide = crew.length ? [1, 1.45, 1.6, 2.1][crew.length] : 1, fit = tight ? Math.max(0.6 / 0.2126, 0.5 / (0.2126 * cam.aspect))
+      const wide = crew.length ? [1, 1.45, 1.6, 2.1][crew.length] : 1, fit = tight ? Math.max(1.02 / 0.2126, 0.56 / (0.2126 * cam.aspect))
         : Math.max(0.95 / 0.2126, 0.62 * wide / (0.2126 * cam.aspect)) * (crew.length ? 1.12 : 1);
-      cam.position.set(crew.length === 3 ? -0.25 : 0, tight ? 0.75 : 0.9 + (crew.length ? 0.25 : 0), fit);
-      cam.lookAt(crew.length === 3 ? -0.25 : 0, tight ? 0.5 : crew.length ? 0.5 : 0.62, crew.length ? -0.35 : 0); // a bit low in the frame, leaving the top for the logo
+      cam.position.set(crew.length === 3 ? -0.25 : 0, tight ? 0.86 : 0.9 + (crew.length ? 0.25 : 0), fit);
+      cam.lookAt(crew.length === 3 ? -0.25 : 0, tight ? 0.53 : crew.length ? 0.5 : 0.62, crew.length ? -0.35 : 0); // a bit low in the frame, leaving the top for the logo
       cam.updateProjectionMatrix();
     }
     let ty, tp, tr;

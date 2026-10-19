@@ -117,7 +117,14 @@
 
   /* menus: a warm studio backdrop (paper grain + soft light) with Buddy standing in the middle */
   .warm { background: radial-gradient(60% 55% at 50% 52%, rgba(255,250,241,.38), rgba(255,250,241,0) 70%), #f3e7d2 url(assets/menu_bg.webp) center 46% / cover no-repeat; overflow: hidden; }
-  .phone .warm { background-position: center, 50% 40%; } /* tall screens: the misty path between the ruins stays behind the character */
+  /* tall screens: the ruins picture is shown as a wide band (not blown up to the full height), placed so the character
+     stands on its misty ground like on a computer, fading into the cream above and below */
+  .phone .warm { background: radial-gradient(60% 40% at 50% 55%, rgba(255,250,241,.5), rgba(255,250,241,0) 70%), #f3e7d2; }
+  .phone .warm::after { content: ""; position: absolute; left: 0; right: 0; top: 29vh; height: 58vh; z-index: 0; pointer-events: none;
+    background: url(assets/menu_bg.webp) 50% 2vh / auto 50vh no-repeat;
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 9vh, #000 44vh, transparent 56vh); mask-image: linear-gradient(180deg, transparent 0, #000 9vh, #000 44vh, transparent 56vh); }
+  .phone .page.warm::after { top: 11vh; height: 50vh; background-position: 50% 5vh; background-size: auto 42vh;
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 9vh, #000 38vh, transparent 48vh); mask-image: linear-gradient(180deg, transparent 0, #000 9vh, #000 38vh, transparent 48vh); }
   .warm::before { content: ""; position: absolute; inset: 0; opacity: .5; pointer-events: none; z-index: 0;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .45 0 0 0 0 .32 0 0 0 0 .18 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
   .warm > * { position: relative; z-index: 1; }
@@ -651,12 +658,13 @@
     .lright { margin-left: auto; gap: 5px; } .lright .chip { font-size: 13px; padding: 4px 8px; } .lright .chestchip, .lright #helpBtn, .lright #installBtn { display: none; } .lright .round { width: 40px; height: 40px; border-radius: 14px; }
     .ltabs { order: 3; width: 100%; margin: 0; padding: 4px; } #topbar .navtab { flex: 1; padding: 8px 4px 9px; font-size: 14px; } #topbar .navtab small { display: none; }
     .lleft { left: 12px; right: 12px; width: auto; top: calc(124px + env(safe-area-inset-top)); } #title .lleft .logo { text-align: center; } #title .lleft .logo .word { font-size: 50px; } #title .lleft .logo .sub { font-size: 10px; }
-    .quests { position: fixed; left: 12px; right: 12px; bottom: calc(176px + env(safe-area-inset-bottom)); padding: 8px 12px 4px; } .quest { padding: 4px 0; } .quest:not(:first-child) { display: none; } .qhead { margin-bottom: 2px; }
+    .quests { position: fixed; left: 12px; right: 12px; bottom: calc(172px + env(safe-area-inset-bottom)); padding: 6px 12px 2px; border-radius: 20px; } .quest { padding: 3px 0; } .quest:not(:first-child), .qhead { display: none; }
     .lplay { left: 12px; right: 12px; width: auto; bottom: calc(14px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); gap: 8px; } .modecard { padding: 8px 12px 10px 8px; } .modecard .art { width: 52px; height: 52px; } .modecard b { font-size: 20px; }
     #title .playbig { font-size: 26px; padding: 12px 20px 17px; }
-    #title .faceSlot { top: calc(186px + env(safe-area-inset-top)) !important; bottom: calc(262px + env(safe-area-inset-bottom)) !important; left: 0 !important; right: 0 !important; height: auto; }
+    #title .faceSlot { top: calc(170px + env(safe-area-inset-top)) !important; bottom: calc(262px + env(safe-area-inset-bottom)) !important; left: 0 !important; right: 0 !important; height: auto; }
     body.barred .page .card { top: auto; max-height: none; }
-    body.barred .page .faceSlot { top: calc(110px + env(safe-area-inset-top)) !important; }
+    body.barred .page .faceSlot { top: calc(112px + env(safe-area-inset-top)) !important; height: calc(44vh - 112px) !important; }
+    body.barred .page { padding-top: calc(44vh + 8px); }
     body.barred #worlds .maptop { top: calc(118px + env(safe-area-inset-top)); }
   }
   /* (previous hub layout, unused now) */

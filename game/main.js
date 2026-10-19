@@ -869,7 +869,7 @@ const WORLD_SHAPES = {
 };
 const BASE_CELLS = [4, 5, 6, 7];
 // the level (from 0) where each card first turns up, one at a time (each with a little story moment)
-const JOKER_AT = { light: 5, smash: 7, freeze: 11, build: 13, dash: 16 };
+const JOKER_AT = { light: 5, smash: 7, freeze: 11, build: 14, dash: 16 };
 const jokersKnown = () => { const at = Math.max(L, nextLevel()); return Object.keys(JOKER_AT).filter(k => at >= JOKER_AT[k]); };
 const levelPlan = (() => {
   const cache = {};
@@ -899,8 +899,24 @@ const levelPlan = (() => {
     const caveWolves = gateway && L >= 17 ? Math.min(3, 1 + Math.floor((L - 17) / 20)) : 0;
     // a card on the floor: the level that introduces a card always has one of it; after that, now and then
     const newCard = Object.keys(JOKER_AT).find(k => JOKER_AT[k] === L) || null;
-    const cards = newCard ? 1 : L > JOKER_AT.light && rnd() < 0.3 ? 1 : 0;
-    return { cells, shape, gateway, reveal, detour, chapter: c, wolves, caveWolves, cards, newCard };
+    // the cards' puzzles, so each card has its job: a walled-in key (Hammer), a grumpy wolf's den by the way (Wall),
+    // a misty level where you can barely see (Lantern). Each is introduced on its card's level (the card put in your
+    // hand, the camera showing what to do), then comes back now and then with the card lying on your way
+    let puzzle = null;
+    if (!gateway) {
+      if (L === JOKER_AT.light) puzzle = 'misty';
+      else if (L === JOKER_AT.smash) puzzle = 'sealed';
+      else if (L === JOKER_AT.build) puzzle = 'den';
+      else if (L > JOKER_AT.build && p === 4 && rnd() < 0.5) puzzle = 'den';
+      else if (L > JOKER_AT.smash && p === 2 && rnd() < 0.5) puzzle = 'sealed';
+      else if (L > JOKER_AT.light && p === 1 && rnd() < 0.3) puzzle = 'misty';
+    }
+    const puzzleCard = { misty: 'light', sealed: 'smash', den: 'build' }[puzzle] || null;
+    const handCard = puzzleCard && JOKER_AT[puzzleCard] === L ? puzzleCard : null; // (its first time: in your hand)
+    const floorCard = handCard ? null : puzzleCard || newCard;
+    const cards = floorCard ? 1 : L > JOKER_AT.light && rnd() < 0.3 ? 1 : 0;
+    const reveal2 = puzzle === 'misty' ? 1.05 : reveal;
+    return { cells, shape, gateway, reveal: reveal2, detour, chapter: c, wolves, caveWolves, cards, newCard, puzzle, puzzleCard, handCard, floorCard };
   })();
 })();
 function genShapedMaze(cells, rnd, shape) {
@@ -1853,7 +1869,7 @@ function trimGPU() { // (every device: laptops held ~110 MB per world visited ot
 }
 function buildLevel(level, race = null, opts = {}) {
   L = level; mode = race ? race.kind || 'race' : 'levels'; pillarsDirty = true; shadowKick = 3;
-  clearWolves(); hunt.clear(); joker.clear(); tour.shots = null; if ($('tourCap')) $('tourCap').classList.remove('on');
+  clearWolves(); hunt.clear(); joker.clear(); puzzles.clear(); tour.shots = null; if ($('tourCap')) $('tourCap').classList.remove('on');
   stage = opts.stage || 'surface';
   const world = race ? (WORLDS.find(w => w.biome === race.biome) || { tint: [1, 1, 1], reveal: 2.1, icon: 'i-w-cave' }) : WORLDS[Math.floor(L / LEVELS_PER_WORLD)];
   const bName = race ? race.biome || 'woods' : stage === 'cave' ? 'cave' : world.biome;
@@ -1957,11 +1973,13 @@ function buildLevel(level, race = null, opts = {}) {
   for (let k = 0; race && !race.online && k < raceCfg.mates; k++) rivals[rivals.length - 1 - k].team = true; // your teammates (the far corners first)
   updateTargets(true);
   wolfOver = false;
-  if (!race && L >= 0) { const P = levelPlan(L); if (stage !== 'cave') joker.place(P.cards, Math.random, P.newCard); else joker.clear(); } // (cards to find)
+  maze.way = !race && L >= 0 ? wayThrough() : null; // (the way through, before any puzzle seals part of it)
+  if (!race && L >= 0 && stage !== 'cave') { puzzles.build(levelPlan(L)); updateTargets(true); }
+  if (!race && L >= 0) { const P = levelPlan(L); if (stage !== 'cave') joker.place(P.cards, Math.random, P.floorCard, P.puzzle ? maze.way : null); else joker.clear(); } // (cards to find)
   else if (race && race.kind === 'wolf') joker.place(1);
   if (!race && L >= 0) { // this level's patrolling wolves (fungus ones in the cave)
     const P = levelPlan(L), n = stage === 'cave' ? P.caveWolves : P.wolves, cave = stage === 'cave', at = L;
-    if (n) loadChar(cave ? 'wolf_fungi' : 'wolf').then(ch => {
+    if (n || (puzzles.den && !cave)) loadChar(cave ? 'wolf_fungi' : 'wolf').then(ch => {
       if (L !== at || mode !== 'levels' || stage !== (cave ? 'cave' : 'surface') || wolves.length) return;
       if (cave && !story.seen('fungus-wolf')) { intro.hold = true; setTimeout(() => Promise.resolve(tell('fungus-wolf')).then(() => { intro.hold = false; }), 600); }
       wolves = crossingRoutes(n).map(route => { // each starts at the far end of its patrol, and never chases
@@ -1970,6 +1988,12 @@ function buildLevel(level, race = null, opts = {}) {
         w.routeMesh = drawRoute(route, cave);
         return w;
       });
+      const D = !cave && puzzles.den;
+      if (D) { // the grumpy wolf of the den: out onto your way and back; it sees all round (close by)
+        const end = D.route[0], w = makeActor(ch, end, { scale: WOLF.size * 1.06 });
+        Object.assign(w, { wolf: true, angry: true, state: 'roam', chaseT: 0, rest: 0, home: distFrom([end]), wait: 1, route: D.route, ri: 0, rdir: 1 });
+        w.routeMesh = drawRoute(D.route, false); wolves.push(w);
+      }
       updateTargets(true);
       if (!seenWolves) { seenWolves = true; try { localStorage.setItem('buddy-seen-wolves', '1'); } catch {} setTimeout(() => toast('A wolf patrols across your way: wait beside its path, cross when it walks away. If it spots you, hide behind a wall!'), 2500); }
     });
@@ -1992,6 +2016,7 @@ function updateTargets(silent) {
     const dx = x - cx, dz = z - cz;
     const prev = targets[i];
     let t = 0;
+    if (puzzles.isCracked(i)) { if (!silent && targets[i] !== CFG.wallH) shake[i] = 1; targets[i] = CFG.wallH; continue; } // (a cracked stone always stands, with its sign)
     const mine = Math.hypot(dx, dz) <= CFG.revealR;
     if (mine) t = (dx + dz > 0) && !(maze.doors && maze.doors.some(d => d.x === x && d.z === z)) ? CFG.stubH : CFG.wallH; // camera sits on the +x+z side (doors always stand full height)
     else if (mode !== 'hunt') for (const w of wolves) { const ex = x - w.x, ez = z - w.z; if (Math.hypot(ex, ez) <= 1.5) { t = (ex + ez > 0) ? CFG.stubH : CFG.wallH; break; } } // (around a wolf too)
@@ -2590,7 +2615,7 @@ function tryMove(dx, dz) {
   const door = maze.doors && maze.doors.find(d => d.x === nx && d.z === nz);
   if (door) { startWarp(door); return false; }
   if (isWall(nx, nz)) {
-    if (st.bumpT < 0 || st.bumpT > 0.45) { st.bumpT = 0; st.bdx = dx; st.bdz = dz; }
+    if (st.bumpT < 0 || st.bumpT > 0.45) { st.bumpT = 0; st.bdx = dx; st.bdz = dz; if (mode === 'levels') puzzles.bumped(nx, nz); }
     return false;
   }
   st.fx = st.gx; st.fz = st.gz; st.tx = nx; st.tz = nz; st.t = 0; st.moving = true; lastDir = [dx, dz];
@@ -3051,6 +3076,7 @@ function pathTiles(a, b) {
   return out;
 }
 function wayThrough() {
+  if (maze.way) return maze.way;
   const D = maze.doors;
   if (stage === 'cave') return keyAt ? [...pathTiles(D[0].out, keyAt), ...pathTiles(keyAt, D[1].out)] : [];
   if (D && D.length) return [...pathTiles(start, D[0].out), ...pathTiles(D[1].out, goal)];
@@ -3130,7 +3156,7 @@ function wolfStep(w, d, prey) {
   // a wolf sees you only in front of it (a narrow look ahead along where it walks, up to 3 steps, nothing in between):
   // waiting beside its patrol line is safe; step out in front of it and it comes for you
   const fx = Math.cos(w.facing), fz = -Math.sin(w.facing);
-  const looks = ([x, z]) => { const dx = x - w.x, dz = z - w.z, l = Math.hypot(dx, dz); return l <= WOLF.see && (l < 0.5 || (dx * fx + dz * fz) / l > 0.7) && inSight(w.x, w.z, x, z); };
+  const looks = ([x, z]) => { const dx = x - w.x, dz = z - w.z, l = Math.hypot(dx, dz); return w.angry ? l <= 2.4 && inSight(w.x, w.z, x, z) : l <= WOLF.see && (l < 0.5 || (dx * fx + dz * fz) / l > 0.7) && inSight(w.x, w.z, x, z); }; // (the den's grumpy wolf sees all round, close by)
   const seen = dh >= 0 && dh <= WOLF.lose ? prey.find(p => w.state === 'chase' ? inSight(w.x, w.z, p[0], p[1]) : looks(p)) : null;
   if (w.state === 'roam' && seen && w.rest <= 0) { w.state = 'chase'; w.chaseT = 0; w.wait = 0.35; flashMark(w, '!'); sfx.ui('nope', 0.35); return null; } // (a moment's surprise)
   if (w.state === 'chase') {
@@ -3293,6 +3319,12 @@ const joker = (() => {
   const cardMat = new THREE.SpriteMaterial({ map: cardTex, transparent: true });
   const trailMat = new THREE.MeshBasicMaterial({ color: '#ffe58a', transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false });
   const trailGeo = new THREE.CircleGeometry(0.09, 14).rotateX(-Math.PI / 2);
+  const trailGlowMat = (() => { // (a warm glowing bead of light)
+    const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, 'rgba(255,255,230,1)'); g.addColorStop(0.25, 'rgba(255,220,110,.9)'); g.addColorStop(0.6, 'rgba(255,190,60,.3)'); g.addColorStop(1, 'rgba(255,190,60,0)');
+    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+    return new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, toneMapped: false });
+  })();
   // the cards fan out (glowing) for a few seconds when one arrives or you reach for them, then tuck away
   let peekT = 0, dockShown = null;
   function peek(toggle) { const d = $('jokerDock'); if (toggle && d.classList.contains('open')) { d.classList.remove('open'); peekT = 0; return; } d.classList.add('open'); peekT = 4.5; }
@@ -3327,10 +3359,14 @@ const joker = (() => {
     for (let k = 0; k < 200; k++) { const i = Math.floor(rnd() * N * N); if (!g[i] && !busy.has(i) && dStart[i] >= 3) return [i % N, (i / N) | 0]; }
     return null;
   }
-  function place(n, rnd = Math.random, kind = null) {
+  function place(n, rnd = Math.random, kind = null, way = null) {
     clear();
     if (!maze || !n) return;
-    for (let k = 0; k < n; k++) { const t = freeTile(rnd); if (t) { spawnAt(t[0], t[1]); if (kind) pickups[pickups.length - 1].kind = kind; } }
+    for (let k = 0; k < n; k++) {
+      // (a puzzle's card lies on your way, a little along it, so you have it before you need it)
+      const t = way && way.length > 6 && k === 0 ? way[Math.max(3, Math.floor(way.length * 0.22))] : freeTile(rnd);
+      if (t) { spawnAt(t[0], t[1]); if (kind) pickups[pickups.length - 1].kind = kind; }
+    }
   }
   function clear() { aiming = null; builds = []; pickups.forEach(p => scene.remove(p.s)); pickups = []; if (trail) { scene.remove(trail); trail = null; } frozenT = dashT = 0; }
   // which cards you can find: online, wolves and animals each have their own; on your own, the snowflake only with wolves about
@@ -3365,7 +3401,7 @@ const joker = (() => {
   function smashAt(x, z, shared) {
     const { N } = maze, i = z * N + x;
     if (x <= 0 || z <= 0 || x >= N - 1 || z >= N - 1 || !maze.g[i] || (maze.empty && maze.empty[i]) || (maze.doors && maze.doors.some(d => d.x === x && d.z === z))) return false;
-    maze.g[i] = 0; pillarsDirty = true; updateTargets(false); preyKey = '';
+    maze.g[i] = 0; pillarsDirty = true; updateTargets(false); preyKey = ''; puzzles.smashed(i);
     for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; spawnPuff(x - origin, 0.5, z - origin, Math.cos(a) * 1.5, rand(0.4, 1.2), Math.sin(a) * 1.5, rand(0.08, 0.13), STONE_DUST[k % STONE_DUST.length], 0.7); }
     sfx.play('bump', 0.7); sfx.play('rise', 0.4);
     if (shared && mode === 'hunt') net.send({ t: 'smash', x, z });
@@ -3378,11 +3414,18 @@ const joker = (() => {
     let ok = true;
     if (k === 'light') {
       const tgt = mode === 'hunt' ? hunt.nextTarget() : stage === 'cave' && maze.doors ? (keyAt && !hasKey ? keyAt : maze.doors[1].out) : keyAt && !hasKey ? keyAt : maze.doors && maze.doors.length && !hasKey ? maze.doors[0].out : goal;
-      const path = tgt ? pathTiles([st.gx, st.gz], tgt) : [];
+      let path = tgt ? pathTiles([st.gx, st.gz], tgt) : [];
+      if (tgt && path.length < 2 && maze.way) { // (walled in: the light follows the way, up to the cracked stone and beyond)
+        const w = maze.way, ti = w.findIndex(t => t[0] === tgt[0] && t[1] === tgt[1]);
+        let bi = 0, bd = 1e9; w.forEach((t, k) => { const d = Math.abs(t[0] - st.gx) + Math.abs(t[1] - st.gz); if (k <= ti && d < bd) { bd = d; bi = k; } });
+        if (ti >= 0) path = [...pathTiles([st.gx, st.gz], w[bi]), ...w.slice(bi + 1, ti + 1)];
+      }
       if (trail) scene.remove(trail);
-      trail = new THREE.InstancedMesh(trailGeo, trailMat, Math.max(1, path.length * 2)); const M = new THREE.Matrix4(); let n = 0;
-      path.forEach((t, j) => { M.makeTranslation(t[0] - origin, 0.11, t[1] - origin); trail.setMatrixAt(n++, M); const u = path[j + 1]; if (u) { M.makeTranslation((t[0] + u[0]) / 2 - origin, 0.11, (t[1] + u[1]) / 2 - origin); trail.setMatrixAt(n++, M); } });
-      trail.count = n; trail.renderOrder = 5; trail.frustumCulled = false; scene.add(trail); trailT = 7; trailMat.opacity = 0.9;
+      trail = new THREE.Group(); trail.userData.n = 0;
+      path.forEach((t, j) => { for (const f of [0, 0.5]) { const u = path[j + 1]; if (f && !u) continue;
+        const x = t[0] + (u ? (u[0] - t[0]) * f : 0), z = t[1] + (u ? (u[1] - t[1]) * f : 0);
+        const g = new THREE.Sprite(trailGlowMat); g.position.set(x - origin, 0.22, z - origin); g.scale.setScalar(0.42); g.userData.k = trail.userData.n++; trail.add(g); } });
+      trail.renderOrder = 5; scene.add(trail); trailT = 8;
     } else if (k === 'smash' || k === 'build') { // aim it: the next swipe or arrow key picks the tile (no steering help)
       if (aiming === k) { aiming = null; render(); return; } // (tapped again: put it away)
       aiming = k; aimT = 8; render();
@@ -3417,7 +3460,12 @@ const joker = (() => {
     frozen: () => frozenT > 0,
     freezeAll() { frozenT = 6; for (const w of wolves) { w.wait = Math.max(w.wait, 6); w.state = 'roam'; w.rest = 8; } },
     update(dt) {
-      if (trailT > 0) { trailT -= dt; trailMat.opacity = Math.min(0.9, trailT / 1.5); if (trailT <= 0 && trail) { scene.remove(trail); trail = null; } }
+      if (trailT > 0) {
+        trailT -= dt; const fade = Math.min(1, trailT / 1.5), now = performance.now() / 1000;
+        if (trail) for (const g of trail.children) { const k = g.userData.k, wave = Math.max(0, Math.cos((now * 9 - k * 0.55) % (Math.PI * 2))); g.scale.setScalar((0.32 + 0.26 * wave) * fade); g.position.y = 0.2 + 0.06 * wave; } // (a pulse of light running along it)
+        trailGlowMat.opacity = fade;
+        if (trailT <= 0 && trail) { scene.remove(trail); trail = null; }
+      }
       if (frozenT > 0) frozenT -= dt; if (dashT > 0) dashT -= dt;
       if (aiming && (aimT -= dt) <= 0) { aiming = null; render(); }
       for (const b of builds) if ((b.t -= dt) <= 0 && maze.g[b.i]) { maze.g[b.i] = 0; pillarsDirty = true; preyKey = ''; updateTargets(false); }
@@ -3428,6 +3476,81 @@ const joker = (() => {
       if (peekT > 0 && !aiming && (peekT -= dt) <= 0) $('jokerDock').classList.remove('open');
       if (aiming) peekT = Math.max(peekT, 1);
     },
+  };
+})();
+// ---------- card puzzles (see the level plan): what each card is for ----------
+const puzzles = (() => {
+  let cracked = new Set(), marks = [], den = null;
+  // a little hammer sign over a cracked stone
+  const signMat = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d');
+    x.fillStyle = '#ffffff'; x.beginPath(); x.arc(32, 32, 29, 0, Math.PI * 2); x.fill();
+    x.fillStyle = '#ff8c6b'; x.beginPath(); x.arc(32, 32, 24, 0, Math.PI * 2); x.fill();
+    x.translate(32, 32); x.rotate(-0.7); x.fillStyle = '#ffffff';
+    x.fillRect(-3, -6, 6, 22); x.beginPath(); x.roundRect ? x.roundRect(-12, -15, 24, 11, 4) : x.rect(-12, -15, 24, 11); x.fill();
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true });
+  })();
+  function clear() {
+    for (const m of marks) scene.remove(m);
+    marks = []; cracked = new Set(); den = null;
+  }
+  const open = (x, z) => x >= 0 && z >= 0 && x < maze.N && z < maze.N && !maze.g[z * maze.N + x];
+  const nbs = (x, z) => [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => [x + dx, z + dz]);
+  // the Hammer's puzzle: the key's nook is sealed by a cracked stone (only a dead-end key can be sealed safely)
+  function seal() {
+    if (!keyAt) return false;
+    const ways = nbs(keyAt[0], keyAt[1]).filter(([x, z]) => open(x, z));
+    if (ways.length !== 1) return false;
+    const [x, z] = ways[0], i = z * maze.N + x;
+    if ((start[0] === x && start[1] === z) || (goal[0] === x && goal[1] === z)) return false;
+    maze.g[i] = 1; cracked.add(i);
+    tint[i] = new THREE.Color(1.12, 0.74, 0.62); // (a warm, cracked-looking stone)
+    const s = new THREE.Sprite(signMat); s.scale.setScalar(0.42); s.renderOrder = 32; s.userData.i = i;
+    s.position.set(x - origin, 1.75, z - origin); scene.add(s); marks.push(s);
+    return true;
+  }
+  // the Wall's puzzle: a side tunnel off the way, 2-6 long, ending in a dead end: a grumpy wolf's den. It comes out
+  // onto the way and back; raise a Wall in the tunnel's mouth while it's inside to keep it there
+  function findDen() {
+    const way = maze.way || [], on = new Set(way.map(([x, z]) => z * maze.N + x));
+    for (let k = Math.floor(way.length * 0.3); k < Math.floor(way.length * 0.85); k++) {
+      const [jx, jz] = way[k];
+      for (const [sx, sz] of nbs(jx, jz)) {
+        if (!open(sx, sz) || on.has(sz * maze.N + sx)) continue;
+        const tunnel = [[sx, sz]]; let px = jx, pz = jz, cx = sx, cz = sz;
+        for (let n = 0; n < 7; n++) {
+          const next = nbs(cx, cz).filter(([x, z]) => open(x, z) && !(x === px && z === pz));
+          if (next.length !== 1 || on.has(next[0][1] * maze.N + next[0][0])) break;
+          px = cx; pz = cz; [cx, cz] = next[0]; tunnel.push([cx, cz]);
+        }
+        const end = nbs(cx, cz).filter(([x, z]) => open(x, z)).length === 1;
+        if (!end || tunnel.length < 2 || tunnel.length > 6) continue;
+        const beyond = way[k + 1] || way[k - 1];
+        return { route: [...tunnel.slice().reverse(), [jx, jz], beyond], mouth: tunnel[0], junction: [jx, jz] };
+      }
+    }
+    return null;
+  }
+  function build(P) {
+    clear();
+    if (P.puzzle === 'sealed') { if (!seal()) P = { ...P, puzzle: null }; }
+    if (P.puzzle === 'den') den = findDen();
+    if (P.handCard && !joker.bag.includes(P.handCard)) setTimeout(() => joker.give(P.handCard), 1200); // (its first time: in your hand)
+  }
+  return {
+    build, clear,
+    get den() { return den; },
+    isCracked: i => cracked.has(i),
+    firstCrack: () => { const i = [...cracked][0]; return i === undefined ? null : [i % maze.N, (i / maze.N) | 0]; },
+    // you bumped into a cracked stone: with no Hammer, one turns up (nobody gets stuck)
+    bumped(x, z) {
+      if (!cracked.has(z * maze.N + x)) return;
+      if (!joker.bag.includes('smash')) { joker.give('smash'); toast('A Hammer for the cracked stone! Tap it, then swipe at the stone'); }
+      else toast('Tap the Hammer, then swipe at the cracked stone');
+    },
+    smashed(i) { if (!cracked.delete(i)) return; marks = marks.filter(m => { if (m.userData.i === i) { scene.remove(m); return false; } return true; }); },
+    update(time) { for (const m of marks) { const i = m.userData.i; m.visible = heights[i] > 0.3; m.position.y = heights[i] + 0.65 + Math.sin(time * 3) * 0.06; } },
   };
 })();
 // ---------- Wolves vs Animals (online) ----------
@@ -5057,7 +5180,10 @@ function tourFor(L) {
     shots.push({ p: () => tile([maze.doors[0].x, maze.doors[0].z]), W: 3.6, text: 'This tree is a doorway! The maze is split in two halves.' });
     shots.push({ p: () => portal.position, W: 3.8, text: 'The portal is on the other half: go down the doorway, find the key in the cave, and come back up.' });
   }
-  if (P.newCard) shots.push({ p: () => { const c = joker.firstCard(); return c && tile(c); }, W: 3.4, text: `A ${JOKERS[P.newCard].name} card: it ${JOKERS[P.newCard].tip}. Walk over it to pick it up.` });
+  if (P.puzzle === 'misty') shots.push({ p: () => player.position, W: 3.2, text: P.handCard ? 'It\u2019s misty here: you can barely see. Tap your Lantern card to light the way to the key!' : 'Misty again! A Lantern card lies on your way.' });
+  if (P.puzzle === 'sealed' && puzzles.firstCrack()) shots.push({ p: () => key.position, W: 3.4, text: P.handCard ? 'The key is walled in by a cracked stone! Tap your Hammer card, then swipe at the stone to smash it.' : 'The key is walled in again: pick up the Hammer card on your way.' });
+  if (P.puzzle === 'den' && puzzles.den) shots.push({ p: () => tile(puzzles.den.mouth), W: 3.6, text: P.handCard ? 'A grumpy wolf lives in this tunnel and sees all around. When it goes back in, raise your Wall in the tunnel\u2019s mouth to trap it, then pass!' : 'A wolf den on your way: pick up the Wall card and trap it in its tunnel.' });
+  if (P.newCard && !P.handCard && !P.puzzle) shots.push({ p: () => { const c = joker.firstCard(); return c && tile(c); }, W: 3.4, text: `A ${JOKERS[P.newCard].name} card: it ${JOKERS[P.newCard].tip}. Walk over it to pick it up.` });
   if (L === 9) shots.push({ p: () => wolves[0] && wolves[0].root.position, W: 3.8, text: 'A wolf! It walks back and forth on the dotted line and only sees straight ahead. Wait beside the line, cross when it walks away.' });
   if (shots.length) shots.push({ p: () => player.position, W: viewW, text: 'Your turn!', hold: 1.2 });
   return shots.length ? shots : null;
@@ -5402,6 +5528,7 @@ function frame(now = performance.now()) {
   updatePlayer(dt, time);
   updateRivals(dt, time);
   updateWolves(dt, time);
+  puzzles.update(time);
   joker.update(dt);
   if (mode === 'hunt') hunt.update(dt, time);
   updateWarp(dt);
@@ -5546,4 +5673,4 @@ show('title');
 { const j = params.get('join'); if (j) { $('friend').classList.add('guest'); $('friendTitle').textContent = 'Joining your friend…'; show('friend'); net.join(j); } } // opened from an invite: straight in
 $('loading').style.opacity = 0; setTimeout(() => $('loading').remove(), 450);
 frame();
-window.__game = { stoneSet, get stoneSets() { return stoneSets; }, hunt, get raceCfg() { return raceCfg; }, startWolf, get wolves() { return wolves; }, get wolfOver() { return wolfOver; }, get state() { return state; }, get mode() { return mode; }, groundTexture, decorMat, get sceneryModels() { return sceneryModels; }, startRace, get rivals() { return rivals; }, intro, net, loadChar, st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };
+window.__game = { puzzles, joker, get keyAtNow() { return keyAt; }, stoneSet, get stoneSets() { return stoneSets; }, hunt, get raceCfg() { return raceCfg; }, startWolf, get wolves() { return wolves; }, get wolfOver() { return wolfOver; }, get state() { return state; }, get mode() { return mode; }, groundTexture, decorMat, get sceneryModels() { return sceneryModels; }, startRace, get rivals() { return rivals; }, intro, net, loadChar, st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };

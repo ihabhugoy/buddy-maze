@@ -30,6 +30,40 @@ export const SCENES = {
     ['buddy', 'Frog! You’re safe!'],
     ['frog', 'I saw Fennec running toward the Sunny Dunes. Let’s go find her!'],
   ],
+  // the new things, one at a time, as Buddy meets them
+  'first-door': [
+    ['buddy', 'A doorway in a tree…? The path must go under the ground!'],
+    [null, 'Some mazes are split in two. Step into the doorway to find the way across, down below.'],
+  ],
+  'card-light': [
+    [null, 'Something glows on the path: a little card! The forest spirits are helping Buddy.'],
+    ['buddy', 'A Lantern! When I’m lost, it lights a trail to where I need to go.'],
+    [null, 'Cards wait in the bar at the bottom. Tap one when you need it.'],
+  ],
+  'card-smash': [
+    ['buddy', 'A Hammer card! It can knock one stone out of my way.'],
+    [null, 'Tap the Hammer, then swipe (or press an arrow) toward the stone you want gone.'],
+  ],
+  'first-wolf': [
+    ['wolf', 'Grrr…'],
+    [null, 'One of the wolves from that night! It walks the same path back and forth, watching the way ahead.'],
+    ['buddy', 'It only sees in front of it. I’ll wait beside its path, cross when it walks away, and hide behind a wall if it spots me!'],
+  ],
+  'card-freeze': [
+    ['buddy', 'Brrr, this one’s cold! A Snowflake card.'],
+    [null, 'Tap it and every wolf freezes for a few seconds. Perfect for slipping past.'],
+  ],
+  'card-build': [
+    ['buddy', 'A Wall card! I can raise a stone to block a wolf.'],
+    [null, 'Tap it, then swipe toward the path to block. The stone sinks again after 10 seconds.'],
+  ],
+  'card-dash': [
+    ['buddy', 'Boots! With these I can run super fast for a moment.'],
+  ],
+  'fungus-wolf': [
+    [null, 'Down here in the dark, a wolf’s eyes glow blue… and mushrooms sprout from its head.'],
+    ['buddy', 'Those glowing mushrooms… they grow under the ground. Is that what made the wolves so wild?'],
+  ],
   'arrive-desert': [['frog', 'So much sand… my feet are toasty! Fennec must be close.']],
   'found-fennec': [
     ['fennec', 'Psst! Buddy! I knew these big ears would hear you coming.', 'clip-fennec-wave.mp4'],
@@ -50,9 +84,15 @@ export const SCENES = {
     ['cat', 'Hmm… but those glowing mushrooms came from deep under the ground. Something’s still down there.', 'portrait-cat-think.webp'],
     ['buddy', 'Then we’ll go and see. All five of us, together!'],
   ],
+  'the-end': [
+    [null, 'Buddy found every one of his friends. The village is safe, and the paths feel like home again.'],
+    ['wolf', 'Grr… *sniff*'],
+    ['buddy', 'Deep below, the mushrooms still glow. One day we’ll find out why. But not today!'],
+    [null, 'Thank you for playing! Every level can be played again for three stars, and Wolf Chase is waiting.'],
+  ],
 };
 // which scene a level starts with (first time only), and which one its win brings
-export const startScene = (L, perWorld) => L === 0 ? 'intro' : L % perWorld === 0 ? ['', 'arrive-desert', 'arrive-snow', 'arrive-autumn'][L / perWorld] || null : null;
+export const startScene = (L, perWorld) => L === 0 ? 'intro' : L === 3 ? 'first-door' : L === 9 ? 'first-wolf' : L % perWorld === 0 ? ['', 'arrive-desert', 'arrive-snow', 'arrive-autumn'][L / perWorld] || null : null;
 export const winScene = (L, perWorld) => (L + 1) % perWorld === 0 ? `found-${FRIENDS[(L + 1) / perWorld - 1]?.id}` : null;
 
 export function createStory({ layer, sfx, buddyPic }) {

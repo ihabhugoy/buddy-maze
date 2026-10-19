@@ -857,13 +857,19 @@ const WORLD_SHAPES = {
   autumn: ['mushroom', 'heart', 'snake', 'circles', 'leaf'],
 };
 const BASE_CELLS = [4, 5, 6, 7];
+// the level (from 0) where each card first turns up, one at a time (each with a little story moment)
+const JOKER_AT = { light: 5, smash: 7, freeze: 11, build: 13, dash: 16 };
+const jokersKnown = () => { const at = Math.max(L, nextLevel()); return Object.keys(JOKER_AT).filter(k => at >= JOKER_AT[k]); };
 const levelPlan = (() => {
   const cache = {};
   return L => cache[L] ||= (() => {
     const w = Math.floor(L / LEVELS_PER_WORLD), k = L % LEVELS_PER_WORLD, c = Math.floor(k / 5), p = k % 5;
     const world = WORLDS[w], shapes = WORLD_SHAPES[world.biome], rnd = mulberry32(L * 131 + 7);
-    let cells = BASE_CELLS[w] + c + (p === 4 ? 1 : 0) - (p === 0 && c > 0 ? 1 : 0);
-    if (w === 0 && c === 0) cells = [3, 4, 4, 5, 5][p]; // the very first levels are tiny
+    // one climb from the first level to the last (not a restart in each world): mazes grow, you see less around you,
+    // keys hide further off the way; a gentle level opens each set of five, a bigger one closes it
+    const g = Math.min(1, L / (TOTAL_LEVELS - 1));
+    let cells = Math.min(14, 4 + Math.floor(L / 5)) + (p === 4 ? 1 : 0) - (p === 0 && L > 4 ? 1 : 0);
+    if (L < 3) cells = [3, 4, 4][L];                     // the very first levels are tiny
     if (k === LEVELS_PER_WORLD - 1) cells += 1;          // the world's finale
     let shape = null, gateway = false;
     if (p === 3) gateway = true; // (from level 4 on; door levels are shaped too: two shaped halves)
@@ -873,13 +879,17 @@ const levelPlan = (() => {
     if (p === 2 || p === 4) shape = shapes[c];
     else if (met.length && !(gateway && w === 0 && c === 0)) shape = met[Math.floor(rnd() * met.length)]; // (the first door level is plain, to learn the doors)
     if (shape && cells < 5) cells = 5;                    // shapes need room to read
-    const reveal = Math.max(1.4, world.reveal - 0.08 * c - (p === 4 ? 0.12 : 0) + (p === 0 ? 0.15 : 0));
-    const detour = p === 0 ? 0.15 : Math.min(0.85, 0.2 + 0.1 * c + 0.06 * w + (p === 4 ? 0.1 : 0));
+    const reveal = Math.max(1.45, 2.6 - 1.05 * g - (p === 4 ? 0.1 : 0) + (p === 0 ? 0.15 : 0));
+    const detour = p === 0 ? 0.15 : Math.min(0.85, 0.2 + 0.6 * g + (p === 4 ? 0.1 : 0));
     // wolves on patrol: on each chapter's big last level from the 2nd chapter, and now and then later in the game;
     // the caves under the door levels have a fungus wolf from the 3rd chapter on
-    const wolves = gateway ? 0 : p === 4 && (c > 0 || w > 0) ? Math.min(4, 1 + w + Math.floor(c / 2)) : p === 1 && w > 0 ? 1 : 0;
-    const caveWolves = gateway && (c >= 2 || w > 0) ? Math.min(3, 1 + Math.floor(w / 2)) : 0;
-    return { cells, shape, gateway, reveal, detour, chapter: c, wolves, caveWolves };
+    // wolves arrive at level 10 (one, on the big level of each set of five), then more and more often
+    const wolves = gateway || L < 9 ? 0 : L === 9 ? 1 : p === 4 ? Math.min(4, 1 + Math.floor((L - 9) / 15)) : (p === 1 || p === 2) && L >= 20 ? Math.min(3, 1 + Math.floor((L - 20) / 20)) : 0;
+    const caveWolves = gateway && L >= 17 ? Math.min(3, 1 + Math.floor((L - 17) / 20)) : 0;
+    // a card on the floor: the level that introduces a card always has one of it; after that, now and then
+    const newCard = Object.keys(JOKER_AT).find(k => JOKER_AT[k] === L) || null;
+    const cards = newCard ? 1 : L > JOKER_AT.light && rnd() < 0.3 ? 1 : 0;
+    return { cells, shape, gateway, reveal, detour, chapter: c, wolves, caveWolves, cards, newCard };
   })();
 })();
 function genShapedMaze(cells, rnd, shape) {
@@ -1010,19 +1020,30 @@ let heldDir = null, queued = null, heldCands = null, queuedCands = null;
 // games (at first only for walls you can already see), so it feels like you got better, not like you're helped.
 let gamesPlayed = 0; try { gamesPlayed = +localStorage.getItem('buddy-games') || 0; } catch {}
 let lastDir = null;
-function pickDir(cands) {
-  if (!cands || !cands.length) return null;
-  const [a, b] = cands; if (!b) return a;
-  const door = d => maze.doors && maze.doors.some(o => o.x === st.gx + d[0] && o.z === st.gz + d[1]);
-  const open = d => door(d) || !isWall(st.gx + d[0], st.gz + d[1]);
-  const seen = d => { const x = st.gx + d[0], z = st.gz + d[1]; return x < 0 || z < 0 || x >= maze.N || z >= maze.N || targets[z * maze.N + x] > 0; };
-  if (open(a)) return a;
-  // only at a corner (the path bends here: two ways out, at a right angle) does it take the other way for you;
-  // in hallways and at crossroads it goes where you pointed
-  const outs = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(open), corner = outs.length === 2 && outs[0][0] !== -outs[1][0];
-  if (corner && open(b) && (gamesPlayed >= 1 || seen(a) || joker.dashing)) return b;
-  return a;
+// Steering, the way it feels right: a new key press or swipe that points into a side path takes that turn (pressed a
+// little early, the turn is remembered for a few tiles and taken where it opens); pressing back turns right round;
+// holding the key keeps you going straight and never turns for you, so you stop exactly where you let go.
+let wish = null;
+const sameDir = (a, b) => !!a && !!b && a[0] === b[0] && a[1] === b[1];
+const backOf = d => d && [-d[0], -d[1]];
+function openDir(d) {
+  const x = st.gx + d[0], z = st.gz + d[1];
+  return (maze.doors && maze.doors.some(o => o.x === x && o.z === z)) || !isWall(x, z);
 }
+function steer(cands, fresh) {
+  if (!cands || !cands.length) return null;
+  if (fresh) {
+    if (lastDir && cands.some(d => sameDir(d, backOf(lastDir))) && openDir(backOf(lastDir))) { wish = null; return backOf(lastDir); }
+    const turn = cands.find(d => !sameDir(d, lastDir) && !sameDir(d, backOf(lastDir)));
+    if (turn && openDir(turn)) { wish = null; return turn; }
+    if (turn && lastDir && cands.some(d => sameDir(d, lastDir))) wish = { d: turn, n: 3 }; // (not there yet: remembered)
+    return cands.find(openDir) || cands[0]; // (nothing open: you bump, as you asked)
+  }
+  if (wish) { if (openDir(wish.d)) { const d = wish.d; wish = null; return d; } if (--wish.n <= 0) wish = null; }
+  if (lastDir && cands.some(d => sameDir(d, lastDir)) && openDir(lastDir)) return lastDir;
+  return null;
+}
+const pickDir = cands => steer(cands, true); // (a fresh press)
 
 // a model's texture goes to a canvas (shrunk to keep phone memory in check) so its colors can be adjusted
 function canvasTexture(tex, size) {
@@ -1920,11 +1941,13 @@ function buildLevel(level, race = null, opts = {}) {
   for (let k = 0; race && !race.online && k < raceCfg.mates; k++) rivals[rivals.length - 1 - k].team = true; // your teammates (the far corners first)
   updateTargets(true);
   wolfOver = false;
-  if (!race || race.kind === 'wolf') joker.place(Math.min(3, Math.max(1, Math.round(maze.N / 9)))); // (cards to find)
+  if (!race && L >= 0) { const P = levelPlan(L); if (stage !== 'cave') joker.place(P.cards, Math.random, P.newCard); else joker.clear(); } // (cards to find)
+  else if (race && race.kind === 'wolf') joker.place(1);
   if (!race && L >= 0) { // this level's patrolling wolves (fungus ones in the cave)
     const P = levelPlan(L), n = stage === 'cave' ? P.caveWolves : P.wolves, cave = stage === 'cave', at = L;
     if (n) loadChar(cave ? 'wolf_fungi' : 'wolf').then(ch => {
       if (L !== at || mode !== 'levels' || stage !== (cave ? 'cave' : 'surface') || wolves.length) return;
+      if (cave && !story.seen('fungus-wolf')) { intro.hold = true; setTimeout(() => Promise.resolve(tell('fungus-wolf')).then(() => { intro.hold = false; }), 600); }
       wolves = crossingRoutes(n).map(route => { // each starts at the far end of its patrol, and never chases
         const end = route[route.length - 1], w = makeActor(ch, end, { glow: cave, scale: WOLF.size });
         Object.assign(w, { wolf: true, state: 'roam', chaseT: 0, rest: 0, home: distFrom([end]), wait: 0.5 + Math.random(), route, ri: route.length - 1, rdir: -1 });
@@ -1955,7 +1978,7 @@ function updateTargets(silent) {
     let t = 0;
     const mine = Math.hypot(dx, dz) <= CFG.revealR;
     if (mine) t = (dx + dz > 0) ? CFG.stubH : CFG.wallH; // camera sits on the +x+z side
-    else for (const w of wolves) { const ex = x - w.x, ez = z - w.z; if (Math.hypot(ex, ez) <= 1.5) { t = (ex + ez > 0) ? CFG.stubH : CFG.wallH; break; } } // (around a wolf too)
+    else if (mode !== 'hunt') for (const w of wolves) { const ex = x - w.x, ez = z - w.z; if (Math.hypot(ex, ez) <= 1.5) { t = (ex + ez > 0) ? CFG.stubH : CFG.wallH; break; } } // (around a wolf too)
     targets[i] = t;
     if (!mine) continue; // (a wolf's stones glide up and down without a shake, dust or sound)
     if (!silent && prev !== t) shake[i] = 1;
@@ -2652,7 +2675,11 @@ function updatePlayer(dt, time) {
         if (hasKey) return win();
         toast('The portal is asleep. Find the key!'); sfx.ui('nope', 0.3);
       }
-      const next = queued || (queuedCands && pickDir(queuedCands)) || (heldCands ? pickDir(heldCands) : heldDir); queued = queuedCands = null;
+      let next = queued || (queuedCands && steer(queuedCands, true));
+      if (!next && wish && openDir(wish.d)) { next = wish.d; wish = null; } // (the turn you asked for a moment ago)
+      if (!next && heldCands) next = steer(heldCands, false);
+      if (!next) wish = null;
+      queued = queuedCands = null;
       if (next) tryMove(next[0], next[1]);
     }
   } else {
@@ -3151,7 +3178,7 @@ function updateWolves(dt, time) {
     animateActor(w, dt, time, hop, live && w.t < 1, w.state === 'chase');
     if (live && (mode === 'wolf' || mode === 'levels') && Math.hypot(w.root.position.x - player.position.x, w.root.position.z - player.position.z) < WOLF.catchR) wolfCaught(w);
   }
-  if (stepped && mode !== 'race') updateTargets(false); // (the stones follow the wolves too)
+  if (stepped && mode !== 'race' && mode !== 'hunt') updateTargets(false); // (the stones follow the wolves too; not online)
 }
 // moves an actor between its tiles and drives its walk (a run while chasing: leaning in, bigger hops)
 function animateActor(a, dt, time, hop, walking, running) {
@@ -3235,7 +3262,7 @@ const JOKERS = {
 };
 const joker = (() => {
   let bag = [];
-  try { bag = JSON.parse(localStorage.getItem('buddy-jokers') || 'null') || ['light', 'smash']; } catch { bag = ['light', 'smash']; }
+  try { bag = JSON.parse(localStorage.getItem('buddy-jokers') || 'null') || []; } catch { bag = []; }
   const save = () => { try { localStorage.setItem('buddy-jokers', JSON.stringify(bag)); } catch {} };
   let pickups = [], trail = null, trailT = 0, frozenT = 0, dashT = 0, aiming = null, aimT = 0;
   // the card lying on the floor: a little golden card with a star, turning and glowing
@@ -3249,14 +3276,18 @@ const joker = (() => {
   const cardMat = new THREE.SpriteMaterial({ map: cardTex, transparent: true });
   const trailMat = new THREE.MeshBasicMaterial({ color: '#ffe58a', transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false });
   const trailGeo = new THREE.CircleGeometry(0.09, 14).rotateX(-Math.PI / 2);
+  // the cards fan out (glowing) for a few seconds when one arrives or you reach for them, then tuck away
+  let peekT = 0;
+  function peek(toggle) { const d = $('jokerDock'); if (toggle && d.classList.contains('open')) { d.classList.remove('open'); peekT = 0; return; } d.classList.add('open'); peekT = 4.5; }
   function render() {
     const el = $('jokerBar'), counts = {};
     for (const k of bag) counts[k] = (counts[k] || 0) + 1;
-    el.innerHTML = Object.keys(JOKERS).filter(k => counts[k]).map(k => `<button class="jcard ${aiming === k ? 'armed' : ''}" data-j="${k}" style="--c:${JOKERS[k].color}" aria-label="${JOKERS[k].name}"><svg class="ico"><use href="#${JOKERS[k].icon}"/></svg>${counts[k] > 1 ? `<b>${counts[k]}</b>` : ''}</button>`).join('');
+    el.innerHTML = Object.keys(JOKERS).filter(k => counts[k]).map(k => `<button class="jcard ${aiming === k ? 'armed' : ''}" data-j="${k}" style="--c:${JOKERS[k].color}" aria-label="${JOKERS[k].name}"><svg class="ico"><use href="#${JOKERS[k].icon}"/></svg>${counts[k] > 1 ? `<b>${counts[k]}</b>` : ''}<kbd>${JOKER_KEYS[k]}</kbd></button>`).join('');
+    $('jokerCount').textContent = bag.length; $('jokerDock').classList.toggle('empty', !bag.length);
   }
   function give(k, from) { // a new card flies into the bar
     if (bag.length >= 9) return;
-    bag.push(k); save(); render();
+    bag.push(k); save(); render(); peek();
     const card = document.createElement('div'); card.className = 'jfly'; card.style.setProperty('--c', JOKERS[k].color);
     card.innerHTML = `<svg class="ico"><use href="#${JOKERS[k].icon}"/></svg><span>${JOKERS[k].name}!</span>`;
     const b = $('jokerBar').getBoundingClientRect(), x0 = from ? from.x : innerWidth / 2, y0 = from ? from.y : innerHeight / 2;
@@ -3278,15 +3309,15 @@ const joker = (() => {
     for (let k = 0; k < 200; k++) { const i = Math.floor(rnd() * N * N); if (!g[i] && !busy.has(i) && dStart[i] >= 3) return [i % N, (i / N) | 0]; }
     return null;
   }
-  function place(n, rnd = Math.random) {
+  function place(n, rnd = Math.random, kind = null) {
     clear();
     if (!maze || !n) return;
-    for (let k = 0; k < n; k++) { const t = freeTile(rnd); if (t) spawnAt(t[0], t[1]); }
+    for (let k = 0; k < n; k++) { const t = freeTile(rnd); if (t) { spawnAt(t[0], t[1]); if (kind) pickups[pickups.length - 1].kind = kind; } }
   }
   function clear() { aiming = null; builds = []; pickups.forEach(p => scene.remove(p.s)); pickups = []; if (trail) { scene.remove(trail); trail = null; } frozenT = dashT = 0; }
   // which cards you can find: online, wolves and animals each have their own; on your own, the snowflake only with wolves about
   const kindsFor = () => mode === 'hunt' ? (hunt.amWolf() ? ['build', 'dash', 'freeze', 'smash'] : ['smash', 'build', 'dash', 'light', 'freeze'])
-    : wolves.length ? ['light', 'smash', 'build', 'freeze', 'dash'] : ['light', 'smash', 'build', 'dash', 'light'];
+    : mode === 'wolf' ? ['light', 'smash', 'build', 'freeze', 'dash'] : (k => k.length ? k : ['light'])(jokersKnown().filter(k => k !== 'freeze' || wolves.length));
   const randomKind = () => { const ks = kindsFor(); return ks[Math.floor(Math.random() * ks.length)]; };
   // a stone rises in front of you for 10 seconds (online, for everyone), then sinks again
   let builds = [];
@@ -3305,7 +3336,9 @@ const joker = (() => {
     const k = pickups.findIndex(p => p.x === x && p.z === z); if (k < 0) return;
     const p = pickups[k]; scene.remove(p.s); pickups.splice(k, 1);
     const v = p.s.position.clone().project(camera);
-    give(randomKind(), { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight }); quests.add('card');
+    const kind = p.kind || randomKind();
+    give(kind, { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight }); quests.add('card');
+    if (mode === 'levels' && !story.seen('card-' + kind)) { intro.hold = true; setTimeout(() => Promise.resolve(tell('card-' + kind)).then(() => { intro.hold = false; }), 900); } // (the first of its kind: what it does)
     for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2; spawnPuff(x - origin, 0.5, z - origin, Math.cos(a) * 1.1, rand(0.3, 0.9), Math.sin(a) * 1.1, rand(0.04, 0.07), i % 2 ? '#ffd04d' : '#ffffff', 0.6); }
     if (mode === 'hunt') net.send({ t: 'jk', x, z });
   }
@@ -3322,6 +3355,7 @@ const joker = (() => {
   }
   function use(k) {
     if (state !== 'play' || intro.t >= 0 || won || wolfOver) return;
+    peek();
     const i = bag.indexOf(k); if (i < 0) return;
     let ok = true;
     if (k === 'light') {
@@ -3347,7 +3381,7 @@ const joker = (() => {
     const b = document.querySelector(`.jcard[data-j="${k}"]`); if (b) b.animate([{ transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: 300 });
   }
   return {
-    give, place, clear, onStep, use, render, smashAt, buildAt, takenElsewhere, spawnAt, freeTile,
+    give, place, clear, onStep, use, render, smashAt, buildAt, takenElsewhere, spawnAt, freeTile, peek,
     get aiming() { return aiming; },
     // the direction you swiped or pressed after arming the Hammer or the Wall: the first of the (one or two) tiles that
     // way that it can act on
@@ -3370,7 +3404,9 @@ const joker = (() => {
       for (const b of builds) if ((b.t -= dt) <= 0 && maze.g[b.i]) { maze.g[b.i] = 0; pillarsDirty = true; preyKey = ''; updateTargets(false); }
       builds = builds.filter(b => b.t > 0);
       for (const p of pickups) { p.s.position.y = 0.5 + Math.sin(performance.now() / 300 + p.x) * 0.05; p.s.material.rotation = 0; }
-      $('jokerBar').style.display = state === 'play' && (mode === 'levels' || mode === 'wolf' || mode === 'hunt') ? '' : 'none';
+      $('jokerDock').style.display = state === 'play' && (mode === 'levels' || mode === 'wolf' || mode === 'hunt') ? '' : 'none';
+      if (peekT > 0 && !aiming && (peekT -= dt) <= 0) $('jokerDock').classList.remove('open');
+      if (aiming) peekT = Math.max(peekT, 1);
     },
   };
 })();
@@ -3629,7 +3665,7 @@ const hunt = (() => {
       }
       if (this.live() && S.host) {
         referee();
-        if ((S.cardT -= dt) <= 0) { S.cardT = 20; const t = joker.freeTile(S.cardRnd); if (t) { joker.spawnAt(t[0], t[1]); net.send({ t: 'jkspawn', x: t[0], z: t[1] }); } } // (a new card every 20 s)
+        if ((S.cardT -= dt) <= 0) { S.cardT = 30; const t = joker.freeTile(S.cardRnd); if (t) { joker.spawnAt(t[0], t[1]); net.send({ t: 'jkspawn', x: t[0], z: t[1] }); } } // (a new card every 20 s)
       }
     },
   };
@@ -3680,7 +3716,7 @@ function win() {
     spawnPuff(p.x, 0.3, p.z, Math.cos(a) * 1.6, rand(0.5, 1.4), Math.sin(a) * 1.6, rand(0.06, 0.1), i % 2 ? '#f2c14e' : '#ffffff', 0.6);
   }
   const ratio = steps / optimal;
-  const stars = steps <= optimal * 1.8 + 4 ? 3 : steps <= optimal * 3 + 8 ? 2 : 1; // (the maze is hidden: some looking around is fair)
+  const stars = steps <= optimal * 1.45 + 3 ? 3 : steps <= optimal * 2.3 + 6 ? 2 : 1; // (the maze is hidden: some looking around is fair)
   quests.add('win'); quests.add('stars', Math.max(0, stars - save.stars(L)));
   const wasLocked = L + 1 < TOTAL_LEVELS && !unlocked(L + 1);
   save.set(L, stars);
@@ -3696,11 +3732,11 @@ function win() {
   const starEls = [...$('winStars').children];
   starEls.forEach(e => e.classList.remove('on'));
   setTimeout(async () => {
-    if (friend) await tell(found);
+    if (friend) { await tell(found); if (found === 'found-cat') await tell('the-end'); }
     show('win');
     starEls.forEach((e, i) => setTimeout(() => { if (i < stars) { e.classList.add('on'); sfx.ui('chime', 0.25 + i * 0.08); } }, 350 + i * 260));
     // now and then a surprise: a bonus card (more likely for three stars)
-    if (Math.random() < (stars === 3 ? 0.55 : 0.3)) setTimeout(() => { const ks = Object.keys(JOKERS).filter(k => k !== 'freeze' || L >= 9); joker.give(ks[Math.floor(Math.random() * ks.length)]); toast('Lucky! A bonus card'); }, 1400);
+    const known = jokersKnown(); if (known.length && Math.random() < (stars === 3 ? 0.18 : 0.08)) setTimeout(() => { joker.give(known[Math.floor(Math.random() * known.length)]); toast('Lucky! A bonus card'); }, 1400); // (rare: cards should feel earned)
     $('winTease').innerHTML = rewards.tease(L);
   }, 700);
 }
@@ -3732,7 +3768,7 @@ const quests = (() => {
     fresh();
     for (const q of Q.list) if (q.id === id && !q.done) {
       q.got = Math.min(q.need, q.got + n);
-      if (q.got >= q.need) { q.done = true; const P = POOL.find(p => p.id === id); setTimeout(() => { toast(`Quest done: ${P.text(q.need)}!`); joker.give(Object.keys(JOKERS)[Math.floor(Math.random() * Object.keys(JOKERS).length)]); }, 1800); }
+      if (q.got >= q.need) { q.done = true; const P = POOL.find(p => p.id === id), ks = jokersKnown(); setTimeout(() => { toast(`Quest done: ${P.text(q.need)}!`); if (ks.length) joker.give(ks[Math.floor(Math.random() * ks.length)]); }, 1800); }
     }
     save();
   }
@@ -3760,27 +3796,27 @@ const rewards = (() => {
     };
     $('giftDone').onclick = () => { busy = false; show('title'); setTimeout(check, 400); };
   }
-  const pick = n => Array.from({ length: n }, () => { const ks = Object.keys(JOKERS); return ks[Math.floor(Math.random() * ks.length)]; });
+  const pick = n => { const ks = jokersKnown(); return ks.length ? Array.from({ length: n }, () => ks[Math.floor(Math.random() * ks.length)]) : []; };
   function check() { // on the title: today's gift first, then any star chest earned
     if (busy || state !== 'title') return;
     const last = get('buddy-gift-day', ''), streak0 = get('buddy-streak', 0);
-    if (last !== today()) {
+    if (last !== today() && jokersKnown().length) {
       const yesterday = new Date(Date.now() - 864e5).toDateString(), streak = last === yesterday ? streak0 + 1 : 1;
       put('buddy-gift-day', today()); put('buddy-streak', streak);
-      return open({ title: streak > 1 ? `Day ${streak} in a row!` : 'A gift for today!', sub: streak >= 7 ? 'A whole week! Here\u2019s a big one' : `Come back tomorrow for day ${streak + 1}: an even bigger gift`, cards: pick(streak >= 7 ? 3 : streak >= 3 ? 2 : 1) });
+      return open({ title: streak > 1 ? `Day ${streak} in a row!` : 'A gift for today!', sub: streak >= 7 ? 'A whole week! Here\u2019s a big one' : `Come back tomorrow for day ${streak + 1}: an even bigger gift`, cards: pick(streak >= 7 ? 2 : 1) });
     }
     const chests = get('buddy-chests', 0), stars = totalStars();
-    if (stars >= (chests + 1) * 10) { put('buddy-chests', chests + 1); return open({ title: 'Star chest!', sub: `${(chests + 1) * 10} stars collected`, cards: pick(2) }); }
+    if (stars >= (chests + 1) * 15 && jokersKnown().length) { put('buddy-chests', chests + 1); return open({ title: 'Star chest!', sub: `${(chests + 1) * 15} stars collected`, cards: pick(1) }); }
     chip();
   }
   function chip() { // the title's little progress chip toward the next chest
-    const chests = get('buddy-chests', 0), stars = totalStars(), next = (chests + 1) * 10;
-    $('chestChip').innerHTML = `<svg class="ico"><use href="#i-gift"/></svg><b>${stars}/${next}</b><i style="--p:${Math.min(1, (stars - chests * 10) / 10)}"></i>`;
+    const chests = get('buddy-chests', 0), stars = totalStars(), next = (chests + 1) * 15;
+    $('chestChip').innerHTML = `<svg class="ico"><use href="#i-gift"/></svg><b>${stars}/${next}</b><i style="--p:${Math.min(1, (stars - chests * 15) / 15)}"></i>`;
   }
   // what's coming: the next friend to find, and how close the next chest is
   function tease(L) {
     const fi = Math.floor(L / LEVELS_PER_WORLD), lastOfWorld = (fi + 1) * LEVELS_PER_WORLD, f = FRIENDS[fi];
-    const chests = get('buddy-chests', 0), left = (chests + 1) * 10 - totalStars();
+    const chests = get('buddy-chests', 0), left = (chests + 1) * 15 - totalStars();
     const a = f && !story.seen(`found-${f.id}`) && L + 1 < lastOfWorld ? `<span class="chip tease"><img alt="" src="${f.sticker}">${f.name} is waiting at level ${lastOfWorld}</span>` : '';
     const b = left > 0 ? `<span class="chip tease"><svg class="ico"><use href="#i-gift"/></svg>${left} more star${left > 1 ? 's' : ''} to a chest</span>` : `<span class="chip tease"><svg class="ico"><use href="#i-gift"/></svg>A chest is ready on the title!</span>`;
     return a + b;
@@ -4297,7 +4333,8 @@ function show(name) {
     const wd = WORLDS[Math.floor(n / LEVELS_PER_WORLD)];
     $('worldNameCard').textContent = wd.name;
     $('contArt').style.setProperty('--wc', wd.card);
-    doorPreview(wd.biome).then(url => { $('modeArtAdv').src = url; if (lobbyMode.mode === 'adventure') $('contArt').innerHTML = `<img alt="" src="${url}">`; });
+    doorPreview(wd.biome).then(url => { if (lobbyMode.mode === 'adventure') $('contArt').innerHTML = `<img alt="" src="${url}">`; });
+    charPreview(charId).then(u => { $('modeArtAdv').src = u; });
   }
   if (name === 'title') { rewards.chip(); setTimeout(() => rewards.check(), 700); }
   if (name === 'gift' || name === 'modes') $('title').classList.add('show'); // (these open over the title)
@@ -4423,8 +4460,8 @@ const lobbyMode = (() => {
   const INFO = {
     adventure: () => ({ name: 'Adventure', art: $('modeArtAdv').src ? `<img alt="" src="${$('modeArtAdv').src}">` : null }),
     wolf: () => ({ name: 'Wolf Chase', sub: wolfBest ? `Best: ${wolfBest} map${wolfBest > 1 ? 's' : ''}` : 'Escape the wolves', art: '<img alt="" src="assets/story/sticker-wolf.webp">' }),
-    race: () => ({ name: 'Race', sub: 'First to the key', art: '<span style="background:var(--coral);width:100%;height:100%;display:grid;place-items:center"><svg class="ico"><use href="#i-flag"/></svg></span>' }),
-    online: () => ({ name: 'With friends', sub: 'Wolves vs Animals, races', art: '<span style="background:#f27ba6;width:100%;height:100%;display:grid;place-items:center"><svg class="ico"><use href="#i-heart"/></svg></span>' }),
+    race: () => ({ name: 'Race', sub: 'First to the key', art: '<img alt="" src="assets/story/sticker-fennec.webp">' }),
+    online: () => ({ name: 'Multiplayer', sub: 'Wolves vs Animals · races', art: '<img alt="" src="assets/story/sticker-frog.webp">' }),
   };
   function render() {
     const i = INFO[m]();
@@ -4440,6 +4477,7 @@ const lobbyMode = (() => {
   };
 })();
 $('modeCard').addEventListener('click', () => show('modes'));
+$('modesClose').addEventListener('click', () => show('title'));
 // the tabs: leaving the friends lobby by a tab leaves the lobby too
 const fromLobby = () => { if (state === 'friend') net.leave(); };
 $('tabPlay').addEventListener('click', () => { fromLobby(); show('title'); });
@@ -4581,7 +4619,9 @@ $('outfitBtn').addEventListener('click', () => { fromLobby(); show('outfit'); })
 $('profileBtn').addEventListener('click', () => show('outfit'));
 $('raceBtn').addEventListener('click', () => show('race'));
 $('jokerBar').addEventListener('click', e => { const b = e.target.closest('[data-j]'); if (b) joker.use(b.dataset.j); });
-addEventListener('keydown', e => { const k = { Digit1: 'light', Digit2: 'smash', Digit3: 'build', Digit4: 'freeze', Digit5: 'dash', KeyQ: 'light', KeyE: 'smash', KeyR: 'build' }[e.code]; if (k && state === 'play') joker.use(k); });
+const JOKER_KEYS = { light: 'Q', smash: 'E', build: 'R', freeze: 'T', dash: 'G' }; // (like the spell keys of League of Legends; W A S D still walk)
+addEventListener('keydown', e => { const k = Object.keys(JOKER_KEYS).find(j => 'Key' + JOKER_KEYS[j] === e.code) || { Digit1: 'light', Digit2: 'smash', Digit3: 'build', Digit4: 'freeze', Digit5: 'dash' }[e.code]; if (k && state === 'play') { joker.peek(); joker.use(k); } });
+$('jokerDeck').addEventListener('click', () => joker.peek(true));
 joker.render();
 $('wolfBtn').addEventListener('click', () => startWolf(0));
 // race setup screen: steppers for Buddies and teammates, a choice of rival speed, and a preview of the teams

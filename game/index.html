@@ -239,7 +239,13 @@
   #mapCanvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
   #mapCanvas:active { cursor: grabbing; }
   #mapNodes { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-  .map { position: absolute; inset: 0; overflow: hidden; }
+  .map { position: absolute; inset: 0; overflow: hidden; z-index: 2; }
+  /* the map, like a miniature: tilt-shift blur at the top and bottom, warm light from above, a soft vignette, motes */
+  #worlds::before, #worlds::after { content: ""; position: absolute; left: 0; right: 0; z-index: 1; pointer-events: none; -webkit-backdrop-filter: blur(5px) saturate(1.08); backdrop-filter: blur(5px) saturate(1.08); }
+  #worlds::before { top: 0; height: 36%; -webkit-mask-image: linear-gradient(180deg, #000 0%, rgba(0,0,0,.75) 35%, transparent 100%); mask-image: linear-gradient(180deg, #000 0%, rgba(0,0,0,.75) 35%, transparent 100%); }
+  #worlds::after { bottom: 0; height: 30%; -webkit-mask-image: linear-gradient(0deg, #000 0%, rgba(0,0,0,.7) 35%, transparent 100%); mask-image: linear-gradient(0deg, #000 0%, rgba(0,0,0,.7) 35%, transparent 100%); }
+  #worlds .mapglow { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(70% 45% at 50% -5%, rgba(255,226,160,.45), rgba(255,226,160,0) 70%), radial-gradient(130% 95% at 50% 48%, rgba(0,0,0,0) 58%, rgba(120,80,40,.2) 100%); }
+  #worlds .motes { z-index: 3 !important; }
   .maptop { position: absolute; top: 22px; left: 28px; right: 28px; display: flex; align-items: center; gap: 14px; pointer-events: none; z-index: 5; }
   .maptop > * { pointer-events: auto; }
   .maptop .hintchip { margin-left: auto; color: var(--ink-soft); font-size: 14px; }
@@ -629,7 +635,9 @@
   .modecard b { font-family: var(--title); font-weight: 400; font-size: 24px; color: var(--ink); } .modecard em { font-style: normal; font-size: 13px; color: var(--ink-soft); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .modecard > .ico { margin-left: auto; width: 22px; height: 22px; color: var(--coral); animation: nudge .9s ease-in-out infinite; }
   #title .playbig { width: 100%; font-size: 30px; padding: 16px 20px 21px; border-radius: 26px; animation: bob 2.6s ease-in-out infinite; } #title .playbig .ico { width: 30px; height: 30px; }
-  .modepick { max-width: 560px; } .mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+  .modepick { max-width: 560px; position: relative; } .modepick h2 { padding: 0 44px; } .modepick .closex { position: absolute; left: 14px; top: 14px; width: 44px; height: 44px; }
+  .mopt .mart.duo { position: relative; background: var(--c); } .mopt .mart.duo img { position: absolute; width: 62%; height: 62%; border-radius: 50%; box-shadow: 0 0 0 2px #fff; } .mopt .mart.duo img:first-child { left: 4%; top: 6%; } .mopt .mart.duo img:last-child { right: 4%; bottom: 6%; }
+  .mopt .mart img.pic { object-fit: cover; transform: scale(1.2) translateY(6%); background: radial-gradient(circle at 50% 35%, #fff, #e6f2d8); } .mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
   .mopt { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 10px; border-radius: 24px; background: var(--card); box-shadow: inset 0 -5px 0 var(--lip), inset 0 0 0 3px var(--c), var(--shadow-s); transition: transform .25s var(--bounce); } .mopt:hover { transform: translateY(-3px); }
   .mopt .mart { width: 74px; height: 74px; border-radius: 24px; overflow: hidden; display: grid; place-items: center; background: var(--c); color: #fff; box-shadow: 0 0 0 3px #fff; } .mopt .mart img { width: 100%; height: 100%; object-fit: cover; } .mopt .mart .ico { width: 38px; height: 38px; }
   .mopt b { font-family: var(--title); font-weight: 400; font-size: 21px; color: var(--ink); } .mopt small { font-size: 12px; color: var(--ink-soft); font-weight: 800; } .mopt .new { position: absolute; right: 8px; top: -8px; padding: 3px 9px 4px; border-radius: 9px; background: #ff5a4e; color: #fff; font-style: normal; font-size: 11px; font-weight: 900; transform: rotate(6deg); }
@@ -697,7 +705,13 @@
     .hubplay { left: 14px; right: 14px; transform: none; bottom: calc(16px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); } .playbig { min-width: 0; width: 100%; } .playbig b { font-size: 34px; }
     #title .faceSlot { top: calc(150px + env(safe-area-inset-top)) !important; bottom: calc(110px + env(safe-area-inset-bottom)) !important; left: 70px !important; right: 70px !important; height: auto; }
   }
-  #jokerBar { position: fixed; left: 14px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 5; display: flex; gap: 8px; }
+  #jokerDock { position: fixed; left: 14px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 5; display: flex; align-items: flex-end; gap: 8px; }
+  .jdeck { position: relative; width: 48px; height: 48px; border-radius: 16px; background: #fffaf1; color: #e8823a; display: grid; place-items: center; box-shadow: inset 0 -4px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); }
+  .jdeck .ico { width: 26px; height: 26px; } .jdeck b { position: absolute; right: -6px; top: -6px; min-width: 20px; height: 20px; border-radius: 10px; background: #e8823a; color: #fff; font-size: 12px; display: grid; place-items: center; box-shadow: 0 0 0 2px #fff; }
+  #jokerDock.empty .jdeck { display: none; }
+  #jokerBar { display: flex; gap: 8px; transition: opacity .35s, transform .35s var(--spring); } #jokerDock:not(.open) #jokerBar { opacity: 0; transform: translateX(-20px) scale(.8); pointer-events: none; }
+  #jokerDock.open .jcard { animation: jglow 1.2s ease-in-out infinite; } @keyframes jglow { 0%, 100% { box-shadow: inset 0 -5px 0 rgba(0,0,0,.08), inset 0 0 0 3px var(--c), 0 0 0 0 var(--c); } 50% { box-shadow: inset 0 -5px 0 rgba(0,0,0,.08), inset 0 0 0 3px var(--c), 0 0 18px 2px var(--c); } }
+  .jcard kbd { position: absolute; left: 50%; bottom: -9px; transform: translateX(-50%); padding: 1px 6px 2px; border-radius: 7px; background: #3b2a1a; color: #fff; font: 900 11px Nunito, system-ui; } .phone .jcard kbd { display: none; }
   .jcard { position: relative; width: 52px; height: 62px; border-radius: 16px; background: #fffaf1; color: var(--c); box-shadow: inset 0 -5px 0 color-mix(in srgb, var(--c) 35%, #d9c4a0), inset 0 0 0 3px var(--c), 0 6px 14px rgba(80,50,20,.18); display: grid; place-items: center; animation: jbob 2.4s ease-in-out infinite; }
   .jcard .ico { width: 28px; height: 28px; margin-top: -4px; } .jcard b { position: absolute; right: -6px; top: -6px; min-width: 20px; height: 20px; border-radius: 10px; background: var(--c); color: #fff; font-size: 12px; display: grid; place-items: center; box-shadow: 0 0 0 2px #fff; }
   .jcard:nth-child(2) { animation-delay: .3s; } .jcard:nth-child(3) { animation-delay: .6s; } .jcard:nth-child(4) { animation-delay: .9s; }
@@ -986,7 +1000,7 @@
 <div id="huntBar" style="display:none"><span class="hside wolves"><svg class="ico"><use href="#i-paw"/></svg><small id="hbWolves">Wolves</small><b id="hbW">0</b></span><span class="hmid"><small id="hbRound">Round 1 of 3</small><b id="hbTime">2:00</b><span id="hbPips"></span></span><span class="hside animals"><b id="hbA">0</b><small id="hbAnimals">Animals</small><svg class="ico"><use href="#i-flag"/></svg></span></div>
 <div class="bigcard" id="waitCard"><div class="card"><div class="waitart"><img alt="" src="assets/story/sticker-frog.webp"><img alt="" src="assets/story/sticker-wolf.webp"><img alt="" src="assets/story/sticker-cat.webp"></div><h3>Waiting for everyone…</h3><p>The round starts as soon as every phone is ready</p></div></div>
 <div class="bigcard" id="roundCard"><div class="card"><h2 class="sticker" id="roundTitle">Round over</h2><div class="roundscore" id="roundScore"></div><p class="roundnext" id="roundNext">Switch sides!</p></div></div>
-<div id="jokerBar" style="display:none"></div>
+<div id="jokerDock" style="display:none"><button class="jdeck" id="jokerDeck" aria-label="Cards"><svg class="ico"><use href="#i-cards"/></svg><b id="jokerCount">0</b></button><div id="jokerBar"></div></div>
 <div id="raceUI"></div>
 <svg id="goalArrow" class="rarrow goalarrow" viewBox="0 0 40 40" style="display:none"><path d="M34 20 L10 6 Q6 4 6 9 L6 31 Q6 36 10 34 Z" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/></svg>
 <div id="fader"></div>
@@ -1003,7 +1017,7 @@
       <button class="navtab on" id="tabPlay"><span>Play</span></button>
       <button class="navtab" id="outfitBtn"><span>Outfit</span></button>
       <button class="navtab" id="playBtn"><span>Map<small id="playSub2">Level 1</small></span></button>
-      <button class="navtab" id="friendMenuBtn"><span>Friends</span></button>
+      <button class="navtab" id="friendMenuBtn"><span>Multiplayer</span></button>
     </nav>
     <div class="lright">
       <span class="chip"><i class="cbadge honey"><svg class="ico"><use href="#i-star"/></svg></i><b id="starCount">0</b></span>
@@ -1038,12 +1052,13 @@
 
 <section class="screen modal" id="modes">
   <div class="card pop modepick">
+    <button class="round closex" id="modesClose" aria-label="Back"><svg class="ico"><use href="#i-back"/></svg></button>
     <h2 class="sticker">Choose a mode</h2>
     <div class="mgrid">
-      <button class="mopt" data-mode="adventure" style="--c:var(--leaf)"><span class="mart"><img alt="" id="modeArtAdv"></span><b>Adventure</b><small>Find Buddy’s friends</small></button>
+      <button class="mopt" data-mode="adventure" style="--c:var(--leaf)"><span class="mart"><img alt="" id="modeArtAdv" class="pic"></span><b>Adventure</b><small>Find Buddy’s friends</small></button>
       <button class="mopt" data-mode="wolf" style="--c:#6f7f95"><span class="mart"><img alt="" src="assets/story/sticker-wolf.webp"></span><b>Wolf Chase</b><small id="modeWolfBest">Can you escape?</small><em class="new">NEW</em></button>
-      <button class="mopt" data-mode="race" style="--c:var(--coral)"><span class="mart"><svg class="ico"><use href="#i-flag"/></svg></span><b>Race</b><small>First to the key</small></button>
-      <button class="mopt" data-mode="online" style="--c:#f27ba6"><span class="mart"><svg class="ico"><use href="#i-heart"/></svg></span><b>With friends</b><small>Wolves vs Animals, races</small></button>
+      <button class="mopt" data-mode="race" style="--c:var(--coral)"><span class="mart"><img alt="" src="assets/story/sticker-fennec.webp"></span><b>Race</b><small>First to the key</small></button>
+      <button class="mopt" data-mode="online" style="--c:#f27ba6"><span class="mart duo"><img alt="" src="assets/story/sticker-frog.webp"><img alt="" src="assets/story/sticker-cat.webp"></span><b>Multiplayer</b><small>Wolves vs Animals · races</small></button>
     </div>
   </div>
 </section>
@@ -1065,6 +1080,8 @@
 </section>
 
 <section class="screen" id="worlds">
+  <div class="mapglow"></div>
+  <div class="motes"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
   <div class="map" id="map"><canvas id="mapCanvas"></canvas><div id="mapNodes"></div></div>
   <div class="maptop">
     <button class="round" data-go="title" aria-label="Back"><svg class="ico"><use href="#i-back"/></svg></button>

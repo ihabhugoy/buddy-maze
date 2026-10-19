@@ -3394,21 +3394,17 @@ const JOKERS = {
   dash: { name: 'Boots', icon: 'i-boot', color: '#9c84ee', tip: 'lets you run faster for a moment' },
   build: { name: 'Wall', icon: 'i-brick', color: '#b08a5a', tip: 'raises a stone in front of you for 10 seconds' },
 };
+// the cards' pictures: one deck, every card on the same frame (see tools/card_unify.py)
+const CARD_ART = k => `assets/cards/${k}.webp`;
 const joker = (() => {
   let bag = [];
   try { bag = JSON.parse(localStorage.getItem('buddy-jokers') || 'null') || []; } catch { bag = []; }
   const BAG = 5; bag = bag.slice(0, BAG); // (a small bag: cards are precious)
   const save = () => { try { localStorage.setItem('buddy-jokers', JSON.stringify(bag)); } catch {} };
   let pickups = [], trail = null, trailT = 0, frozenT = 0, dashT = 0, aiming = null, aimT = 0;
-  // the card lying on the floor: a little golden card with a star, turning and glowing
-  const cardTex = (() => {
-    const c = document.createElement('canvas'); c.width = 96; c.height = 128; const x = c.getContext('2d');
-    const rr = (a, b, w, h, r) => { x.beginPath(); x.moveTo(a + r, b); x.arcTo(a + w, b, a + w, b + h, r); x.arcTo(a + w, b + h, a, b + h, r); x.arcTo(a, b + h, a, b, r); x.arcTo(a, b, a + w, b, r); x.closePath(); };
-    rr(6, 6, 84, 116, 16); x.fillStyle = '#fff6d8'; x.fill(); x.lineWidth = 7; x.strokeStyle = '#f2b636'; x.stroke();
-    x.translate(48, 64); x.beginPath(); for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2 - Math.PI / 2, r = i % 2 ? 12 : 27; x.lineTo(Math.cos(a) * r, Math.sin(a) * r); } x.closePath(); x.fillStyle = '#ffc43d'; x.fill(); x.lineWidth = 4; x.strokeStyle = '#e69a1c'; x.stroke();
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
-  })();
-  const cardMat = new THREE.SpriteMaterial({ map: cardTex, transparent: true });
+  // a card lying on the floor: its own picture when it's a known card (a puzzle's), else the deck's back
+  const cardMats = {};
+  const cardMatOf = k => cardMats[k] ||= (() => { const t = new THREE.TextureLoader().load(CARD_ART(k)); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return new THREE.SpriteMaterial({ map: t, transparent: true }); })();
   const trailMat = new THREE.MeshBasicMaterial({ color: '#ffe58a', transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false });
   const trailGeo = new THREE.CircleGeometry(0.09, 14).rotateX(-Math.PI / 2);
   const trailGlowMat = (() => { // (a warm glowing bead of light)
@@ -3423,7 +3419,7 @@ const joker = (() => {
   function render() {
     const el = $('jokerBar'), counts = {};
     for (const k of bag) counts[k] = (counts[k] || 0) + 1;
-    el.innerHTML = Object.keys(JOKERS).filter(k => counts[k]).map(k => `<button class="jcard ${aiming === k ? 'armed' : ''}" data-j="${k}" style="--c:${JOKERS[k].color}" aria-label="${JOKERS[k].name}"><svg class="ico"><use href="#${JOKERS[k].icon}"/></svg>${counts[k] > 1 ? `<b>${counts[k]}</b>` : ''}<kbd>${JOKER_KEYS[k]}</kbd></button>`).join('');
+    el.innerHTML = Object.keys(JOKERS).filter(k => counts[k]).map(k => `<button class="jcard ${aiming === k ? 'armed' : ''}" data-j="${k}" style="--c:${JOKERS[k].color};--art:url(${CARD_ART(k)})" aria-label="${JOKERS[k].name}">${counts[k] > 1 ? `<b>${counts[k]}</b>` : ''}<kbd>${JOKER_KEYS[k]}</kbd></button>`).join('');
     $('jokerCount').textContent = bag.length; $('jokerDock').classList.toggle('empty', !bag.length);
   }
   function give(k, from, force) { // a new card flies into the bar
@@ -3431,7 +3427,7 @@ const joker = (() => {
     bag.push(k); save(); render();
     const nb = document.querySelector(`.jcard[data-j="${k}"]`); if (nb) nb.classList.add('fresh'); // (the new card glows a moment)
     const card = document.createElement('div'); card.className = 'jfly'; card.style.setProperty('--c', JOKERS[k].color);
-    card.innerHTML = `<svg class="ico"><use href="#${JOKERS[k].icon}"/></svg><span>${JOKERS[k].name}!</span>`;
+    card.innerHTML = `<img alt="" src="${CARD_ART(k)}"><span>${JOKERS[k].name}!</span>`;
     const b = $('jokerBar').getBoundingClientRect(), x0 = from ? from.x : innerWidth / 2, y0 = from ? from.y : innerHeight / 2;
     card.style.left = x0 + 'px'; card.style.top = y0 + 'px'; document.body.appendChild(card);
     card.animate([{ transform: 'translate(-50%,-50%) scale(.3) rotate(-20deg)', opacity: 0 }, { transform: 'translate(-50%,-120%) scale(1.25) rotate(6deg)', opacity: 1, offset: 0.35 }, { transform: 'translate(-50%,-110%) scale(1.1) rotate(0)', opacity: 1, offset: 0.6 },
@@ -3440,8 +3436,8 @@ const joker = (() => {
   }
   // cards on the floor: on random open tiles away from where you start (online the spots come from the round's seed,
   // so every phone has the same cards)
-  function spawnAt(x, z) {
-    const s = new THREE.Sprite(cardMat); s.scale.set(0.3, 0.4, 1); s.position.set(x - origin, 0.5, z - origin); s.renderOrder = 6;
+  function spawnAt(x, z, kind = null) {
+    const s = new THREE.Sprite(cardMatOf(kind || 'back')); s.scale.set(0.32, 0.444, 1); s.position.set(x - origin, 0.5, z - origin); s.renderOrder = 6;
     const glow = new THREE.Sprite(wolfHaloMat); glow.scale.setScalar(0.9); s.add(glow);
     scene.add(s); pickups.push({ x, z, s });
   }
@@ -3457,7 +3453,7 @@ const joker = (() => {
     for (let k = 0; k < n; k++) {
       // (a puzzle's card waits in a nook a few steps off the way, early on: you go and get it before you need it)
       const t = way && way.length > 6 && k === 0 ? nookOff(way) : freeTile(rnd);
-      if (t) { spawnAt(t[0], t[1]); if (kind) pickups[pickups.length - 1].kind = kind; }
+      if (t) { spawnAt(t[0], t[1], kind); if (kind) pickups[pickups.length - 1].kind = kind; }
     }
   }
   function nookOff(way) {
@@ -4074,7 +4070,7 @@ const rewards = (() => {
     $('giftOpen').onclick = $('giftBox').onclick = () => {
       if ($('giftBox').classList.contains('open')) return;
       $('giftBox').classList.add('open'); $('giftOpen').style.display = 'none'; sfx.ui('whoosh', 0.5); confetti();
-      $('giftCards').innerHTML = cards.map((k, i) => `<span class="jcard big" style="--c:${JOKERS[k].color};animation-delay:${0.15 * i}s"><svg class="ico"><use href="#${JOKERS[k].icon}"/></svg><small>${JOKERS[k].name}</small></span>`).join('');
+      $('giftCards').innerHTML = cards.map((k, i) => `<span class="jcard big" style="--c:${JOKERS[k].color};--art:url(${CARD_ART(k)});animation-delay:${0.15 * i}s"><small>${JOKERS[k].name}</small></span>`).join('');
       cards.forEach((k, i) => setTimeout(() => { joker.give(k); }, 500 + i * 250));
       setTimeout(() => { $('giftDone').style.display = ''; }, 700 + cards.length * 250);
     };

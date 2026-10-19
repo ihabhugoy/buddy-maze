@@ -161,11 +161,19 @@ if (params.has('exp')) {
 const XF = EXP && EXP.run ? EXP_LIST[EXP.i] : '';
 const off = k => params.has(k) || XF === k;
 const NOSOUND = params.has('nosound') || params.has('exp');
-const PR_MAX = Math.min(devicePixelRatio, PHONE ? (LITE ? 1 : 1.25) : 1.5); // (phones: fixed, see adaptRes)
+const PR_MAX = Math.min(devicePixelRatio, PHONE ? (LITE ? 1 : 1.25) : 2); // (phones: fixed, see adaptRes; computers climb to full sharpness when fast enough)
 if (PHONE) document.documentElement.classList.add('phone');
 // (phones draw straight to the screen, so they use the canvas's own antialiasing and skip the composer's big buffers)
-const renderer = new THREE.WebGLRenderer({ antialias: PHONE && !off('noaa'), powerPreference: 'high-performance' });
-renderer.setPixelRatio(PR_MAX);
+// (smooth edges everywhere: the map and menus draw straight to the screen)
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ antialias: !off('noaa'), powerPreference: 'high-performance' }); }
+catch (e) { // no 3D in this browser (graphics acceleration off, or WebGL blocked): say how to fix it instead of loading forever
+  const el = document.getElementById('loading');
+  if (el) el.innerHTML = `<div class="card" style="max-width:420px;text-align:center;padding:22px"><h2 class="sticker" style="margin:0 0 8px">Buddy needs 3D</h2><p style="margin:0 0 10px">This browser has 3D graphics switched off.</p><p style="margin:0;font-size:14px">In Chrome: <b>Settings → System → Use graphics acceleration when available</b>, switch it on, then restart Chrome. Or open the game in another browser.</p></div>`;
+  throw e;
+}
+const PR_START = PHONE ? PR_MAX : Math.min(PR_MAX, 1.5); // (computers start here and sharpen up if they keep up)
+renderer.setPixelRatio(PR_START);
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = !off('noshadow');
 renderer.shadowMap.type = LITE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
@@ -1447,7 +1455,8 @@ function prepDoor(gltf) {
   const arch = reach.indexOf(Math.min(...reach)), [ax, az] = sides[arch];
   if (PHONE && !params.has("nosimp")) simplifyGeo(raw, Math.min(1, 30000 / raw.index.count), 0.015); // (phones: ~10k triangles)
   const mat = new THREE.MeshStandardMaterial({ map: canvasTexture(pm.material.map, 2048), roughness: 0.92, metalness: 0 });
-  return { raw, mat, reach, yaw: -Math.atan2(-az, ax) };
+  // (every shipped door model has its mouth on its +z side; measuring it misread two of them, autumn's and the cave's)
+  return { raw, mat, reach, yaw: Math.PI / 2 };
 }
 // flat floor tiles show a picture of each stone, lit by the biome's light and captured once (4 turns each)
 function bakeFloor(variants, B) {
@@ -1844,7 +1853,7 @@ function trimGPU() { // (every device: laptops held ~110 MB per world visited ot
 }
 function buildLevel(level, race = null, opts = {}) {
   L = level; mode = race ? race.kind || 'race' : 'levels'; pillarsDirty = true; shadowKick = 3;
-  clearWolves(); hunt.clear(); joker.clear();
+  clearWolves(); hunt.clear(); joker.clear(); tour.shots = null; if ($('tourCap')) $('tourCap').classList.remove('on');
   stage = opts.stage || 'surface';
   const world = race ? (WORLDS.find(w => w.biome === race.biome) || { tint: [1, 1, 1], reveal: 2.1, icon: 'i-w-cave' }) : WORLDS[Math.floor(L / LEVELS_PER_WORLD)];
   const bName = race ? race.biome || 'woods' : stage === 'cave' ? 'cave' : world.biome;
@@ -1984,7 +1993,7 @@ function updateTargets(silent) {
     const prev = targets[i];
     let t = 0;
     const mine = Math.hypot(dx, dz) <= CFG.revealR;
-    if (mine) t = (dx + dz > 0) ? CFG.stubH : CFG.wallH; // camera sits on the +x+z side
+    if (mine) t = (dx + dz > 0) && !(maze.doors && maze.doors.some(d => d.x === x && d.z === z)) ? CFG.stubH : CFG.wallH; // camera sits on the +x+z side (doors always stand full height)
     else if (mode !== 'hunt') for (const w of wolves) { const ex = x - w.x, ez = z - w.z; if (Math.hypot(ex, ez) <= 1.5) { t = (ex + ez > 0) ? CFG.stubH : CFG.wallH; break; } } // (around a wolf too)
     targets[i] = t;
     if (!mine) continue; // (a wolf's stones glide up and down without a shake, dust or sound)
@@ -3262,10 +3271,10 @@ async function startWolf(run = 0) {
 // Snowflake: every wolf freezes for a while. Boots: you run faster for a moment. Wall: a stone rises in front of you
 // for 10 seconds (to block a wolf). They're kept between games (up to 9). Online, wolves and animals find different cards.
 const JOKERS = {
-  light: { name: 'Lantern', icon: 'i-lantern', color: '#ffc43d', tip: 'a trail of light to where you’re going' },
+  light: { name: 'Lantern', icon: 'i-lantern', color: '#ffc43d', tip: 'shows a trail of light to where you need to go' },
   smash: { name: 'Hammer', icon: 'i-hammer', color: '#ff8c6b', tip: 'sinks the stone in front of you' },
   freeze: { name: 'Snowflake', icon: 'i-snow', color: '#6dbef0', tip: 'freezes the wolves for a while' },
-  dash: { name: 'Boots', icon: 'i-boot', color: '#9c84ee', tip: 'run faster for a moment' },
+  dash: { name: 'Boots', icon: 'i-boot', color: '#9c84ee', tip: 'lets you run faster for a moment' },
   build: { name: 'Wall', icon: 'i-brick', color: '#b08a5a', tip: 'raises a stone in front of you for 10 seconds' },
 };
 const joker = (() => {
@@ -3295,7 +3304,8 @@ const joker = (() => {
   }
   function give(k, from) { // a new card flies into the bar
     if (bag.length >= 9) return;
-    bag.push(k); save(); render(); peek();
+    bag.push(k); save(); render();
+    const nb = document.querySelector(`.jcard[data-j="${k}"]`); if (nb) nb.classList.add('fresh'); // (the new card glows a moment)
     const card = document.createElement('div'); card.className = 'jfly'; card.style.setProperty('--c', JOKERS[k].color);
     card.innerHTML = `<svg class="ico"><use href="#${JOKERS[k].icon}"/></svg><span>${JOKERS[k].name}!</span>`;
     const b = $('jokerBar').getBoundingClientRect(), x0 = from ? from.x : innerWidth / 2, y0 = from ? from.y : innerHeight / 2;
@@ -3390,6 +3400,7 @@ const joker = (() => {
   }
   return {
     give, place, clear, onStep, use, render, smashAt, buildAt, takenElsewhere, spawnAt, freeTile, peek,
+    firstCard: () => pickups[0] ? [pickups[0].x, pickups[0].z] : null,
     get aiming() { return aiming; },
     // the direction you swiped or pressed after arming the Hammer or the Wall: the first of the (one or two) tiles that
     // way that it can act on
@@ -4371,6 +4382,7 @@ async function play(level) {
   if (!stoneSets[b]) { $('busy').classList.add('on'); await stoneSet(b); $('busy').classList.remove('on'); } // first visit to a biome
   warp.t = -1; $('fader').style.opacity = 0;
   buildLevel(level); show('play'); intro.t = 0; intro.warm = 3; intro.wave = false; intro.online = intro.hold = false;
+  tour.i = 0; tour.t = 0; $('tourCap').classList.remove('on'); tour.shots = null; setTimeout(() => { if (L === level && intro.t >= 0) tour.shots = tourFor(level); }, 60); // (after the wolves and cards are placed)
   const scene = startScene(level, LEVELS_PER_WORLD);
   if (scene && !story.seen(scene)) { intro.hold = true; await tell(scene); intro.hold = false; }
 }
@@ -4486,6 +4498,7 @@ const lobbyMode = (() => {
   };
 })();
 $('modeCard').addEventListener('click', () => show('modes'));
+$('tourCap').addEventListener('click', e => { e.stopPropagation(); tourNext(); });
 $('modesClose').addEventListener('click', () => show('title'));
 // the tabs: leaving the friends lobby by a tab leaves the lobby too
 const fromLobby = () => { if (state === 'friend') net.leave(); };
@@ -4986,7 +4999,7 @@ function updatePillars(dt, time) {
     const jx = nudge[i * 2] + a * Math.sin(time * 71 + i * 12.9), jz = nudge[i * 2 + 1] + a * Math.cos(time * 63 + i * 7.3);
     const x = i % N, z = (i / N) | 0;
     const door = doorMeshes.get(i);
-    if (door) { door.position.set(x - origin + jx, heights[i], z - origin + jz); continue; } // door blocks move as one piece
+    if (door) { door.position.set(x - origin + jx, heights[i] - 0.12, z - origin + jz); continue; } // door blocks move as one piece (a little into the ground: no base edge showing)
     if (heights[i] > 0.003) {
       _m.makeRotationY(rotIdx[i] * Math.PI / 2 + twist[i]);
       _m.setPosition(x - origin + jx, heights[i], z - origin + jz);
@@ -5030,7 +5043,44 @@ const intro = { t: -1, warm: 0, wave: false, online: false, hold: false, t0: 0 }
 // online race: everyone's countdown starts together (the host's 'go', minus each player's network delay)
 function raceGo(at) { intro.hold = false; intro.goAt = intro.t0 = at; } // (at: this device's clock)
 const INTRO = [0.6, 1.7, 1.95, 3.1]; // key hold | out to wide | wide hold | down to the character
+// ---------- guided camera tours: on the first level, and whenever something new turns up (a doorway, a wolf, a card),
+// the camera flies to it and a caption explains, before you play. Tap (or move) to go on to the next. ----------
+const tour = { shots: null, i: 0, t: 0 };
+function tourFor(L) {
+  const P = levelPlan(L), shots = [], tile = t => t && new THREE.Vector3(t[0] - origin, 0, t[1] - origin);
+  if (L === 0) {
+    shots.push({ p: () => key.position, W: 3.4, text: 'This is the key. Find it!' });
+    shots.push({ p: () => portal.position, W: 3.6, text: 'Then bring it to the portal to finish the level.' });
+    shots.push({ p: () => player.position, W: 3.2, text: 'The walls hide under the ground and only rise near you. Remember the way!' });
+  }
+  if (P.gateway && L === 3 && maze.doors) {
+    shots.push({ p: () => tile([maze.doors[0].x, maze.doors[0].z]), W: 3.6, text: 'This tree is a doorway! The maze is split in two halves.' });
+    shots.push({ p: () => portal.position, W: 3.8, text: 'The portal is on the other half: go down the doorway, find the key in the cave, and come back up.' });
+  }
+  if (P.newCard) shots.push({ p: () => { const c = joker.firstCard(); return c && tile(c); }, W: 3.4, text: `A ${JOKERS[P.newCard].name} card: it ${JOKERS[P.newCard].tip}. Walk over it to pick it up.` });
+  if (L === 9) shots.push({ p: () => wolves[0] && wolves[0].root.position, W: 3.8, text: 'A wolf! It walks back and forth on the dotted line and only sees straight ahead. Wait beside the line, cross when it walks away.' });
+  if (shots.length) shots.push({ p: () => player.position, W: viewW, text: 'Your turn!', hold: 1.2 });
+  return shots.length ? shots : null;
+}
+function tourNext() {
+  tour.i++; tour.t = 0;
+  if (!tour.shots || tour.i >= tour.shots.length) { tour.shots = null; $('tourCap').classList.remove('on'); intro.t = -1; intro.wave = false; st.facing = Math.PI * 0.75; return; }
+  $('tourText').textContent = tour.shots[tour.i].text;
+  $('tourDots').innerHTML = tour.shots.map((_, k) => `<i class="${k === tour.i ? 'on' : ''}"></i>`).join('');
+  const c = $('tourCap'); c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop');
+}
+function tourShot(dt) {
+  if (intro.hold) return; // (a story scene first)
+  if (tour.t === 0 && tour.i === 0 && !$('tourCap').classList.contains('on')) { $('tourCap').classList.add('on'); tour.i = -1; tourNext(); }
+  const s = tour.shots[tour.i]; if (!s) return;
+  tour.t += Math.min(dt, 1 / 30);
+  const p = s.p();
+  if (p) camTarget.lerp(_ka.set(p.x, 0, p.z), 1 - Math.exp(-3.5 * dt));
+  camera.userData.W = THREE.MathUtils.lerp(camera.userData.W ?? viewW, s.W || viewW, 1 - Math.exp(-3 * dt));
+  if (tour.t > (s.hold || 3.2)) tourNext();
+}
 const skipIntro = () => {
+  if (tour.shots) { tourNext(); return; } // (a tour: on to the next thing)
   if (intro.t < 0 || intro.online) return; // (an online race's intro is shared: nobody can skip ahead)
   if (mode === 'race') { const end = RACE_HOLD + rivals.length * RACE_SEG; if (intro.t < end) intro.t = end; } // straight to the countdown
   else if (intro.t < INTRO[2]) intro.t = INTRO[2];
@@ -5095,7 +5145,8 @@ function showCount(text) {
   if (text) sfx.play(text === 'GO!' ? 'land' : 'step', text === 'GO!' ? 0.7 : 0.5);
 }
 function updateCamera(dt) {
-  if (intro.t >= 0 && state === 'play' && (mode === 'race' || mode === 'hunt')) raceShot(dt);
+  if (intro.t >= 0 && state === 'play' && tour.shots) tourShot(dt);
+  else if (intro.t >= 0 && state === 'play' && (mode === 'race' || mode === 'hunt')) raceShot(dt);
   else if (intro.t >= 0 && state === 'play') introShot(dt);
   else if (intro.t < 0) {
     const want = player.position.clone().setY(0).add(AHEAD);
@@ -5298,7 +5349,7 @@ peekBtn.addEventListener('pointerleave', setPeek(false));
 
 let fitW = 0, fitH = 0;
 // the render resolution follows the frame rate: long frames lower it a step, a long smooth run raises it back
-let prNow = PR_MAX, slowT = 0, fastT = 0, liteAuto = false;
+let prNow = PR_START, slowT = 0, fastT = 0, liteAuto = false;
 // this phone stayed slow: the heaviest extras go now, and the game starts in light mode next time
 function goLite() {
   try { localStorage.setItem('buddy-lite', '1'); } catch {}
@@ -5495,4 +5546,4 @@ show('title');
 { const j = params.get('join'); if (j) { $('friend').classList.add('guest'); $('friendTitle').textContent = 'Joining your friend…'; show('friend'); net.join(j); } } // opened from an invite: straight in
 $('loading').style.opacity = 0; setTimeout(() => $('loading').remove(), 450);
 frame();
-window.__game = { hunt, get raceCfg() { return raceCfg; }, startWolf, get wolves() { return wolves; }, get wolfOver() { return wolfOver; }, get state() { return state; }, get mode() { return mode; }, groundTexture, decorMat, get sceneryModels() { return sceneryModels; }, startRace, get rivals() { return rivals; }, intro, net, loadChar, st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };
+window.__game = { stoneSet, get stoneSets() { return stoneSets; }, hunt, get raceCfg() { return raceCfg; }, startWolf, get wolves() { return wolves; }, get wolfOver() { return wolfOver; }, get state() { return state; }, get mode() { return mode; }, groundTexture, decorMat, get sceneryModels() { return sceneryModels; }, startRace, get rivals() { return rivals; }, intro, net, loadChar, st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };

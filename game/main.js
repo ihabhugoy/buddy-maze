@@ -1016,10 +1016,12 @@ function pickDir(cands) {
   const door = d => maze.doors && maze.doors.some(o => o.x === st.gx + d[0] && o.z === st.gz + d[1]);
   const open = d => door(d) || !isWall(st.gx + d[0], st.gz + d[1]);
   const seen = d => { const x = st.gx + d[0], z = st.gz + d[1]; return x < 0 || z < 0 || x >= maze.N || z >= maze.N || targets[z * maze.N + x] > 0; };
-  const order = lastDir && b[0] === lastDir[0] && b[1] === lastDir[1] ? [b, a] : [a, b];
-  if (open(order[0])) return order[0];
-  if (open(order[1]) && (gamesPlayed >= 1 || seen(order[0]) || joker.dashing)) return order[1];
-  return order[0];
+  if (open(a)) return a;
+  // only at a corner (the path bends here: two ways out, at a right angle) does it take the other way for you;
+  // in hallways and at crossroads it goes where you pointed
+  const outs = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(open), corner = outs.length === 2 && outs[0][0] !== -outs[1][0];
+  if (corner && open(b) && (gamesPlayed >= 1 || seen(a) || joker.dashing)) return b;
+  return a;
 }
 
 // a model's texture goes to a canvas (shrunk to keep phone memory in check) so its colors can be adjusted
@@ -1955,7 +1957,7 @@ function updateTargets(silent) {
     if (mine) t = (dx + dz > 0) ? CFG.stubH : CFG.wallH; // camera sits on the +x+z side
     else for (const w of wolves) { const ex = x - w.x, ez = z - w.z; if (Math.hypot(ex, ez) <= 1.5) { t = (ex + ez > 0) ? CFG.stubH : CFG.wallH; break; } } // (around a wolf too)
     targets[i] = t;
-    if (!mine) { if (!silent && prev !== t) shake[i] = 1; continue; } // (a wolf's stones rise without dust or sound)
+    if (!mine) continue; // (a wolf's stones glide up and down without a shake, dust or sound)
     if (!silent && prev !== t) shake[i] = 1;
     if (!silent && prev === 0 && t > 0) { stonePuffs(x - origin, z - origin, true); rising++; panSum += panOf(x, z); }
     else if (!silent && prev > 0 && t === 0) stonePuffs(x - origin, z - origin, false);
@@ -3182,6 +3184,7 @@ function wolfCaught(w) {
   setTimeout(() => { if (mode === 'wolf') { const n = wolfRun; if (n > wolfBest) { wolfBest = n; try { localStorage.setItem('buddy-wolf-best', n); } catch {} } gameOver({ win: false, title: 'Caught by a wolf!', sub: `${n} map${n === 1 ? '' : 's'} cleared · best ${wolfBest}`, art: ['sticker-wolf'], again: () => startWolf(0), againLabel: 'Try again' }); } else { toast('A wolf caught you! Try again'); play(L); } }, 1200);
 }
 function wolfEnd(cleared) {
+  if (cleared) quests.add('wolf');
   const n = wolfRun + (cleared ? 1 : 0);
   if (n > wolfBest) { wolfBest = n; try { localStorage.setItem('buddy-wolf-best', n); } catch {} }
   $('raceTitle').textContent = cleared ? `Map ${wolfRun + 1} cleared!` : 'Caught by a wolf!';
@@ -3234,7 +3237,7 @@ const joker = (() => {
   let bag = [];
   try { bag = JSON.parse(localStorage.getItem('buddy-jokers') || 'null') || ['light', 'smash']; } catch { bag = ['light', 'smash']; }
   const save = () => { try { localStorage.setItem('buddy-jokers', JSON.stringify(bag)); } catch {} };
-  let pickups = [], trail = null, trailT = 0, frozenT = 0, dashT = 0;
+  let pickups = [], trail = null, trailT = 0, frozenT = 0, dashT = 0, aiming = null, aimT = 0;
   // the card lying on the floor: a little golden card with a star, turning and glowing
   const cardTex = (() => {
     const c = document.createElement('canvas'); c.width = 96; c.height = 128; const x = c.getContext('2d');
@@ -3249,7 +3252,7 @@ const joker = (() => {
   function render() {
     const el = $('jokerBar'), counts = {};
     for (const k of bag) counts[k] = (counts[k] || 0) + 1;
-    el.innerHTML = Object.keys(JOKERS).filter(k => counts[k]).map(k => `<button class="jcard" data-j="${k}" style="--c:${JOKERS[k].color}" aria-label="${JOKERS[k].name}"><svg class="ico"><use href="#${JOKERS[k].icon}"/></svg>${counts[k] > 1 ? `<b>${counts[k]}</b>` : ''}</button>`).join('');
+    el.innerHTML = Object.keys(JOKERS).filter(k => counts[k]).map(k => `<button class="jcard ${aiming === k ? 'armed' : ''}" data-j="${k}" style="--c:${JOKERS[k].color}" aria-label="${JOKERS[k].name}"><svg class="ico"><use href="#${JOKERS[k].icon}"/></svg>${counts[k] > 1 ? `<b>${counts[k]}</b>` : ''}</button>`).join('');
   }
   function give(k, from) { // a new card flies into the bar
     if (bag.length >= 9) return;
@@ -3280,7 +3283,7 @@ const joker = (() => {
     if (!maze || !n) return;
     for (let k = 0; k < n; k++) { const t = freeTile(rnd); if (t) spawnAt(t[0], t[1]); }
   }
-  function clear() { builds = []; pickups.forEach(p => scene.remove(p.s)); pickups = []; if (trail) { scene.remove(trail); trail = null; } frozenT = dashT = 0; }
+  function clear() { aiming = null; builds = []; pickups.forEach(p => scene.remove(p.s)); pickups = []; if (trail) { scene.remove(trail); trail = null; } frozenT = dashT = 0; }
   // which cards you can find: online, wolves and animals each have their own; on your own, the snowflake only with wolves about
   const kindsFor = () => mode === 'hunt' ? (hunt.amWolf() ? ['build', 'dash', 'freeze', 'smash'] : ['smash', 'build', 'dash', 'light', 'freeze'])
     : wolves.length ? ['light', 'smash', 'build', 'freeze', 'dash'] : ['light', 'smash', 'build', 'dash', 'light'];
@@ -3302,7 +3305,7 @@ const joker = (() => {
     const k = pickups.findIndex(p => p.x === x && p.z === z); if (k < 0) return;
     const p = pickups[k]; scene.remove(p.s); pickups.splice(k, 1);
     const v = p.s.position.clone().project(camera);
-    give(randomKind(), { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight });
+    give(randomKind(), { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight }); quests.add('card');
     for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2; spawnPuff(x - origin, 0.5, z - origin, Math.cos(a) * 1.1, rand(0.3, 0.9), Math.sin(a) * 1.1, rand(0.04, 0.07), i % 2 ? '#ffd04d' : '#ffffff', 0.6); }
     if (mode === 'hunt') net.send({ t: 'jk', x, z });
   }
@@ -3328,26 +3331,33 @@ const joker = (() => {
       trail = new THREE.InstancedMesh(trailGeo, trailMat, Math.max(1, path.length * 2)); const M = new THREE.Matrix4(); let n = 0;
       path.forEach((t, j) => { M.makeTranslation(t[0] - origin, 0.11, t[1] - origin); trail.setMatrixAt(n++, M); const u = path[j + 1]; if (u) { M.makeTranslation((t[0] + u[0]) / 2 - origin, 0.11, (t[1] + u[1]) / 2 - origin); trail.setMatrixAt(n++, M); } });
       trail.count = n; trail.renderOrder = 5; trail.frustumCulled = false; scene.add(trail); trailT = 7; trailMat.opacity = 0.9;
-    } else if (k === 'smash') {
-      const d = [Math.round(Math.cos(st.facing)), Math.round(-Math.sin(st.facing))];
-      ok = smashAt(st.gx + d[0], st.gz + d[1], true);
-      if (!ok) toast('Face a stone to use the Hammer');
+    } else if (k === 'smash' || k === 'build') { // aim it: the next swipe or arrow key picks the tile (no steering help)
+      if (aiming === k) { aiming = null; render(); return; } // (tapped again: put it away)
+      aiming = k; aimT = 8; render();
+      toast(k === 'smash' ? 'Swipe toward the stone to smash' : 'Swipe toward the path to block');
+      return;
     } else if (k === 'freeze') {
       if (mode === 'hunt') { const side = hunt.amWolf() ? 'animals' : 'wolves'; net.send({ t: 'freeze', side }); hunt.freeze(side); }
       else { frozenT = 6; for (const w of wolves) { w.wait = Math.max(w.wait, 6); w.state = 'roam'; w.rest = 8; } }
       toast(mode === 'hunt' && hunt.amWolf() ? 'The animals are frozen!' : 'The wolves are frozen!');
     } else if (k === 'dash') { dashT = 5; toast('Zoom!'); }
-    else if (k === 'build') {
-      const d = [Math.round(Math.cos(st.facing)), Math.round(-Math.sin(st.facing))];
-      ok = buildAt(st.gx + d[0], st.gz + d[1], true);
-      if (!ok) toast('Face an empty path to raise a Wall');
-    }
+
     if (!ok) return;
-    bag.splice(i, 1); save(); render(); sfx.ui('whoosh', 0.4);
+    bag.splice(i, 1); save(); render(); sfx.ui('whoosh', 0.4); quests.add('joker');
     const b = document.querySelector(`.jcard[data-j="${k}"]`); if (b) b.animate([{ transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: 300 });
   }
   return {
     give, place, clear, onStep, use, render, smashAt, buildAt, takenElsewhere, spawnAt, freeTile,
+    get aiming() { return aiming; },
+    // the direction you swiped or pressed after arming the Hammer or the Wall: the first of the (one or two) tiles that
+    // way that it can act on
+    aim(cands) {
+      const k = aiming; if (!k) return;
+      const done = cands.some(d => k === 'smash' ? smashAt(st.gx + d[0], st.gz + d[1], true) : buildAt(st.gx + d[0], st.gz + d[1], true));
+      if (!done) { toast(k === 'smash' ? 'No stone that way: try another direction' : 'No free path that way'); return; }
+      st.facing = Math.atan2(-cands[0][1], cands[0][0]);
+      aiming = null; const i = bag.indexOf(k); if (i >= 0) bag.splice(i, 1); save(); render(); sfx.ui('whoosh', 0.4); quests.add('joker');
+    },
     get bag() { return bag; },
     speed: () => dashT > 0 ? 0.62 : 1,
     get dashing() { return dashT > 0; },
@@ -3356,6 +3366,7 @@ const joker = (() => {
     update(dt) {
       if (trailT > 0) { trailT -= dt; trailMat.opacity = Math.min(0.9, trailT / 1.5); if (trailT <= 0 && trail) { scene.remove(trail); trail = null; } }
       if (frozenT > 0) frozenT -= dt; if (dashT > 0) dashT -= dt;
+      if (aiming && (aimT -= dt) <= 0) { aiming = null; render(); }
       for (const b of builds) if ((b.t -= dt) <= 0 && maze.g[b.i]) { maze.g[b.i] = 0; pillarsDirty = true; preyKey = ''; updateTargets(false); }
       builds = builds.filter(b => b.t > 0);
       for (const p of pickups) { p.s.position.y = 0.5 + Math.sin(performance.now() / 300 + p.x) * 0.05; p.s.material.rotation = 0; }
@@ -3670,6 +3681,7 @@ function win() {
   }
   const ratio = steps / optimal;
   const stars = steps <= optimal * 1.8 + 4 ? 3 : steps <= optimal * 3 + 8 ? 2 : 1; // (the maze is hidden: some looking around is fair)
+  quests.add('win'); quests.add('stars', Math.max(0, stars - save.stars(L)));
   const wasLocked = L + 1 < TOTAL_LEVELS && !unlocked(L + 1);
   save.set(L, stars);
   const newWorld = wasLocked && (L + 1) % LEVELS_PER_WORLD === 0 ? WORLDS[(L + 1) / LEVELS_PER_WORLD] : null;
@@ -3694,6 +3706,38 @@ function win() {
 }
 const fmt = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 const chip = (icon, text) => `<span class="chip"><svg class="ico"><use href="#${icon}"/></svg>${text}</span>`;
+// ---------- daily quests: three small goals a day, each worth a card ----------
+const quests = (() => {
+  const POOL = [
+    { id: 'win', text: n => `Clear ${n} levels`, n: [2, 3], icon: 'i-portal', c: 'var(--leaf)' },
+    { id: 'stars', text: n => `Earn ${n} stars`, n: [4, 6], icon: 'i-star', c: '#ffc43d' },
+    { id: 'card', text: n => `Pick up ${n} cards`, n: [1, 2], icon: 'i-cards', c: '#e8823a' },
+    { id: 'wolf', text: n => `Clear ${n} Wolf Chase map${n > 1 ? 's' : ''}`, n: [1, 2], icon: 'i-paw', c: '#6f7f95' },
+    { id: 'joker', text: n => `Use ${n} cards`, n: [2, 3], icon: 'i-lantern', c: '#9c84ee' },
+  ];
+  const day = () => new Date().toDateString();
+  let Q = null; try { Q = JSON.parse(localStorage.getItem('buddy-quests') || 'null'); } catch {}
+  function fresh() {
+    if (Q && Q.day === day()) return;
+    const pick = POOL.slice().sort(() => Math.random() - 0.5).slice(0, 3);
+    Q = { day: day(), list: pick.map(p => ({ id: p.id, need: p.n[Math.floor(Math.random() * p.n.length)], got: 0, done: false })) };
+    save();
+  }
+  const save = () => { try { localStorage.setItem('buddy-quests', JSON.stringify(Q)); } catch {} };
+  function render() {
+    fresh();
+    $('questList').innerHTML = Q.list.map(q => { const P = POOL.find(p => p.id === q.id); return `<div class="quest ${q.done ? 'done' : ''}" style="--c:${P.c}"><i><svg class="ico"><use href="#${P.icon}"/></svg></i><span>${P.text(q.need)}</span><em>${q.done ? 'Done!' : `${q.got}/${q.need}`}<svg class="ico"><use href="#i-cards"/></svg></em><div class="qbar"><u style="width:${Math.min(100, q.got / q.need * 100)}%"></u></div></div>`; }).join('');
+  }
+  function add(id, n = 1) {
+    fresh();
+    for (const q of Q.list) if (q.id === id && !q.done) {
+      q.got = Math.min(q.need, q.got + n);
+      if (q.got >= q.need) { q.done = true; const P = POOL.find(p => p.id === id); setTimeout(() => { toast(`Quest done: ${P.text(q.need)}!`); joker.give(Object.keys(JOKERS)[Math.floor(Math.random() * Object.keys(JOKERS).length)]); }, 1800); }
+    }
+    save();
+  }
+  return { render, add };
+})();
 // ---------- rewards: a gift every day (bigger the more days in a row), a chest every 10 stars, and a peek at what's next
 const rewards = (() => {
   const get = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
@@ -4247,15 +4291,16 @@ function show(name) {
     $('profileName').textContent = (CHARS.find(c => c.id === charId) || CHARS[0]).name;
     charPreview(charId).then(u => { $('profilePic').src = u; });
     $('cardCount').textContent = joker.bag.length;
-    $('wolfBestTxt').textContent = wolfBest ? `Best: ${wolfBest} map${wolfBest > 1 ? 's' : ''}` : 'Can you escape?';
+    $('wolfBestTxt').textContent = $('modeWolfBest').textContent = wolfBest ? `Best: ${wolfBest} map${wolfBest > 1 ? 's' : ''}` : 'Can you escape?';
+    lobbyMode.render(); quests.render();
     $('starCount').textContent = Array.from({ length: TOTAL_LEVELS }, (_, k) => save.stars(k)).reduce((a, b) => a + b, 0);
     const wd = WORLDS[Math.floor(n / LEVELS_PER_WORLD)];
     $('worldNameCard').textContent = wd.name;
     $('contArt').style.setProperty('--wc', wd.card);
-    doorPreview(wd.biome).then(url => { $('contArt').innerHTML = `<img alt="" src="${url}">`; });
+    doorPreview(wd.biome).then(url => { $('modeArtAdv').src = url; if (lobbyMode.mode === 'adventure') $('contArt').innerHTML = `<img alt="" src="${url}">`; });
   }
   if (name === 'title') { rewards.chip(); setTimeout(() => rewards.check(), 700); }
-  if (name === 'gift') $('title').classList.add('show'); // (the gift opens over the title)
+  if (name === 'gift' || name === 'modes') $('title').classList.add('show'); // (these open over the title)
   if (['title', 'outfit', 'race', 'friend'].includes(name)) $(name).querySelector('.faceSlot').appendChild($('faceCanvas'));
   if (name === 'title' || name === 'outfit') face.setCrew([]);
   if (name === 'race') raceCrew();
@@ -4367,7 +4412,32 @@ document.addEventListener('click', e => {
   show(b.dataset.go);
 });
 $('playBtn').addEventListener('click', () => show('worlds')); // adventure opens the map
-$('contBtn').addEventListener('click', e => { e.stopPropagation(); play(nextLevel()); });
+$('contBtn').addEventListener('click', e => { e.stopPropagation(); lobbyMode.go(); });
+// the lobby's mode card: what PLAY starts (remembered); tap it to choose another
+const lobbyMode = (() => {
+  let m = 'adventure'; try { m = localStorage.getItem('buddy-mode') || 'adventure'; } catch {}
+  const INFO = {
+    adventure: () => ({ name: 'Adventure', art: $('modeArtAdv').src ? `<img alt="" src="${$('modeArtAdv').src}">` : null }),
+    wolf: () => ({ name: 'Wolf Chase', sub: wolfBest ? `Best: ${wolfBest} map${wolfBest > 1 ? 's' : ''}` : 'Escape the wolves', art: '<img alt="" src="assets/story/sticker-wolf.webp">' }),
+    race: () => ({ name: 'Race', sub: 'First to the key', art: '<span style="background:var(--coral);width:100%;height:100%;display:grid;place-items:center"><svg class="ico"><use href="#i-flag"/></svg></span>' }),
+    online: () => ({ name: 'With friends', sub: 'Wolves vs Animals, races', art: '<span style="background:#f27ba6;width:100%;height:100%;display:grid;place-items:center"><svg class="ico"><use href="#i-heart"/></svg></span>' }),
+  };
+  function render() {
+    const i = INFO[m]();
+    $('modeName').textContent = i.name;
+    $('advSub').style.display = m === 'adventure' ? '' : 'none'; $('modeSub').textContent = m === 'adventure' ? '' : i.sub;
+    if (m !== 'adventure') $('contArt').innerHTML = i.art;
+  }
+  return {
+    get mode() { return m; },
+    render,
+    set(x) { m = x; try { localStorage.setItem('buddy-mode', x); } catch {} show('title'); },
+    go() { if (m === 'wolf') startWolf(0); else if (m === 'race') show('race'); else if (m === 'online') openFriend(); else play(nextLevel()); },
+  };
+})();
+$('modeCard').addEventListener('click', () => show('modes'));
+$('tabPlay').addEventListener('click', () => {});
+$('modes').addEventListener('click', e => { const b = e.target.closest('[data-mode]'); if (b) lobbyMode.set(b.dataset.mode); else if (e.target.id === 'modes') show('title'); });
 // soft UI sounds: a little pop on every button, a breath of a hover on menu items
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -4395,7 +4465,7 @@ function clearBadge() {
 }
 setTimeout(clearBadge, 2500); setTimeout(clearBadge, 7000); addEventListener('resize', () => setTimeout(clearBadge, 300));
 // title menu: the hovered item is the selected one; arrow keys / W S move it, Enter or Space picks it
-const menuItems = [...document.querySelectorAll('#sideMenu .hubtile')];
+const menuItems = [...document.querySelectorAll('#sideMenu .navtab')];
 const selectItem = el => menuItems.forEach(m => m.classList.toggle('sel', m === el));
 menuItems.forEach(m => m.addEventListener('pointerenter', () => selectItem(m)));
 addEventListener('keydown', e => {
@@ -5128,6 +5198,7 @@ cv.addEventListener('pointermove', e => {
   const dx = e.clientX - anchor.x, dy = e.clientY - anchor.y;
   if (Math.hypot(dx, dy) > 22) {
     const d = screenToGrid(dx, dy);
+    if (joker.aiming) { joker.aim(swipeCands); anchor = null; return; }
     if (!heldDir || d[0] !== heldDir[0] || d[1] !== heldDir[1]) { heldDir = d; heldCands = swipeCands; if (st.moving) queuedCands = swipeCands; else { const c = pickDir(swipeCands); tryMove(c[0], c[1]); } }
     anchor = { x: e.clientX, y: e.clientY };
   }
@@ -5146,6 +5217,7 @@ addEventListener('keydown', e => {
   const d = KEYS[e.code]; if (!d || state !== 'play') return;
   e.preventDefault();
   if (e.repeat) return;
+  if (joker.aiming) return joker.aim(d);
   heldCands = d; heldDir = d[0];
   if (st.moving) queuedCands = d; else { const c = pickDir(d); tryMove(c[0], c[1]); }
 });

@@ -1030,18 +1030,9 @@ function openDir(d) {
   const x = st.gx + d[0], z = st.gz + d[1];
   return (maze.doors && maze.doors.some(o => o.x === x && o.z === z)) || !isWall(x, z);
 }
-function steer(cands, fresh) {
+function steer(cands, fresh) { // (no steering help: you go exactly the way you point; holding keeps going that way)
   if (!cands || !cands.length) return null;
-  if (fresh) {
-    if (lastDir && cands.some(d => sameDir(d, backOf(lastDir))) && openDir(backOf(lastDir))) { wish = null; return backOf(lastDir); }
-    const turn = cands.find(d => !sameDir(d, lastDir) && !sameDir(d, backOf(lastDir)));
-    if (turn && openDir(turn)) { wish = null; return turn; }
-    if (turn && lastDir && cands.some(d => sameDir(d, lastDir))) wish = { d: turn, n: 3 }; // (not there yet: remembered)
-    return cands.find(openDir) || cands[0]; // (nothing open: you bump, as you asked)
-  }
-  if (wish) { if (openDir(wish.d)) { const d = wish.d; wish = null; return d; } if (--wish.n <= 0) wish = null; }
-  if (lastDir && cands.some(d => sameDir(d, lastDir)) && openDir(lastDir)) return lastDir;
-  return null;
+  return fresh ? cands[0] : openDir(cands[0]) ? cands[0] : null;
 }
 const pickDir = cands => steer(cands, true); // (a fresh press)
 
@@ -5218,7 +5209,7 @@ function screenToGrid(sx, sy) {
     const dot = (vx / l) * (sx / len) + (vy / l) * (sy / len);
     if (dot > bestDot) { second = best; secondDot = bestDot; bestDot = dot; best = d; } else if (dot > secondDot) { secondDot = dot; second = d; }
   }
-  swipeCands = secondDot > 0.45 ? [best, second] : [best]; // (a swipe between two ways: either will do)
+  swipeCands = [best];
   return best;
 }
 let swipeCands = null;

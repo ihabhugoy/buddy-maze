@@ -60,7 +60,7 @@ let STONE_DUST = ['#9d9a92', '#b3afa6', '#8c897f', '#c4c0b6']; // set per biome
 const OLIVE = '#5d6b3f';
 
 // ---------- worlds & levels ----------
-const LEVELS_PER_WORLD = 25;
+const LEVELS_PER_WORLD = 15;
 const WORLDS = [
   { name: 'Mossy Woods', biome: 'woods', icon: 'i-w-woods', color: '#6cc15a', card: '#cfe9b8', tint: [1, 1, 1], reveal: 2.3 },
   { name: 'Sunny Dunes', biome: 'desert', icon: 'i-w-desert', color: '#f2a53a', card: '#f8dfae', tint: [1.07, 0.96, 0.8], reveal: 2.1 },
@@ -1879,7 +1879,7 @@ function buildLevel(level, race = null, opts = {}) {
     const [a, b] = maze.doors, cave = genCaveMaze(L), [ca, cb] = cave.doors, k = keyTile(cave, ca.out, cb.out, keyDetour(L));
     optimal = shortestPath(maze, start[0], start[1], a.out[0], a.out[1]) + shortestPath(cave, ca.out[0], ca.out[1], k[0], k[1]) + shortestPath(cave, k[0], k[1], cb.out[0], cb.out[1]) + shortestPath(maze, b.out[0], b.out[1], goal[0], goal[1]) + 4;
   } else optimal = race ? shortestPath(maze, start[0], start[1], goal[0], goal[1]) : shortestPath(maze, start[0], start[1], keyAt[0], keyAt[1]) + shortestPath(maze, keyAt[0], keyAt[1], goal[0], goal[1]);
-  ui.level.textContent = race ? 'RACE' : `${Math.floor(L / LEVELS_PER_WORLD) + 1}-${L % LEVELS_PER_WORLD + 1}`;
+  ui.level.textContent = race ? 'RACE' : `${L + 1}`; // (just the level's number)
   ui.steps.textContent = steps;
   $('worldBadgeIco').setAttribute('href', '#' + (stage === 'cave' || bName === 'cave' ? 'i-w-cave' : world.icon));
   coach.level(race ? -1 : L, stage, opts.keep);
@@ -2814,6 +2814,31 @@ function raceEnd(winner) {
   setTimeout(() => show('raceEnd'), 700);
 }
 // name tags over rivals you can see, and an arrow at the screen edge pointing to the ones you can't
+// adventure (and Wolf Chase): a gold arrow at the screen edge points to the key; once you have it, a blue one points to
+// the portal (on a door level's surface: to the door; in its cave: to the key, then the way back up)
+const _ga = new THREE.Vector3();
+function updateGoalArrow(time) {
+  const el = $('goalArrow'), on = (mode === 'levels' || mode === 'wolf') && state === 'play' && intro.t < 0 && !won && warp.t < 0;
+  let tgt = null, gold = true;
+  if (on) {
+    if (keyAt && !hasKey && key.visible) tgt = key.position;
+    else if (stage === 'cave' && maze.doors) { const d = maze.doors[1]; tgt = _ga.set(d.x - origin, 0.4, d.z - origin); gold = false; }
+    else if (!hasKey && maze.doors && maze.doors.length) { const d = maze.doors[0]; tgt = _ga.set(d.x - origin, 0.4, d.z - origin); gold = false; }
+    else if (portal && portal.visible) { tgt = portal.position; gold = false; }
+  }
+  if (!tgt) { el.style.display = 'none'; return; }
+  _rp.copy(tgt); _rp.y += 0.5; _rp.project(camera);
+  const W = innerWidth, H = innerHeight, cx = W / 2, cy = H / 2, top = 96, bottom = H - 150, left = 30, right = W - 30;
+  let x = (_rp.x + 1) / 2 * W, y = (1 - _rp.y) / 2 * H;
+  if (_rp.z > 1) { x = W - x; y = H - y; }
+  el.style.display = '';
+  el.classList.toggle('blue', !gold);
+  const inside = x > left && x < right && y > top && y < bottom && _rp.z <= 1;
+  if (inside) { el.style.transform = `translate(${x}px, ${y - 30 - Math.abs(Math.sin(time * 4)) * 10}px) translate(-50%, -50%) rotate(90deg)`; return; } // bobbing over it
+  const dx = x - cx, dy = y - cy;
+  const k = Math.min(Math.abs((dx > 0 ? right - cx : cx - left) / (dx || 1e-6)), Math.abs((dy > 0 ? bottom - cy : cy - top) / (dy || 1e-6)));
+  el.style.transform = `translate(${cx + dx * k}px, ${cy + dy * k}px) translate(-50%, -50%) rotate(${Math.atan2(dy, dx)}rad)`;
+}
 function setupRaceUI() {
   const box = $('raceUI');
   box.innerHTML = rivals.map((r, i) => `<span class="rtag ${r.team ? 'team' : ''}" id="rtag${i}" style="--c:${r.color}">${r.team ? '♥ Teammate' : COLOR_NAMES[r.skinIdx]}</span>` +
@@ -3393,7 +3418,7 @@ function win() {
     spawnPuff(p.x, 0.3, p.z, Math.cos(a) * 1.6, rand(0.5, 1.4), Math.sin(a) * 1.6, rand(0.06, 0.1), i % 2 ? '#f2c14e' : '#ffffff', 0.6);
   }
   const ratio = steps / optimal;
-  const stars = ratio <= 1.15 ? 3 : ratio <= 1.6 ? 2 : 1;
+  const stars = steps <= optimal * 1.8 + 4 ? 3 : steps <= optimal * 3 + 8 ? 2 : 1; // (the maze is hidden: some looking around is fair)
   const wasLocked = L + 1 < TOTAL_LEVELS && !unlocked(L + 1);
   save.set(L, stars);
   const newWorld = wasLocked && (L + 1) % LEVELS_PER_WORLD === 0 ? WORLDS[(L + 1) / LEVELS_PER_WORLD] : null;
@@ -3905,7 +3930,7 @@ function show(name) {
   if (name === 'worlds') renderMap();
   if (name === 'title') {
     const n = nextLevel();
-    $('playSub').textContent = $('playSub2').textContent = `Level ${Math.floor(n / LEVELS_PER_WORLD) + 1}-${n % LEVELS_PER_WORLD + 1}`;
+    $('playSub').textContent = $('playSub2').textContent = `Level ${n + 1}`;
     $('starCount').textContent = Array.from({ length: TOTAL_LEVELS }, (_, k) => save.stars(k)).reduce((a, b) => a + b, 0);
     const wd = WORLDS[Math.floor(n / LEVELS_PER_WORLD)];
     $('worldNameCard').textContent = wd.name;
@@ -3918,7 +3943,7 @@ function show(name) {
   if (name === 'outfit') renderChars();
   if ((name === 'settings' || name === 'help') && (name === 'settings' ? settingsBack : helpBack) === 'title') $('title').classList.add('show'); // these panels sit over the title
   if (name === 'race') renderRaceSetup();
-  if (name === 'pause') $('pauseInfo').textContent = mode === 'wolf' ? `Wolf Chase · map ${wolfRun + 1} · ${wolves.length} wolves` : mode === 'hunt' ? 'Wolves vs Animals' : mode === 'race' ? (raceTeam ? `Team race · ${raceCfg.mates + 1} vs ${raceSize - raceCfg.mates - 1}` : `Race · ${raceSize} Buddies`) : `${WORLDS[Math.floor(L / LEVELS_PER_WORLD)].name} · level ${L % LEVELS_PER_WORLD + 1}`;
+  if (name === 'pause') $('pauseInfo').textContent = mode === 'wolf' ? `Wolf Chase · map ${wolfRun + 1} · ${wolves.length} wolves` : mode === 'hunt' ? 'Wolves vs Animals' : mode === 'race' ? (raceTeam ? `Team race · ${raceCfg.mates + 1} vs ${raceSize - raceCfg.mates - 1}` : `Race · ${raceSize} Buddies`) : `${WORLDS[Math.floor(L / LEVELS_PER_WORLD)].name} · level ${L + 1}`;
   if (name !== 'play') heldDir = queued = null;
   sfx.setScene(name === 'play' || name === 'pause' || name === 'win' || name === 'raceEnd');
 }
@@ -4555,7 +4580,7 @@ const AHEAD = new THREE.Vector3(-0.9, 0, -0.9); // keep more maze visible above 
 const intro = { t: -1, warm: 0, wave: false, online: false, hold: false, t0: 0 };
 // online race: everyone's countdown starts together (the host's 'go', minus each player's network delay)
 function raceGo(at) { intro.hold = false; intro.goAt = intro.t0 = at; } // (at: this device's clock)
-const INTRO = [1.2, 3.4, 3.9, 6.4]; // key hold | out to wide | wide hold | down to the character
+const INTRO = [0.6, 1.7, 1.95, 3.1]; // key hold | out to wide | wide hold | down to the character
 const skipIntro = () => {
   if (intro.t < 0 || intro.online) return; // (an online race's intro is shared: nobody can skip ahead)
   if (mode === 'race') { const end = RACE_HOLD + rivals.length * RACE_SEG; if (intro.t < end) intro.t = end; } // straight to the countdown
@@ -4900,6 +4925,7 @@ function frame(now = performance.now()) {
   updateCamera(dt);
   updateFocus();
   updateRaceUI();
+  updateGoalArrow(time);
   if (state === 'title' || state === 'outfit' || state === 'race' || state === 'friend' || (state === 'settings' && settingsBack === 'title') || (state === 'help' && helpBack === 'title') || state === 'install') face.render(dt, time); // menus are opaque; skip the maze behind them
   else if (state === 'worlds') map3d && map3d.render(dt, time); // the map has its own little 3D board
   else {

@@ -35,14 +35,14 @@ export const SCENES = {
     ['buddy', 'A doorway in a tree…? The path must go under the ground!'],
     [null, 'Some mazes are split in two. Step into the doorway to find the way across, down below.'],
   ],
+  // (each card has a level of its own: a forest spirit hands it to Buddy there, and the level shows how it works)
   'card-light': [
-    [null, 'Something glows on the path: a little card! The forest spirits are helping Buddy.'],
-    ['buddy', 'A Lantern! When I’m lost, it lights a trail to where I need to go.'],
-    [null, 'Cards wait in the bar at the bottom. Tap one when you need it.'],
+    [null, 'A little forest spirit floats out of the mist and gives Buddy a glowing card.'],
+    ['buddy', 'A Lantern! It lights a trail to where I need to go. Just what I need in this mist!'],
   ],
   'card-smash': [
-    ['buddy', 'A Hammer card! It can knock one stone out of my way.'],
-    [null, 'Tap the Hammer, then swipe (or press an arrow) toward the stone you want gone.'],
+    [null, 'The forest spirit is back, with a heavy little card.'],
+    ['buddy', 'A Hammer! It can knock one stone out of my way.'],
   ],
   'first-wolf': [
     ['wolf', 'Grrr…'],
@@ -50,14 +50,15 @@ export const SCENES = {
     ['buddy', 'It only sees in front of it. I’ll wait beside its path, cross when it walks away, and hide behind a wall if it spots me!'],
   ],
   'card-freeze': [
-    ['buddy', 'Brrr, this one’s cold! A Snowflake card.'],
-    [null, 'Tap it and every wolf freezes for a few seconds. Perfect for slipping past.'],
+    [null, 'A chilly breeze… the forest spirit brings a frosty card.'],
+    ['buddy', 'Brrr! A Snowflake. It freezes the wolves for a few seconds!'],
   ],
   'card-build': [
-    ['buddy', 'A Wall card! I can raise a stone to block a wolf.'],
-    [null, 'Tap it, then swipe toward the path to block. The stone sinks again after 10 seconds.'],
+    [null, 'The forest spirit hands Buddy a card made of stone.'],
+    ['buddy', 'A Wall! I can raise a stone to block a wolf’s way.'],
   ],
   'card-dash': [
+    [null, 'The forest spirit has one last card: a pair of tiny boots.'],
     ['buddy', 'Boots! With these I can run super fast for a moment.'],
   ],
   'fungus-wolf': [

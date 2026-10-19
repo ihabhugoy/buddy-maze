@@ -142,9 +142,14 @@ const PHONE = matchMedia('(pointer: coarse)').matches;
 // because a phone stayed slow), low-memory phones (Chrome reports 4 GB or less) and phones with entry-level
 // graphics chips (most budget Android phones: Mali-G5x/G6x, older Adreno, PowerVR). ?nosound: no audio at all.
 const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const GPU_NAME = (() => { try { const gl = document.createElement('canvas').getContext('webgl'), ext = gl && gl.getExtension('WEBGL_debug_renderer_info'), name = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : ''; const lose = gl && gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext(); return String(name || ''); } catch { return ''; } })();
+const GPU = (() => { try { const gl = document.createElement('canvas').getContext('webgl'), ext = gl && gl.getExtension('WEBGL_debug_renderer_info'), name = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '', astc = !!(gl && gl.getExtension('WEBGL_compressed_texture_astc')); const lose = gl && gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext(); return { name: String(name || ''), astc }; } catch { return { name: '', astc: true }; } })();
+const GPU_NAME = GPU.name;
 const WEAK_GPU = /Mali-(G5\d|G6\d|G7[0-6]|T\d)|PowerVR|Adreno \(TM\) ([1-5]\d\d|6[0-2]\d)\b/i.test(GPU_NAME);
 let liteChoice = null; try { liteChoice = localStorage.getItem('buddy-lite'); } catch {} // '1' on, '0' off (your choice wins)
+// computers with a built-in Intel graphics chip (MacBook Airs and 13-inch Pros before 2020, most office laptops) get
+// fewer pixels, half the antialiasing samples, smaller shadows, a lighter reflection and the lighter stones. Safari
+// hides the chip's name ("Apple GPU"), but only Apple's own chips read ASTC textures: a Mac without them is an Intel one
+const SLOWPC = !PHONE && !params.has('full') && (params.has('slowpc') || /Intel|Iris|HD Graphics|UHD Graphics/i.test(GPU_NAME) || (/^Apple GPU$/i.test(GPU_NAME) && !GPU.astc));
 const LITE = params.has('lite') || liteChoice === '1' || (PHONE && liteChoice !== '0' && !params.has('full') && ((navigator.deviceMemory > 0 && navigator.deviceMemory <= 4) || WEAK_GPU));
 // ?exp: an unattended test on a phone, to find what fills its memory. The game plays itself with one part switched
 // off; when the page gets closed (out of memory) or lasts 4 minutes, the next part is tried. Results stay on screen.
@@ -161,22 +166,22 @@ if (params.has('exp')) {
 const XF = EXP && EXP.run ? EXP_LIST[EXP.i] : '';
 const off = k => params.has(k) || XF === k;
 const NOSOUND = params.has('nosound') || params.has('exp');
-const PR_MAX = Math.min(devicePixelRatio, PHONE ? (LITE ? 1 : 1.25) : 2); // (phones: fixed, see adaptRes; computers climb to full sharpness when fast enough)
+const PR_MAX = Math.min(devicePixelRatio, PHONE ? (LITE ? 1 : 1.25) : LITE ? 1.25 : SLOWPC ? 1.5 : 2); // (phones: fixed, see adaptRes; computers climb to full sharpness when fast enough)
 if (PHONE) document.documentElement.classList.add('phone');
 // (phones draw straight to the screen, so they use the canvas's own antialiasing and skip the composer's big buffers)
 // (smooth edges everywhere: the map and menus draw straight to the screen)
 let renderer;
-try { renderer = new THREE.WebGLRenderer({ antialias: !off('noaa'), powerPreference: 'high-performance' }); }
+try { renderer = new THREE.WebGLRenderer({ antialias: !off('noaa') && !SLOWPC, /* (slow computers: the composer smooths the maze) */ powerPreference: 'high-performance' }); }
 catch (e) { // no 3D in this browser (graphics acceleration off, or WebGL blocked): say how to fix it instead of loading forever
   const el = document.getElementById('loading');
   if (el) el.innerHTML = `<div class="card" style="max-width:420px;text-align:center;padding:22px"><h2 class="sticker" style="margin:0 0 8px">Buddy needs 3D</h2><p style="margin:0 0 10px">This browser has 3D graphics switched off.</p><p style="margin:0;font-size:14px">In Chrome: <b>Settings → System → Use graphics acceleration when available</b>, switch it on, then restart Chrome. Or open the game in another browser.</p></div>`;
   throw e;
 }
-const PR_START = PHONE ? PR_MAX : Math.min(PR_MAX, 1.5); // (computers start here and sharpen up if they keep up)
+const PR_START = PHONE ? PR_MAX : Math.min(PR_MAX, SLOWPC || LITE ? 1 : 1.5); // (computers start here and sharpen up if they keep up)
 renderer.setPixelRatio(PR_START);
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = !off('noshadow');
-renderer.shadowMap.type = LITE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = LITE || SLOWPC ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 renderer.shadowMap.autoUpdate = false; // updated once per frame, not again for the reflection
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
@@ -205,7 +210,7 @@ scene.environmentIntensity = 0.35;
 
 const camera = new THREE.PerspectiveCamera(28, 1, 0.5, 200);
 // miniature look: tilt-shift blur above and below a sharp band around Buddy
-const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: PHONE ? 2 : 4 }));
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: PHONE || SLOWPC ? 2 : 4 }));
 composer.addPass(new RenderPass(scene, camera));
 // tilt-shift with a sharp band (not a single sharp line) centered on Buddy's height on screen each frame, so he is never
 // in the blur; the blur grows gently above and below the band. Two passes: across, then down.
@@ -255,7 +260,7 @@ function addLights(target, withShadow, B = BIOMES.woods) {
   sun.userData = { hemi, fill };
   if (withShadow) {
     sun.castShadow = true;
-    sun.shadow.mapSize.set(LITE ? 512 : PHONE ? 1024 : 2048, LITE ? 512 : PHONE ? 1024 : 2048);
+    sun.shadow.mapSize.set(LITE ? 512 : PHONE || SLOWPC ? 1024 : 2048, LITE ? 512 : PHONE || SLOWPC ? 1024 : 2048);
     Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12, near: 1, far: 50 });
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.02;
@@ -279,8 +284,8 @@ const ground = new THREE.Mesh(
 );
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = GROUND_Y;
-// phones: no reflection (it draws the whole scene a second time every frame); the cream floor is simply opaque
-if (PHONE) { mirror.visible = false; ground.material.transparent = false; ground.material.opacity = 1; }
+// phones and Intel computers: no reflection (it draws the whole scene a second time every frame); the cream floor is simply opaque
+if (PHONE || SLOWPC) { mirror.visible = false; ground.material.transparent = false; ground.material.opacity = 1; }
 scene.add(ground);
 
 // ---------- helpers ----------
@@ -868,9 +873,14 @@ const WORLD_SHAPES = {
   autumn: ['mushroom', 'heart', 'snake', 'circles', 'leaf'],
 };
 const BASE_CELLS = [4, 5, 6, 7];
-// the level (from 0) where each card first turns up, one at a time (each with a little story moment)
-const JOKER_AT = { light: 5, smash: 7, freeze: 11, build: 14, dash: 16 };
+// the level (from 0) where each card first turns up: one at a time, five levels apart, each on a tutorial level of
+// its own (the card is handed to you there and a pointing hand shows what to tap, step by step). Between them come the
+// other new things: the doorways (level 4), the wolves (10), mazes in three parts (19), the fungus wolves (24) and
+// mazes in four parts (34), so something new turns up every few levels and never two at once
+const JOKER_AT = { light: 6, smash: 11, freeze: 16, build: 21, dash: 26 };
 const jokersKnown = () => { const at = Math.max(L, nextLevel()); return Object.keys(JOKER_AT).filter(k => at >= JOKER_AT[k]); };
+// a tutorial level's maze is picked so its lesson fits (a den on the way for the Wall, a dead-end key for the Hammer)
+const TUT_SEED = { 21: 24 };
 const levelPlan = (() => {
   const cache = {};
   return L => cache[L] ||= (() => {
@@ -879,7 +889,8 @@ const levelPlan = (() => {
     // one climb from the first level to the last (not a restart in each world): mazes grow, you see less around you,
     // keys hide further off the way; a gentle level opens each set of five, a bigger one closes it
     const g = Math.min(1, L / (TOTAL_LEVELS - 1));
-    let cells = Math.min(14, 4 + Math.floor(L / 5)) + (p === 4 ? 1 : 0) - (p === 0 && L > 4 ? 1 : 0);
+    // (and the later, harder levels are vast: the size climbs faster towards the end)
+    let cells = Math.min(21, 4 + Math.floor(L / 5) + Math.round(7 * g * g)) + (p === 4 ? 1 : 0) - (p === 0 && L > 4 ? 1 : 0);
     if (L < 3) cells = [3, 4, 4][L];                     // the very first levels are tiny
     if (k === LEVELS_PER_WORLD - 1) cells += 1;          // the world's finale
     let shape = null, gateway = false;
@@ -895,28 +906,34 @@ const levelPlan = (() => {
     // wolves on patrol: on each chapter's big last level from the 2nd chapter, and now and then later in the game;
     // the caves under the door levels have a fungus wolf from the 3rd chapter on
     // wolves arrive at level 10 (one, on the big level of each set of five), then more and more often
-    const wolves = gateway || L < 9 ? 0 : L === 9 ? 1 : p === 4 ? Math.min(4, 1 + Math.floor((L - 9) / 15)) : (p === 1 || p === 2) && L >= 20 ? Math.min(3, 1 + Math.floor((L - 20) / 20)) : 0;
-    const caveWolves = gateway && L >= 17 ? Math.min(3, 1 + Math.floor((L - 17) / 20)) : 0;
+    const tutorial = Object.keys(JOKER_AT).find(k => JOKER_AT[k] === L) || null; // (a card's own tutorial level)
+    let wolves = gateway || L < 9 ? 0 : L === 9 ? 1 : p === 4 ? Math.min(4, 1 + Math.floor((L - 9) / 15)) : (p === 1 || p === 2) && L >= 20 ? Math.min(3, 1 + Math.floor((L - 20) / 20)) : 0;
+    if (tutorial) { wolves = tutorial === 'freeze' || tutorial === 'dash' ? 1 : 0; cells = Math.min(cells, 8); } // (a tutorial is about its card and nothing else)
+    const caveWolves = gateway && L >= 23 ? Math.min(3, 1 + Math.floor((L - 23) / 15)) : 0;
     // a card on the floor: the level that introduces a card always has one of it; after that, now and then
     const newCard = Object.keys(JOKER_AT).find(k => JOKER_AT[k] === L) || null;
     // the cards' puzzles, so each card has its job: a walled-in key (Hammer), a grumpy wolf's den by the way (Wall),
     // a misty level where you can barely see (Lantern). Each is introduced on its card's level (the card put in your
     // hand, the camera showing what to do), then comes back now and then with the card lying on your way
     let puzzle = null;
-    if (!gateway) {
-      if (L === JOKER_AT.light) puzzle = 'misty';
-      else if (L === JOKER_AT.smash) puzzle = 'sealed';
-      else if (L === JOKER_AT.build) puzzle = 'den';
-      else if (L > JOKER_AT.build && p === 4 && rnd() < 0.5) puzzle = 'den';
-      else if (L > JOKER_AT.smash && p === 2 && rnd() < 0.5) puzzle = 'sealed';
+    if (tutorial) puzzle = { light: 'misty', smash: 'sealed', build: 'den' }[tutorial] || null;
+    else if (!gateway) {
+      if (L > JOKER_AT.build && p === 4 && rnd() < 0.5) puzzle = 'den';
+      else if (L > JOKER_AT.smash && p === 2 && rnd() < 0.45) puzzle = 'sealed';
       else if (L > JOKER_AT.light && p === 1 && rnd() < 0.3) puzzle = 'misty';
     }
     const puzzleCard = { misty: 'light', sealed: 'smash', den: 'build' }[puzzle] || null;
-    const handCard = puzzleCard && JOKER_AT[puzzleCard] === L ? puzzleCard : null; // (its first time: in your hand)
-    const floorCard = handCard ? null : puzzleCard || newCard;
-    const cards = floorCard ? 1 : L > JOKER_AT.light && rnd() < 0.3 ? 1 : 0;
+    const handCard = tutorial; // (on its tutorial the card is handed to you)
+    // cards are rare: none lie about at random. A puzzle level after the card's tutorial hides the card it needs in a
+    // nook off the way (you go and get it); the rest are earned (stars, quests, days in a row)
+    const floorCard = tutorial ? null : puzzleCard;
+    const cards = floorCard ? 1 : 0;
     const reveal2 = puzzle === 'misty' ? 1.05 : reveal;
-    return { cells, shape, gateway, reveal: reveal2, detour, chapter: c, wolves, caveWolves, cards, newCard, puzzle, puzzleCard, handCard, floorCard };
+    // door levels: the harder the game gets, the more pieces the maze is cut into (a cave under each cut): two halves
+    // in the first world, three parts from level 19, four from level 34; each part needs room, so they're vast too
+    const parts = !gateway ? 1 : L < 15 ? 2 : L < 30 ? 3 : 4;
+    if (parts > 2) cells = Math.min(22, Math.max(cells + 1, parts * 4 + (parts - 3) * 2));
+    return { parts, cells, shape, gateway, reveal: reveal2, detour: tutorial ? Math.min(detour, 0.3) : detour, chapter: c, wolves, caveWolves, cards, newCard, puzzle, puzzleCard, handCard, floorCard, tutorial };
   })();
 })();
 function genShapedMaze(cells, rnd, shape) {
@@ -1547,7 +1564,7 @@ function stoneSet(name) {
     let variants = pgs.map(prepPillar);
     // phones: a stone shape that stays far too heavy even simplified (a scan cut into countless texture patches,
     // ~34k triangles where 3k was asked) is left out of the set; the world has plenty of others
-    if (PHONE) { const light = variants.filter(v => v.raw.index.count / 3 < 9000); if (light.length >= 3) variants = light; }
+    if (PHONE || SLOWPC) { const light = variants.filter(v => v.raw.index.count / 3 < 9000); if (light.length >= 3) variants = light; }
     const door = prepDoor(doorG);
     // cave: the bioluminescent bits (bright and colorful, any hue) keep their own colors; remember them before the rock is recolored
     const glows = B.stepGlow ? variants.map(v => captureGlow(v.mat.map)) : null;
@@ -1681,36 +1698,46 @@ const levelBiome = L => WORLDS[Math.floor(L / LEVELS_PER_WORLD)].biome;
 // two separate mazes, one above and one below a solid middle row; door A below it, door B above it
 // (with a shape, each half is that shape squeezed into its half; door A opens onto the lower half's first row, door B
 // onto the upper half's last row, a corridor is cut to them if the shape is narrow there)
-function genSplitMaze(C, rnd, shape) {
-  const N = C * 2 + 1, h = Math.floor(C / 2), zDiv = 2 * h, g = new Uint8Array(N * N).fill(1), S = shape && SHAPES[shape];
-  const doorCol = [];
-  for (const [r0, r1] of [[0, h], [h, C]]) {
-    const H = r1 - r0, inHalf = cz => cz >= r0 && cz < r1;
+function genSplitMaze(C, rnd, shape, parts = 2) {
+  // The maze in `parts` bands (2 halves, later 3 or 4 parts), each its own maze, stacked from the far one (the
+  // portal's, band 0) to the near one (where you start, the last band), with open gaps between them. Between each
+  // pair, door A (on the near band's far edge) goes down to a cave and door B (on the far band's near edge) comes
+  // back up: transition t joins band parts-1-t to the one beyond it. The doors swap sides each time so the way
+  // zig-zags. (With a shape, each band is that shape squeezed into its rows.)
+  const N = C * 2 + 1, g = new Uint8Array(N * N).fill(1), S = shape && SHAPES[shape];
+  const bands = []; for (let k = 0, r = 0; k < parts; k++) { const n = Math.floor((C - r) / (parts - k)); bands.push([r, r + n]); r += n; }
+  const sideOf = t => t % 2 === 0 ? C - 1 : 0; // door A_t's side (B_t on the other)
+  const cols = bands.map(() => ({}));
+  bands.forEach(([r0, r1], k) => {
+    const H = r1 - r0, inBand = cz => cz >= r0 && cz < r1;
     const shaped = (cx, cz) => !S || S.inside(cx, Math.min(C - 1, Math.floor((cz - r0 + 0.5) * C / H)), C);
-    const ok0 = (cx, cz) => cx >= 0 && cx < C && inHalf(cz) && shaped(cx, cz);
-    // keep the half's biggest connected part
+    const ok0 = (cx, cz) => cx >= 0 && cx < C && inBand(cz) && shaped(cx, cz);
     const comp = new Int32Array(C * C).fill(-1); let best = -1, bestN = 0;
     for (let cz = r0; cz < r1; cz++) for (let cx = 0; cx < C; cx++) {
       if (!ok0(cx, cz) || comp[cz * C + cx] >= 0) continue;
       const id = cz * C + cx, q = [[cx, cz]]; comp[id] = id;
-      for (let k = 0; k < q.length; k++) for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const x = q[k][0] + dx, z = q[k][1] + dz; if (ok0(x, z) && comp[z * C + x] < 0) { comp[z * C + x] = id; q.push([x, z]); } }
+      for (let j = 0; j < q.length; j++) for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const x = q[j][0] + dx, z = q[j][1] + dz; if (ok0(x, z) && comp[z * C + x] < 0) { comp[z * C + x] = id; q.push([x, z]); } }
       if (q.length > bestN) { bestN = q.length; best = id; }
     }
     const inMain = new Uint8Array(C * C);
     for (let i = 0; i < C * C; i++) if (best >= 0 && comp[i] === best) inMain[i] = 1;
-    if (best < 0) for (let cz = r0; cz < r1; cz++) for (let cx = 0; cx < C; cx++) inMain[cz * C + cx] = 1; // (nothing fits: the whole half)
-    // the row next to the middle must be reachable: if the shape is narrow there, a corridor runs to it
-    const edge = r0 === 0 ? r1 - 1 : r0, dir = r0 === 0 ? -1 : 1, want = r0 === 0 ? 0 : C - 1; // door B left, door A right
-    let col = -1;
-    for (let cx = 0; cx < C; cx++) if (inMain[edge * C + cx] && (col < 0 || Math.abs(cx - want) < Math.abs(col - want))) col = cx;
-    if (col < 0) {
-      let bx = 0, bz = r0, bd = 1e9;
-      for (let cz = r0; cz < r1; cz++) for (let cx = 0; cx < C; cx++) if (inMain[cz * C + cx]) { const d = Math.abs(cz - edge) * 4 + Math.abs(cx - want); if (d < bd) { bd = d; bx = cx; bz = cz; } }
-      for (let cz = bz; cz !== edge - dir; cz -= dir) inMain[cz * C + bx] = 1;
-      col = bx;
+    if (best < 0) for (let cz = r0; cz < r1; cz++) for (let cx = 0; cx < C; cx++) inMain[cz * C + cx] = 1;
+    // the edges with a door must be reachable: if the shape is narrow there, a corridor runs to it
+    const needs = [];
+    if (k < parts - 1) needs.push({ key: 'near', edge: r1 - 1, step: 1, want: C - 1 - sideOf(parts - 2 - k) }); // door B of transition parts-2-k
+    if (k > 0) needs.push({ key: 'far', edge: r0, step: -1, want: sideOf(parts - 1 - k) });                    // door A of transition parts-1-k
+    for (const nd of needs) {
+      let col = -1;
+      for (let cx = 0; cx < C; cx++) if (inMain[nd.edge * C + cx] && (col < 0 || Math.abs(cx - nd.want) < Math.abs(col - nd.want))) col = cx;
+      if (col < 0) {
+        let bx = 0, bz = r0, bd = 1e9;
+        for (let cz = r0; cz < r1; cz++) for (let cx = 0; cx < C; cx++) if (inMain[cz * C + cx]) { const d = Math.abs(cz - nd.edge) * 4 + Math.abs(cx - nd.want); if (d < bd) { bd = d; bx = cx; bz = cz; } }
+        for (let cz = bz; cz !== nd.edge + nd.step; cz += nd.step) inMain[cz * C + bx] = 1;
+        col = bx;
+      }
+      cols[k][nd.key] = col;
     }
-    doorCol.push(col);
-    const ok = (cx, cz) => cx >= 0 && cx < C && inHalf(cz) && inMain[cz * C + cx];
+    const ok = (cx, cz) => cx >= 0 && cx < C && inBand(cz) && inMain[cz * C + cx];
     const cells = [];
     for (let cz = r0; cz < r1; cz++) for (let cx = 0; cx < C; cx++) if (ok(cx, cz)) cells.push([cx, cz]);
     const [sx, sz] = cells[Math.floor(rnd() * cells.length)], stack = [[sx, sz]];
@@ -1724,37 +1751,37 @@ function genSplitMaze(C, rnd, shape) {
       g[(2 * (cz + dz) + 1) * N + 2 * (cx + dx) + 1] = 0;
       stack.push([cx + dx, cz + dz]);
     }
+  });
+  // pull the bands apart: an open gap of GAP empty rows between each, so you can see they don't connect (the grid
+  // stays square: the extra width is split as empty columns on both sides)
+  const GAP = 3, M = N + (parts - 1) * (GAP + 1), ox = Math.floor((parts - 1) * (GAP + 1) / 2);
+  const g2 = new Uint8Array(M * M).fill(1), empty = new Uint8Array(M * M).fill(1), zOf = (k, z) => z + k * (GAP + 1);
+  bands.forEach(([r0, r1], k) => { for (let z = 2 * r0; z <= 2 * r1; z++) for (let x = 0; x < N; x++) { const z2 = zOf(k, z); g2[z2 * M + x + ox] = g[z * N + x]; empty[z2 * M + x + ox] = 0; } });
+  const doors = [];
+  for (let t = 0; t < parts - 1; t++) {
+    const b = parts - 1 - t, xa = 2 * cols[b].far + 1 + ox, za = zOf(b, 2 * bands[b][0]), xb = 2 * cols[b - 1].near + 1 + ox, zb = zOf(b - 1, 2 * bands[b - 1][1]);
+    doors.push({ id: 'A' + t, x: xa, z: za, out: [xa, za + 1], t }, { id: 'B' + t, x: xb, z: zb, out: [xb, zb - 1], t });
   }
-  const xA = S ? 2 * doorCol[1] + 1 : N - 2 - 2 * Math.floor(rnd() * 2), xB = S ? 2 * doorCol[0] + 1 : 1 + 2 * Math.floor(rnd() * 2);
-  // pull the two halves apart: an open gap of GAP empty rows between them, so you can see they are not connected
-  // (the grid stays square, so the extra width is split as empty columns on both sides)
-  const GAP = 3, M = N + GAP + 1, ox = Math.floor((GAP + 1) / 2), dz = GAP + 1;
-  const g2 = new Uint8Array(M * M).fill(1), empty = new Uint8Array(M * M).fill(1);
-  const put = (x, z, x2, z2) => { g2[z2 * M + x2] = g[z * N + x]; empty[z2 * M + x2] = 0; };
-  for (let z = 0; z <= zDiv; z++) for (let x = 0; x < N; x++) put(x, z, x + ox, z);
-  for (let z = zDiv; z < N; z++) for (let x = 0; x < N; x++) put(x, z, x + ox, z + dz);
-  let start = [N - 2 + ox, N - 2 + dz], goal = [1 + ox, 1];
-  if (S) { // shaped: tiles away from any path stay empty floor; start nearest the camera below, portal furthest away above
-    const open = i => !g2[i];
-    for (let z = 0; z < M; z++) for (let x = 0; x < M; x++) {
-      let near = false;
-      for (let a = -1; a <= 1 && !near; a++) for (let b = -1; b <= 1; b++) { const X = x + b, Z = z + a; if (X >= 0 && Z >= 0 && X < M && Z < M && open(Z * M + X)) { near = true; break; } }
-      if (!near) empty[z * M + x] = 1;
-    }
-    start = null; goal = null;
-    for (let z = 0; z < M; z++) for (let x = 0; x < M; x++) if (open(z * M + x)) {
-      if (z > zDiv + dz && (!start || x + z > start[0] + start[1])) start = [x, z];
-      if (z < zDiv && (!goal || x + z < goal[0] + goal[1])) goal = [x, z];
-    }
+  let start = null, goal = null;
+  const open = i => !g2[i], nearZ = zOf(parts - 1, 2 * bands[parts - 1][0]), farZ = 2 * bands[0][1];
+  if (S) for (let z = 0; z < M; z++) for (let x = 0; x < M; x++) { // (shaped: tiles away from any path stay empty floor)
+    let near = false;
+    for (let a = -1; a <= 1 && !near; a++) for (let c = -1; c <= 1; c++) { const X = x + c, Z = z + a; if (X >= 0 && Z >= 0 && X < M && Z < M && open(Z * M + X)) { near = true; break; } }
+    if (!near) empty[z * M + x] = 1;
   }
-  return { N: M, g: g2, empty, start, goal,
-    doors: [{ id: 'A', x: xA + ox, z: zDiv + dz, out: [xA + ox, zDiv + dz + 1] }, { id: 'B', x: xB + ox, z: zDiv, out: [xB + ox, zDiv - 1] }] };
+  for (const d of doors) empty[d.z * M + d.x] = 0;
+  // start nearest the camera in the near band, the portal furthest away in the far band
+  for (let z = 0; z < M; z++) for (let x = 0; x < M; x++) if (open(z * M + x)) {
+    if (z > nearZ && (!start || x + z > start[0] + start[1])) start = [x, z];
+    if (z < farZ && (!goal || x + z < goal[0] + goal[1])) goal = [x, z];
+  }
+  return { N: M, g: g2, empty, start, goal, doors, parts };
 }
 // the cave under a door level: door A near the bottom corner, door B at the far corner
 // (the cave has a shape of its own too; door A stands just past its nearest path, door B past its furthest)
 const CAVE_SHAPES = ['circle', 'star', 'islands', 'mushroom', 'flower', 'gem', 'crescent', 'leaf', 'plus', 'ring', 'heart', 'snake'];
-function genCaveMaze(L) {
-  const rnd = mulberry32(L * 7919 + 3), m = genShapedMaze(5 + Math.min(4, Math.floor(L / 10)), rnd, CAVE_SHAPES[(L * 5 + 2) % CAVE_SHAPES.length]), N = m.N;
+function genCaveMaze(L, t = 0) { // (t: which gap's cave)
+  const rnd = mulberry32(L * 7919 + 3 + t * 1013), m = genShapedMaze(5 + Math.min(4, Math.floor(L / 10)), rnd, CAVE_SHAPES[(L * 5 + 2 + t * 3) % CAVE_SHAPES.length]), N = m.N;
   const wallBy = ([x, z], dirs) => { for (const [dx, dz] of dirs) { const X = x + dx, Z = z + dz; if (X >= 0 && Z >= 0 && X < N && Z < N && m.g[Z * N + X]) return [X, Z]; } return null; };
   // the open tile nearest (or furthest) along the camera diagonal that has a wall beside it for the door
   const pick = (near, dirs) => {
@@ -1767,7 +1794,8 @@ function genCaveMaze(L) {
   m.doors = [{ id: 'A', x: a.x, z: a.z, out: a.out }, { id: 'B', x: b.x, z: b.z, out: b.out }];
   return m;
 }
-let biome = 'woods', curSet = null, stage = 'surface', doorMeshes = new Map();
+let biome = 'woods', curSet = null, stage = 'surface', doorMeshes = new Map(), caveIdx = 0;
+const surfaceMaze = L => genSplitMaze(levelCells(L), mulberry32(L * 9973 + 17), levelPlan(L).shape, levelPlan(L).parts);
 // switch light, sky, floor, fog and color grade to a biome
 function applyBiome(name) {
   const B = BIOMES[name];
@@ -1880,8 +1908,9 @@ function buildLevel(level, race = null, opts = {}) {
   for (const m of doorMeshes.values()) scene.remove(m);
   doorMeshes.clear();
   const shape = race || isGateway(L) ? null : levelPlan(L).shape;
-  const rnd = mulberry32(L * 9973 + 17);
-  maze = race ? race.maze : stage === 'cave' ? genCaveMaze(L) : isGateway(L) ? genSplitMaze(levelCells(L), rnd, levelPlan(L).shape) : shape ? genShapedMaze(levelCells(L), rnd, shape) : genMaze(levelCells(L), rnd);
+  const rnd = mulberry32(L * 9973 + 17 + (TUT_SEED[L] ?? window.__seedOff ?? 0) * 7);
+  if (stage === 'cave') caveIdx = opts.cave ?? caveIdx;
+  maze = race ? race.maze : stage === 'cave' ? genCaveMaze(L, caveIdx) : isGateway(L) ? genSplitMaze(levelCells(L), rnd, levelPlan(L).shape, levelPlan(L).parts) : shape ? genShapedMaze(levelCells(L), rnd, shape) : genMaze(levelCells(L), rnd);
   // within a world you see less of the maze around you as the levels go on
   CFG.revealR = parseFloat(params.get('r') || (race ? world.reveal : levelPlan(L).reveal));
   const { N } = maze, T = N * N;
@@ -1924,7 +1953,7 @@ function buildLevel(level, race = null, opts = {}) {
   goal = race ? race.goal : stage === 'cave' ? [-9, -9] : maze.goal || [1, 1]; // the portal (none in the cave)
   if (!opts.keep) hasKey = false;
   // the key: in a race it's the prize in the middle; on a door level it waits in the cave; elsewhere down a side path
-  keyAt = race ? (race.keyAt !== undefined ? race.keyAt : goal) : isGateway(L) ? (stage === 'cave' ? keyTile(maze, maze.doors[0].out, maze.doors[1].out, keyDetour(L)) : null) : keyTile(maze, start, goal, keyDetour(L));
+  keyAt = race ? (race.keyAt !== undefined ? race.keyAt : goal) : isGateway(L) ? (stage === 'cave' && caveIdx === levelPlan(L).parts - 2 ? keyTile(maze, maze.doors[0].out, maze.doors[1].out, keyDetour(L)) : null) : keyTile(maze, start, goal, keyDetour(L));
   key.visible = !!keyAt && !hasKey;
   key.userData.grab = -1;
   if (keyAt) key.position.set(keyAt[0] - origin, 0.55, keyAt[1] - origin);
@@ -1947,13 +1976,20 @@ function buildLevel(level, race = null, opts = {}) {
   won = false; heldDir = queued = heldCands = queuedCands = null;
   if (opts.keep) { /* stats carry over through the doors */ }
   else if (isGateway(L) && !race) { // best path: to door A, through the cave by way of the key, then from door B to the portal
-    const [a, b] = maze.doors, cave = genCaveMaze(L), [ca, cb] = cave.doors, k = keyTile(cave, ca.out, cb.out, keyDetour(L));
-    optimal = shortestPath(maze, start[0], start[1], a.out[0], a.out[1]) + shortestPath(cave, ca.out[0], ca.out[1], k[0], k[1]) + shortestPath(cave, k[0], k[1], cb.out[0], cb.out[1]) + shortestPath(maze, b.out[0], b.out[1], goal[0], goal[1]) + 4;
+    const parts = levelPlan(L).parts, D = id => maze.doors.find(d => d.id === id); let from = start; optimal = 0;
+    for (let t = 0; t < parts - 1; t++) {
+      const a = D('A' + t), b = D('B' + t), cave = genCaveMaze(L, t), [ca, cb] = cave.doors;
+      optimal += shortestPath(maze, from[0], from[1], a.out[0], a.out[1]) + 4;
+      if (t === parts - 2) { const k = keyTile(cave, ca.out, cb.out, keyDetour(L)); optimal += shortestPath(cave, ca.out[0], ca.out[1], k[0], k[1]) + shortestPath(cave, k[0], k[1], cb.out[0], cb.out[1]); }
+      else optimal += shortestPath(cave, ca.out[0], ca.out[1], cb.out[0], cb.out[1]);
+      from = b.out;
+    }
+    optimal += shortestPath(maze, from[0], from[1], goal[0], goal[1]);
   } else optimal = race ? shortestPath(maze, start[0], start[1], goal[0], goal[1]) : shortestPath(maze, start[0], start[1], keyAt[0], keyAt[1]) + shortestPath(maze, keyAt[0], keyAt[1], goal[0], goal[1]);
   ui.level.textContent = race ? 'RACE' : `${L + 1}`; // (just the level's number)
   ui.steps.textContent = steps;
   $('worldBadgeIco').setAttribute('href', '#' + (stage === 'cave' || bName === 'cave' ? 'i-w-cave' : world.icon));
-  coach.level(race ? -1 : L, stage, opts.keep);
+  coach.level(race ? -1 : L, stage, opts.keep); guide.level(race ? -1 : L, stage, opts.keep);
   for (const r of rivals) { scene.remove(r.root); setTimeout(() => r.root.traverse(o => { if (o.material) [].concat(o.material).forEach(m => m.dispose()); }), 3000); } // (their textures are shared)
   keyDist = null;
   if (race) { // walking distance from every tile to the key, for the live ranking
@@ -1995,7 +2031,7 @@ function buildLevel(level, race = null, opts = {}) {
         w.routeMesh = drawRoute(D.route, false); wolves.push(w);
       }
       updateTargets(true);
-      if (!seenWolves) { seenWolves = true; try { localStorage.setItem('buddy-seen-wolves', '1'); } catch {} setTimeout(() => toast('A wolf patrols across your way: wait beside its path, cross when it walks away. If it spots you, hide behind a wall!'), 2500); }
+      if (!seenWolves) { seenWolves = true; try { localStorage.setItem('buddy-seen-wolves', '1'); } catch {} }
     });
   }
   for (let i = 0; i < T; i++) heights[i] = targets[i];
@@ -2019,9 +2055,8 @@ function updateTargets(silent) {
     if (puzzles.isCracked(i)) { if (!silent && targets[i] !== CFG.wallH) shake[i] = 1; targets[i] = CFG.wallH; continue; } // (a cracked stone always stands, with its sign)
     const mine = Math.hypot(dx, dz) <= CFG.revealR;
     if (mine) t = (dx + dz > 0) && !(maze.doors && maze.doors.some(d => d.x === x && d.z === z)) ? CFG.stubH : CFG.wallH; // camera sits on the +x+z side (doors always stand full height)
-    else if (mode !== 'hunt') for (const w of wolves) { const ex = x - w.x, ez = z - w.z; if (Math.hypot(ex, ez) <= 1.5) { t = (ex + ez > 0) ? CFG.stubH : CFG.wallH; break; } } // (around a wolf too)
     targets[i] = t;
-    if (!mine) continue; // (a wolf's stones glide up and down without a shake, dust or sound)
+    if (!mine) continue;
     if (!silent && prev !== t) shake[i] = 1;
     if (!silent && prev === 0 && t > 0) { stonePuffs(x - origin, z - origin, true); rising++; panSum += panOf(x, z); }
     else if (!silent && prev > 0 && t === 0) stonePuffs(x - origin, z - origin, false);
@@ -2036,7 +2071,7 @@ function updateTargets(silent) {
 // only the big structures (castles, towers, arches, gate, shrine, ruined walls), each on a soft patch of grass
 const SCENERY = [[1, 'arch'], [2, 'arch'], [3, 'arch'], [4, 'arch'], [5, 'arch'], [7, 'arch'], [8, 'arch'], [15, 'arch'], [16, 'arch']];
 const KIND = {
-  arch: { size: [3.0, 4.4], sink: [0.1, 0.22], count: PHONE ? 0 : 6, gap: 6, inner: 3.4, outer: 11 }, // (phones: none, it's far background)
+  arch: { size: [3.0, 4.4], sink: [0.1, 0.22], count: PHONE ? 0 : SLOWPC ? 3 : 6, gap: 6, inner: 3.4, outer: 11 }, // (phones: none, it's far background)
 };
 const sceneryModels = { arch: [] };
 const sceneryGroup = new THREE.Group();
@@ -2641,11 +2676,12 @@ function startWarp(door) {
 }
 async function warpSwap() {
   const toCave = stage !== 'cave';
-  const dest = toCave ? genCaveMaze(L).doors.find(d => d.id === warp.door.id) : null;
+  const t = toCave ? warp.door.t : caveIdx; // (which gap's cave)
+  const dest = toCave ? genCaveMaze(L, t).doors.find(d => d.id === warp.door.id[0]) : null;
   if (toCave) await stoneSet('cave'); else await stoneSet(levelBiome(L));
-  const back = !toCave ? genSplitMaze(levelCells(L), mulberry32(L * 9973 + 17), levelPlan(L).shape).doors.find(d => d.id === warp.door.id) : null;
+  const back = !toCave ? surfaceMaze(L).doors.find(d => d.id === warp.door.id + t) : null;
   const d = dest || back;
-  buildLevel(L, null, { stage: toCave ? 'cave' : 'surface', spawn: d.out, keep: true });
+  buildLevel(L, null, { stage: toCave ? 'cave' : 'surface', spawn: d.out, keep: true, cave: t });
   warp.from.copy(worldPos(d.x, d.z)); warp.to.copy(worldPos(d.out[0], d.out[1]));
   st.facing = Math.atan2(-(d.out[1] - d.z), d.out[0] - d.x);
   camTarget.copy(warp.to);
@@ -2913,7 +2949,7 @@ function updateGoalArrow(time) {
   else if (on) {
     if (keyAt && !hasKey && key.visible) tgt = key.position;
     else if (stage === 'cave' && maze.doors) { const d = maze.doors[1]; tgt = _ga.set(d.x - origin, 0.4, d.z - origin); gold = false; }
-    else if (!hasKey && maze.doors && maze.doors.length) { const d = maze.doors[0]; tgt = _ga.set(d.x - origin, 0.4, d.z - origin); gold = false; }
+    else if (maze.doors && maze.doors.length && doorAhead()) { const d = doorAhead(); tgt = _ga.set(d.x - origin, 0.4, d.z - origin); gold = false; }
     else if (portal && portal.visible) { tgt = portal.position; gold = false; }
   }
   if (!tgt) { if (arrowOn) { el.style.display = 'none'; arrowOn = false; } return; }
@@ -3075,11 +3111,30 @@ function pathTiles(a, b) {
   while (d[i] > 0) { const x = i % N, z = (i / N) | 0; for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Z = z + dz, j = Z * N + X; if (X >= 0 && Z >= 0 && X < N && Z < N && d[j] === d[i] - 1) { i = j; break; } } out.push([i % N, (i / N) | 0]); }
   return out;
 }
+let _nd = { m: null, i: -1, a: null };
+function nextDoorway() { // (worked out again only when Buddy steps onto another tile)
+  if (!maze.doors || stage === 'cave') return null;
+  const N = maze.N, i = st.gz * N + st.gx;
+  if (_nd.m === maze && _nd.i === i) return _nd.a;
+  const d = distFrom([[st.gx, st.gz]]);
+  const a = maze.doors.filter(o => o.id[0] === 'A').find(o => d[o.out[1] * N + o.out[0]] >= 0);
+  _nd = { m: maze, i, a: a && !(d[goal[1] * N + goal[0]] >= 0) ? a : null }; // (the portal's part has no doorway onwards)
+  return _nd.a;
+}
+// the doorway to head for on a door level's surface: the next one on, or (came up without the key) back down
+function doorAhead() {
+  const a = nextDoorway(); if (a || hasKey || !maze.doors || stage === 'cave') return a;
+  return maze.doors.find(d => d.id === 'B' + (maze.parts - 2)) || null;
+}
 function wayThrough() {
   if (maze.way) return maze.way;
   const D = maze.doors;
-  if (stage === 'cave') return keyAt ? [...pathTiles(D[0].out, keyAt), ...pathTiles(keyAt, D[1].out)] : [];
-  if (D && D.length) return [...pathTiles(start, D[0].out), ...pathTiles(D[1].out, goal)];
+  if (stage === 'cave') return keyAt ? [...pathTiles(D[0].out, keyAt), ...pathTiles(keyAt, D[1].out)] : pathTiles(D[0].out, D[1].out);
+  if (D && D.length) { // start -> A0, B0 -> A1, ... -> the last B -> the portal
+    const out = [], n = D.length / 2, get = id => D.find(d => d.id === id); let from = start;
+    for (let t = 0; t < n; t++) { out.push(...pathTiles(from, get('A' + t).out)); from = get('B' + t).out; }
+    return [...out, ...pathTiles(from, goal)];
+  }
   return keyAt ? [...pathTiles(start, keyAt), ...pathTiles(keyAt, goal)] : pathTiles(start, goal);
 }
 // patrols that cross your way: each wolf walks across it at a side opening (a short arm into the side path, over the
@@ -3200,7 +3255,6 @@ function updateWolves(dt, time) {
     preyNow = prey;
     if (k !== preyKey) { preyKey = k; preyDist = prey.length ? distFrom(prey) : null; }
   }
-  let stepped = false;
   for (const w of wolves) {
     let hop = 0;
     if (w.rest > 0) w.rest -= dt;
@@ -3212,16 +3266,53 @@ function updateWolves(dt, time) {
         if (nx) {
           w.fx = w.x; w.fz = w.z; [w.x, w.z] = nx; w.t = 0;
           w.stepTime = w.state === 'chase' ? WOLF.chase : WOLF.roam;
-          w.facing = Math.atan2(-(w.z - w.fz), w.x - w.fx); stepped = true;
+          w.facing = Math.atan2(-(w.z - w.fz), w.x - w.fx);
           if (w.pid !== undefined) net.send({ t: 'pos', x: w.x, z: w.z, p: w.pid, s: w.stepTime });
         } else if (w.wait <= 0) w.wait = 0.25 + Math.random() * 0.6; // stops and sniffs
       }
       if (w.t < 1) { w.t = Math.min(1, w.t + dt / w.stepTime); hop = Math.abs(Math.sin(w.U.uPhase.value)) * (w.state === 'chase' ? 0.07 : 0.035); wolfMoving = true; }
     }
     animateActor(w, dt, time, hop, live && w.t < 1, w.state === 'chase');
+    iceLook(w, joker.frozenLeft, time);
     if (live && (mode === 'wolf' || mode === 'levels') && Math.hypot(w.root.position.x - player.position.x, w.root.position.z - player.position.z) < WOLF.catchR) wolfCaught(w);
   }
-  if (stepped && mode !== 'race' && mode !== 'hunt') updateTargets(false); // (the stones follow the wolves too; not online)
+}
+// frozen by the Snowflake: the wolf turns to ice (pale blue, glinting, standing stock still) with a little round
+// countdown over its head; when the time's up it thaws back to its own colors
+function iceTimerDraw(a, n) {
+  const c = a.iceCanvas, x = c.getContext('2d'), W = c.width;
+  x.clearRect(0, 0, W, W);
+  x.beginPath(); x.arc(W / 2, W / 2, W / 2 - 4, 0, Math.PI * 2); x.fillStyle = '#ffffff'; x.fill();
+  x.lineWidth = 9; x.strokeStyle = '#6dbef0'; x.stroke();
+  x.beginPath(); x.arc(W / 2, W / 2, W / 2 - 16, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, a.iceFrac)); x.lineWidth = 7; x.strokeStyle = '#bfe4fb'; x.stroke();
+  x.fillStyle = '#2f7fd0'; x.font = `900 ${Math.round(W * 0.5)}px Nunito, system-ui, sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(String(n), W / 2, W / 2 + 4);
+  a.ice.material.map.needsUpdate = true;
+}
+function iceLook(a, left, time) {
+  const on = left > 0;
+  if (on !== !!a.iced) {
+    a.iced = on;
+    if (!a.iceMats) { a.iceMats = []; a.body.children[0].traverse(o => { if (o.isMesh && o.material.emissive) a.iceMats.push([o.material, o.material.color.clone(), o.material.emissive.clone(), o.material.emissiveIntensity]); }); }
+    for (const [m, c, e, k] of a.iceMats) { if (on) { m.color.set('#a8dcff'); m.emissive.set('#3b8ad8'); m.emissiveIntensity = 0.45; } else { m.color.copy(c); m.emissive.copy(e); m.emissiveIntensity = k; } }
+    if (on && !a.ice) {
+      a.iceCanvas = document.createElement('canvas'); a.iceCanvas.width = a.iceCanvas.height = 96;
+      const t = new THREE.CanvasTexture(a.iceCanvas); t.colorSpace = THREE.SRGBColorSpace;
+      a.ice = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true })); a.ice.renderOrder = 32;
+      a.ice.position.y = CFG.charH * a.scale + 0.42; a.root.add(a.ice);
+    }
+    if (a.ice) a.ice.visible = on;
+    a.iceN = -1;
+    const p = a.root.position;
+    for (let i = 0; i < (on ? 12 : 8); i++) { const r = i / 12 * Math.PI * 2; spawnPuff(p.x, 0.35, p.z, Math.cos(r) * 0.9, rand(0.3, 0.8), Math.sin(r) * 0.9, rand(0.05, 0.08), i % 2 ? '#dff3ff' : '#9fd3fb', 0.6); }
+  }
+  if (!on) return;
+  a.iceFrac = left / 6;
+  const n = Math.ceil(left);
+  if (n !== a.iceN) { a.iceN = n; iceTimerDraw(a, n); }
+  a.ice.scale.setScalar(0.4 + (left % 1 > 0.85 ? (left % 1 - 0.85) * 0.6 : 0)); // (a little tick each second)
+  a.body.rotation.set(0, 0, 0); a.U.uAmp.value = 0; // stock still
+  a.ice.position.y = CFG.charH * a.scale + 0.42 + Math.sin(time * 3) * 0.02;
 }
 // moves an actor between its tiles and drives its walk (a run while chasing: leaning in, bigger hops)
 function animateActor(a, dt, time, hop, walking, running) {
@@ -3306,6 +3397,7 @@ const JOKERS = {
 const joker = (() => {
   let bag = [];
   try { bag = JSON.parse(localStorage.getItem('buddy-jokers') || 'null') || []; } catch { bag = []; }
+  const BAG = 5; bag = bag.slice(0, BAG); // (a small bag: cards are precious)
   const save = () => { try { localStorage.setItem('buddy-jokers', JSON.stringify(bag)); } catch {} };
   let pickups = [], trail = null, trailT = 0, frozenT = 0, dashT = 0, aiming = null, aimT = 0;
   // the card lying on the floor: a little golden card with a star, turning and glowing
@@ -3334,8 +3426,8 @@ const joker = (() => {
     el.innerHTML = Object.keys(JOKERS).filter(k => counts[k]).map(k => `<button class="jcard ${aiming === k ? 'armed' : ''}" data-j="${k}" style="--c:${JOKERS[k].color}" aria-label="${JOKERS[k].name}"><svg class="ico"><use href="#${JOKERS[k].icon}"/></svg>${counts[k] > 1 ? `<b>${counts[k]}</b>` : ''}<kbd>${JOKER_KEYS[k]}</kbd></button>`).join('');
     $('jokerCount').textContent = bag.length; $('jokerDock').classList.toggle('empty', !bag.length);
   }
-  function give(k, from) { // a new card flies into the bar
-    if (bag.length >= 9) return;
+  function give(k, from, force) { // a new card flies into the bar
+    if (bag.length >= BAG && !force) { toast('Your bag is full (5 cards): use one first'); return; }
     bag.push(k); save(); render();
     const nb = document.querySelector(`.jcard[data-j="${k}"]`); if (nb) nb.classList.add('fresh'); // (the new card glows a moment)
     const card = document.createElement('div'); card.className = 'jfly'; card.style.setProperty('--c', JOKERS[k].color);
@@ -3363,27 +3455,66 @@ const joker = (() => {
     clear();
     if (!maze || !n) return;
     for (let k = 0; k < n; k++) {
-      // (a puzzle's card lies on your way, a little along it, so you have it before you need it)
-      const t = way && way.length > 6 && k === 0 ? way[Math.max(3, Math.floor(way.length * 0.22))] : freeTile(rnd);
+      // (a puzzle's card waits in a nook a few steps off the way, early on: you go and get it before you need it)
+      const t = way && way.length > 6 && k === 0 ? nookOff(way) : freeTile(rnd);
       if (t) { spawnAt(t[0], t[1]); if (kind) pickups[pickups.length - 1].kind = kind; }
     }
   }
-  function clear() { aiming = null; builds = []; pickups.forEach(p => scene.remove(p.s)); pickups = []; if (trail) { scene.remove(trail); trail = null; } frozenT = dashT = 0; }
+  function nookOff(way) {
+    const { N, g } = maze, early = way.slice(2, Math.max(4, Math.floor(way.length * 0.45))), d = distFrom(early);
+    const onWay = new Set(way.map(([x, z]) => z * N + x)), busy = new Set([keyAt, goal, start].filter(Boolean).map(([x, z]) => z * N + x));
+    let best = null, bs = -1;
+    for (let i = 0; i < N * N; i++) {
+      if (g[i] || onWay.has(i) || busy.has(i) || d[i] < 2 || d[i] > 5) continue;
+      const x = i % N, z = (i / N) | 0, exits = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dz]) => { const X = x + dx, Z = z + dz; return X >= 0 && Z >= 0 && X < N && Z < N && !g[Z * N + X]; }).length;
+      const sc = (exits === 1 ? 10 : 0) + d[i]; // (a dead end, a few steps in)
+      if (sc > bs) { bs = sc; best = [x, z]; }
+    }
+    return best || way[Math.max(3, Math.floor(way.length * 0.22))];
+  }
+  function clear() { aiming = null; builds = []; ghosts.forEach(m => { m.visible = false; }); pickups.forEach(p => scene.remove(p.s)); pickups = []; if (trail) { scene.remove(trail); trail = null; } frozenT = dashT = 0; }
   // which cards you can find: online, wolves and animals each have their own; on your own, the snowflake only with wolves about
   const kindsFor = () => mode === 'hunt' ? (hunt.amWolf() ? ['build', 'dash', 'freeze', 'smash'] : ['smash', 'build', 'dash', 'light', 'freeze'])
     : mode === 'wolf' ? ['light', 'smash', 'build', 'freeze', 'dash'] : (k => k.length ? k : ['light'])(jokersKnown().filter(k => k !== 'freeze' || wolves.length));
   const randomKind = () => { const ks = kindsFor(); return ks[Math.floor(Math.random() * ks.length)]; };
   // a stone rises in front of you for 10 seconds (online, for everyone), then sinks again
   let builds = [];
-  function buildAt(x, z, shared) {
+  function canBuild(x, z) {
     const { N } = maze, i = z * N + x;
     if (x <= 0 || z <= 0 || x >= N - 1 || z >= N - 1 || maze.g[i]) return false;
     const taken = [[st.gx, st.gz], [st.tx, st.tz], keyAt, goal, ...wolves.map(w => [w.x, w.z]), ...(mode === 'hunt' ? hunt.occupied() : [])].filter(Boolean);
-    if (taken.some(([a, c]) => a === x && c === z)) return false;
+    return !taken.some(([a, c]) => a === x && c === z);
+  }
+  function buildAt(x, z, shared) {
+    const { N } = maze, i = z * N + x;
+    if (!canBuild(x, z)) return false;
     maze.g[i] = 1; builds.push({ i, t: 10 }); pillarsDirty = true; updateTargets(false); preyKey = '';
     sfx.play('rise', 0.5);
     if (shared && mode === 'hunt') net.send({ t: 'build', x, z });
     return true;
+  }
+  // while a Hammer or a Wall is armed: a see-through ghost stone shows each spot it can act on (the Wall: where a
+  // stone would rise; the Hammer: a warm glow round each stone it can knock down)
+  const ghostMats = { build: new THREE.MeshBasicMaterial({ color: '#cfeeff', transparent: true, opacity: 0.4, depthWrite: false, toneMapped: false }),
+    smash: new THREE.MeshBasicMaterial({ color: '#ff9d6b', transparent: true, opacity: 0.35, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending }) };
+  const ghosts = []; let focus = null;
+  function showGhosts(time) {
+    let n = 0;
+    if (aiming === 'build' || aiming === 'smash') for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const x = st.gx + dx, z = st.gz + dz, i = z * maze.N + x;
+      if (aiming === 'build' ? !canBuild(x, z) : !canSmash(x, z) || heights[i] < 0.3) continue;
+      if (focus && (focus[0] !== x || focus[1] !== z)) continue; // (a lesson pointing at one spot shows just that one)
+      const v = curSet.variants[varIdx[i]], geo = v.wall || v.raw;
+      let m = ghosts[n]; if (!m) { m = ghosts[n] = new THREE.Mesh(geo, ghostMats.build); m.renderOrder = 7; m.frustumCulled = false; scene.add(m); }
+      m.geometry = geo; m.material = ghostMats[aiming]; m.visible = true;
+      const pulse = 0.5 + 0.5 * Math.sin(time * 6);
+      m.rotation.set(0, rotIdx[i] * Math.PI / 2 + twist[i], 0);
+      if (aiming === 'build') { m.position.set(x - origin, CFG.wallH * (0.94 + 0.04 * pulse), z - origin); m.scale.setScalar(1); }
+      else { m.position.set(x - origin, heights[i] + 0.02, z - origin); m.scale.setScalar(1.05 + 0.03 * pulse); }
+      n++;
+    }
+    ghostMats.build.opacity = 0.28 + 0.2 * Math.sin(time * 6) ** 2; ghostMats.smash.opacity = 0.25 + 0.25 * Math.sin(time * 6) ** 2;
+    for (let k = n; k < ghosts.length; k++) ghosts[k].visible = false;
   }
   // stepping on a card picks it up
   function onStep(x, z) {
@@ -3398,9 +3529,10 @@ const joker = (() => {
   }
   function takenElsewhere(x, z) { const k = pickups.findIndex(p => p.x === x && p.z === z); if (k >= 0) { scene.remove(pickups[k].s); pickups.splice(k, 1); } }
   // the stone in front of Buddy sinks for good (online, for everyone)
+  const canSmash = (x, z) => { const { N } = maze, i = z * N + x; return !(x <= 0 || z <= 0 || x >= N - 1 || z >= N - 1 || !maze.g[i] || (maze.empty && maze.empty[i]) || (maze.doors && maze.doors.some(d => d.x === x && d.z === z))); };
   function smashAt(x, z, shared) {
     const { N } = maze, i = z * N + x;
-    if (x <= 0 || z <= 0 || x >= N - 1 || z >= N - 1 || !maze.g[i] || (maze.empty && maze.empty[i]) || (maze.doors && maze.doors.some(d => d.x === x && d.z === z))) return false;
+    if (!canSmash(x, z)) return false;
     maze.g[i] = 0; pillarsDirty = true; updateTargets(false); preyKey = ''; puzzles.smashed(i);
     for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; spawnPuff(x - origin, 0.5, z - origin, Math.cos(a) * 1.5, rand(0.4, 1.2), Math.sin(a) * 1.5, rand(0.08, 0.13), STONE_DUST[k % STONE_DUST.length], 0.7); }
     sfx.play('bump', 0.7); sfx.play('rise', 0.4);
@@ -3413,7 +3545,7 @@ const joker = (() => {
     const i = bag.indexOf(k); if (i < 0) return;
     let ok = true;
     if (k === 'light') {
-      const tgt = mode === 'hunt' ? hunt.nextTarget() : stage === 'cave' && maze.doors ? (keyAt && !hasKey ? keyAt : maze.doors[1].out) : keyAt && !hasKey ? keyAt : maze.doors && maze.doors.length && !hasKey ? maze.doors[0].out : goal;
+      const tgt = mode === 'hunt' ? hunt.nextTarget() : stage === 'cave' && maze.doors ? (keyAt && !hasKey ? keyAt : maze.doors[1].out) : keyAt && !hasKey ? keyAt : doorAhead() ? doorAhead().out : goal;
       let path = tgt ? pathTiles([st.gx, st.gz], tgt) : [];
       if (tgt && path.length < 2 && maze.way) { // (walled in: the light follows the way, up to the cracked stone and beyond)
         const w = maze.way, ti = w.findIndex(t => t[0] === tgt[0] && t[1] === tgt[1]);
@@ -3424,18 +3556,19 @@ const joker = (() => {
       trail = new THREE.Group(); trail.userData.n = 0;
       path.forEach((t, j) => { for (const f of [0, 0.5]) { const u = path[j + 1]; if (f && !u) continue;
         const x = t[0] + (u ? (u[0] - t[0]) * f : 0), z = t[1] + (u ? (u[1] - t[1]) * f : 0);
-        const g = new THREE.Sprite(trailGlowMat); g.position.set(x - origin, 0.22, z - origin); g.scale.setScalar(0.42); g.userData.k = trail.userData.n++; trail.add(g); } });
+        const g = new THREE.Sprite(trailGlowMat); g.position.set(x - origin, 0.22, z - origin); g.scale.setScalar(0.42); g.userData.k = trail.userData.n++; g.userData.j = j; trail.add(g); } });
+      trail.userData.tiles = path.map(([x, z]) => z * maze.N + x); trail.userData.past = -1;
       trail.renderOrder = 5; scene.add(trail); trailT = 8;
     } else if (k === 'smash' || k === 'build') { // aim it: the next swipe or arrow key picks the tile (no steering help)
       if (aiming === k) { aiming = null; render(); return; } // (tapped again: put it away)
-      aiming = k; aimT = 8; render();
-      toast(k === 'smash' ? 'Swipe toward the stone to smash' : 'Swipe toward the path to block');
+      aiming = k; aimT = 10; render();
+      if (!guide.active) toast(k === 'smash' ? 'Swipe toward the stone to smash' : 'Swipe toward the path to block');
       return;
     } else if (k === 'freeze') {
       if (mode === 'hunt') { const side = hunt.amWolf() ? 'animals' : 'wolves'; net.send({ t: 'freeze', side }); hunt.freeze(side); }
       else { frozenT = 6; for (const w of wolves) { w.wait = Math.max(w.wait, 6); w.state = 'roam'; w.rest = 8; } }
-      toast(mode === 'hunt' && hunt.amWolf() ? 'The animals are frozen!' : 'The wolves are frozen!');
-    } else if (k === 'dash') { dashT = 5; toast('Zoom!'); }
+      if (!guide.active) toast(mode === 'hunt' && hunt.amWolf() ? 'The animals are frozen!' : 'The wolves are frozen!');
+    } else if (k === 'dash') { dashT = 5; if (!guide.active) toast('Zoom!'); }
 
     if (!ok) return;
     bag.splice(i, 1); save(); render(); sfx.ui('whoosh', 0.4); quests.add('joker');
@@ -3455,6 +3588,10 @@ const joker = (() => {
       aiming = null; const i = bag.indexOf(k); if (i >= 0) bag.splice(i, 1); save(); render(); sfx.ui('whoosh', 0.4); quests.add('joker');
     },
     get bag() { return bag; },
+    get trailOn() { return !!trail; },
+    get frozenLeft() { return frozenT; },
+    builtAt: i => builds.some(b => b.i === i),
+    set ghostFocus(t) { focus = t; },
     speed: () => dashT > 0 ? 0.62 : 1,
     get dashing() { return dashT > 0; },
     frozen: () => frozenT > 0,
@@ -3462,12 +3599,17 @@ const joker = (() => {
     update(dt) {
       if (trailT > 0) {
         trailT -= dt; const fade = Math.min(1, trailT / 1.5), now = performance.now() / 1000;
+        if (trail) { // (the beads you've walked past go out: the light only shows the way still ahead)
+          const at = trail.userData.tiles.indexOf(st.gz * maze.N + st.gx);
+          if (at > trail.userData.past) { trail.userData.past = at; for (const g of trail.children) if (g.userData.j < at) g.visible = false; }
+        }
         if (trail) for (const g of trail.children) { const k = g.userData.k, wave = Math.max(0, Math.cos((now * 9 - k * 0.55) % (Math.PI * 2))); g.scale.setScalar((0.32 + 0.26 * wave) * fade); g.position.y = 0.2 + 0.06 * wave; } // (a pulse of light running along it)
         trailGlowMat.opacity = fade;
         if (trailT <= 0 && trail) { scene.remove(trail); trail = null; }
       }
       if (frozenT > 0) frozenT -= dt; if (dashT > 0) dashT -= dt;
       if (aiming && (aimT -= dt) <= 0) { aiming = null; render(); }
+      if (aiming || ghosts.some(m => m.visible)) showGhosts(performance.now() / 1000);
       for (const b of builds) if ((b.t -= dt) <= 0 && maze.g[b.i]) { maze.g[b.i] = 0; pillarsDirty = true; preyKey = ''; updateTargets(false); }
       builds = builds.filter(b => b.t > 0);
       for (const p of pickups) { p.s.position.y = 0.5 + Math.sin(performance.now() / 300 + p.x) * 0.05; p.s.material.rotation = 0; }
@@ -3536,7 +3678,7 @@ const puzzles = (() => {
     clear();
     if (P.puzzle === 'sealed') { if (!seal()) P = { ...P, puzzle: null }; }
     if (P.puzzle === 'den') den = findDen();
-    if (P.handCard && !joker.bag.includes(P.handCard)) setTimeout(() => joker.give(P.handCard), 1200); // (its first time: in your hand)
+    if (P.handCard && !joker.bag.includes(P.handCard)) setTimeout(() => joker.give(P.handCard, null, true), 1200); // (its tutorial: in your hand)
   }
   return {
     build, clear,
@@ -3546,7 +3688,7 @@ const puzzles = (() => {
     // you bumped into a cracked stone: with no Hammer, one turns up (nobody gets stuck)
     bumped(x, z) {
       if (!cracked.has(z * maze.N + x)) return;
-      if (!joker.bag.includes('smash')) { joker.give('smash'); toast('A Hammer for the cracked stone! Tap it, then swipe at the stone'); }
+      if (!joker.bag.includes('smash')) { joker.give('smash', null, true); toast('A Hammer for the cracked stone! Tap it, then swipe at the stone'); }
       else toast('Tap the Hammer, then swipe at the cracked stone');
     },
     smashed(i) { if (!cracked.delete(i)) return; marks = marks.filter(m => { if (m.userData.i === i) { scene.remove(m); return false; } return true; }); },
@@ -3860,7 +4002,7 @@ function win() {
   }
   const ratio = steps / optimal;
   const stars = steps <= optimal * 1.45 + 3 ? 3 : steps <= optimal * 2.3 + 6 ? 2 : 1; // (the maze is hidden: some looking around is fair)
-  quests.add('win'); quests.add('stars', Math.max(0, stars - save.stars(L)));
+  quests.add('win'); quests.add('stars', Math.max(0, stars - save.stars(L))); if (stars === 3) quests.add('three');
   const wasLocked = L + 1 < TOTAL_LEVELS && !unlocked(L + 1);
   save.set(L, stars);
   const newWorld = wasLocked && (L + 1) % LEVELS_PER_WORLD === 0 ? WORLDS[(L + 1) / LEVELS_PER_WORLD] : null;
@@ -3869,7 +4011,7 @@ function win() {
   $('unlockText').innerHTML = (friend ? `<img class="fsticker" alt="" src="${friend.sticker}">${friend.name} is back!` : '')
     + (newWorld ? `<svg class="ico"><use href="#${newWorld.icon}"/></svg>New world: ${newWorld.name}` : '');
   confetti();
-  coach.done();
+  coach.done(); guide.learned(L);
   $('unlockMsg').classList.toggle('on', !!(newWorld || friend));
   $('nextBtn').firstChild.textContent = L + 1 < TOTAL_LEVELS ? 'Next' : 'Map';
   const starEls = [...$('winStars').children];
@@ -3878,26 +4020,24 @@ function win() {
     if (friend) { await tell(found); if (found === 'found-cat') await tell('the-end'); }
     show('win');
     starEls.forEach((e, i) => setTimeout(() => { if (i < stars) { e.classList.add('on'); sfx.ui('chime', 0.25 + i * 0.08); } }, 350 + i * 260));
-    // now and then a surprise: a bonus card (more likely for three stars)
-    const known = jokersKnown(); if (known.length && Math.random() < (stars === 3 ? 0.18 : 0.08)) setTimeout(() => { joker.give(known[Math.floor(Math.random() * known.length)]); toast('Lucky! A bonus card'); }, 1400); // (rare: cards should feel earned)
     $('winTease').innerHTML = rewards.tease(L);
   }, 700);
 }
 const fmt = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 const chip = (icon, text) => `<span class="chip"><svg class="ico"><use href="#${icon}"/></svg>${text}</span>`;
-// ---------- daily quests: three small goals a day, each worth a card ----------
+// ---------- daily quests: three small goals a day; all three done is worth a card ----------
 const quests = (() => {
   const POOL = [
     { id: 'win', text: n => `Clear ${n} levels`, n: [2, 3], icon: 'i-portal', c: 'var(--leaf)' },
     { id: 'stars', text: n => `Earn ${n} stars`, n: [4, 6], icon: 'i-star', c: '#ffc43d' },
-    { id: 'card', text: n => `Pick up ${n} cards`, n: [1, 2], icon: 'i-cards', c: '#e8823a' },
+    { id: 'three', text: n => `Get 3 stars on ${n} level${n > 1 ? 's' : ''}`, n: [1, 2], icon: 'i-star', c: '#e8823a' },
     { id: 'wolf', text: n => `Clear ${n} Wolf Chase map${n > 1 ? 's' : ''}`, n: [1, 2], icon: 'i-paw', c: '#6f7f95' },
-    { id: 'joker', text: n => `Use ${n} cards`, n: [2, 3], icon: 'i-lantern', c: '#9c84ee' },
+    { id: 'joker', text: n => `Use ${n} card${n > 1 ? 's' : ''}`, n: [1], icon: 'i-lantern', c: '#9c84ee' },
   ];
   const day = () => new Date().toDateString();
   let Q = null; try { Q = JSON.parse(localStorage.getItem('buddy-quests') || 'null'); } catch {}
   function fresh() {
-    if (Q && Q.day === day()) return;
+    if (Q && Q.day === day() && Q.list.every(q => POOL.some(p => p.id === q.id))) return; // (today's, unless one of them was retired)
     const pick = POOL.slice().sort(() => Math.random() - 0.5).slice(0, 3);
     Q = { day: day(), list: pick.map(p => ({ id: p.id, need: p.n[Math.floor(Math.random() * p.n.length)], got: 0, done: false })) };
     save();
@@ -3911,13 +4051,14 @@ const quests = (() => {
     fresh();
     for (const q of Q.list) if (q.id === id && !q.done) {
       q.got = Math.min(q.need, q.got + n);
-      if (q.got >= q.need) { q.done = true; const P = POOL.find(p => p.id === id), ks = jokersKnown(); setTimeout(() => { toast(`Quest done: ${P.text(q.need)}!`); if (ks.length) joker.give(ks[Math.floor(Math.random() * ks.length)]); }, 1800); }
+      if (q.got >= q.need) { q.done = true; const P = POOL.find(p => p.id === id), ks = jokersKnown(), all = Q.list.every(o => o.done); setTimeout(() => { toast(all ? 'All three quests done: a card for you!' : `Quest done: ${P.text(q.need)}!`); if (all && ks.length) joker.give(ks[Math.floor(Math.random() * ks.length)]); }, 1800); } // (a card for finishing all three)
     }
     save();
   }
   return { render, add };
 })();
-// ---------- rewards: a gift every day (bigger the more days in a row), a chest every 10 stars, and a peek at what's next
+// ---------- rewards: a card every third day in a row, a chest every 20 stars, and a peek at what's next
+const CHEST = 20; // (stars to the next chest: one card in it)
 const rewards = (() => {
   const get = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
   const put = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
@@ -3943,23 +4084,24 @@ const rewards = (() => {
   function check() { // on the title: today's gift first, then any star chest earned
     if (busy || state !== 'title') return;
     const last = get('buddy-gift-day', ''), streak0 = get('buddy-streak', 0);
-    if (last !== today() && jokersKnown().length) {
+    if (last !== today() && jokersKnown().length) { // (a card on every third day in a row: the days between count up to it)
       const yesterday = new Date(Date.now() - 864e5).toDateString(), streak = last === yesterday ? streak0 + 1 : 1;
       put('buddy-gift-day', today()); put('buddy-streak', streak);
-      return open({ title: streak > 1 ? `Day ${streak} in a row!` : 'A gift for today!', sub: streak >= 7 ? 'A whole week! Here\u2019s a big one' : `Come back tomorrow for day ${streak + 1}: an even bigger gift`, cards: pick(streak >= 7 ? 2 : 1) });
+      if (streak % 3 === 0) return open({ title: `Day ${streak} in a row!`, sub: 'Three days in a row: a card for you. Come back for more!', cards: pick(1) });
+      setTimeout(() => toast(`Day ${streak} in a row! ${3 - streak % 3 === 1 ? 'Tomorrow' : 'In 2 days'}: a gift`), 900);
     }
     const chests = get('buddy-chests', 0), stars = totalStars();
-    if (stars >= (chests + 1) * 15 && jokersKnown().length) { put('buddy-chests', chests + 1); return open({ title: 'Star chest!', sub: `${(chests + 1) * 15} stars collected`, cards: pick(1) }); }
+    if (stars >= (chests + 1) * CHEST && jokersKnown().length) { put('buddy-chests', chests + 1); return open({ title: 'Star chest!', sub: `${(chests + 1) * CHEST} stars collected`, cards: pick(1) }); }
     chip();
   }
   function chip() { // the title's little progress chip toward the next chest
-    const chests = get('buddy-chests', 0), stars = totalStars(), next = (chests + 1) * 15;
-    $('chestChip').innerHTML = `<svg class="ico"><use href="#i-gift"/></svg><b>${stars}/${next}</b><i style="--p:${Math.min(1, (stars - chests * 15) / 15)}"></i>`;
+    const chests = get('buddy-chests', 0), stars = totalStars(), next = (chests + 1) * CHEST;
+    $('chestChip').innerHTML = `<svg class="ico"><use href="#i-gift"/></svg><b>${stars}/${next}</b><i style="--p:${Math.max(0, Math.min(1, (stars - chests * CHEST) / CHEST))}"></i>`;
   }
   // what's coming: the next friend to find, and how close the next chest is
   function tease(L) {
     const fi = Math.floor(L / LEVELS_PER_WORLD), lastOfWorld = (fi + 1) * LEVELS_PER_WORLD, f = FRIENDS[fi];
-    const chests = get('buddy-chests', 0), left = (chests + 1) * 15 - totalStars();
+    const chests = get('buddy-chests', 0), left = (chests + 1) * CHEST - totalStars();
     const a = f && !story.seen(`found-${f.id}`) && L + 1 < lastOfWorld ? `<span class="chip tease"><img alt="" src="${f.sticker}">${f.name} is waiting at level ${lastOfWorld}</span>` : '';
     const b = left > 0 ? `<span class="chip tease"><svg class="ico"><use href="#i-gift"/></svg>${left} more star${left > 1 ? 's' : ''} to a chest</span>` : `<span class="chip tease"><svg class="ico"><use href="#i-gift"/></svg>A chest is ready on the title!</span>`;
     return a + b;
@@ -4435,8 +4577,7 @@ const coach = (() => {
     level(L, stage, keep) {
       if (keep) { if (stage === 'cave' && !seen.cave) { pending = 'cave'; remember('cave'); } else if (cur === 'door') cur = null; return; }
       cur = pending = null; basics = false;
-      if (L === 0 && !seen.basics) { basics = true; pending = 'move'; }
-      else if (L >= 0 && isGateway(L) && !seen.door) { pending = 'door'; remember('door'); }
+      if (L >= 0 && isGateway(L) && !seen.door) { pending = 'door'; remember('door'); }
     },
     step(n) {
       if (!basics) return;
@@ -4449,6 +4590,105 @@ const coach = (() => {
       if (pending && state === 'play' && intro.t < 0 && warp.t < 0) { show(pending, pending === 'door' ? 9 : pending === 'cave' ? 8 : 0); pending = null; }
       if (until && performance.now() > until) { cur = null; until = 0; }
       el.classList.toggle('on', !!cur && state === 'play' && intro.t < 0 && warp.t < 0 && !won);
+    },
+  };
+})();
+
+// ---------- the guide: a pointing hand and a little bubble, one thing at a time ----------
+// The levels that teach something have a few rules, each with its moment: the first one whose moment has come (and
+// that isn't done yet) is shown, pointing at the very thing to tap or the place to go ("Tap the Hammer", then "Now
+// swipe toward the stone"). The first levels teach the controls and the screen, one thing each; every card gets a
+// level of its own. Once you've won a teaching level, it never explains itself again.
+const guide = (() => {
+  const el = $('guide'), bub = $('guideBub'), hand = $('guideHand'), ring = $('guideRing');
+  let taught = {}; try { taught = JSON.parse(localStorage.getItem('buddy-taught') || '{}'); } catch {}
+  let rules = null, done = new Set(), cur = null, curT = 0, text = '', bw = 0, bh = 0, zoomed = false;
+  const _gp = new THREE.Vector3();
+  const kb = k => PHONE ? '' : ` <kbd>${JOKER_KEYS[k]}</kbd>`;
+  const card = k => document.querySelector(`.jcard[data-j="${k}"]`);
+  const tileP = (t, y = 0.3) => t && new THREE.Vector3(t[0] - origin, y, t[1] - origin);
+  const man = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
+  const me = () => [st.gx, st.gz];
+  const wolfNear = r => wolves.some(w => man([w.x, w.z], me()) <= r);
+  const nearestWolf = () => { let b = null, bd = 1e9; for (const w of wolves) { const d = man([w.x, w.z], me()); if (d < bd) { bd = d; b = w; } } return b; };
+  const head = w => w && w.root.position.clone().setY(CFG.charH * w.scale + 0.2);
+  const shown = id => { const e = $(id); return e && e.style.display !== 'none' && e.offsetParent !== null; };
+  function rulesFor(L) {
+    const P = levelPlan(L);
+    if (L === 0) return [
+      { text: PHONE ? 'Swipe to walk' : 'Walk with the arrow keys or <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>', at: () => player.position.clone().setY(0.9), done: () => steps >= 3 },
+      { when: () => steps >= 3 && !hasKey && shown('goalArrow'), text: 'This gold arrow points to the key', at: () => $('goalArrow'), max: 4 },
+      { when: () => steps >= 12 && !hasKey, text: 'Your steps: the fewer, the more stars!', at: () => $('steps'), max: 4 },
+      { when: () => hasKey, text: 'You have the key! The blue arrow leads to the portal', at: () => $('keyHud'), max: 4.5 },
+    ];
+    if (L === 1) return [{ when: () => steps >= 3, text: 'Hold the eye to see more of the maze', at: () => $('peek'), done: () => peek, max: 7 }];
+    if (L === 2) return [{ when: () => steps >= 3, text: 'Tap here to bring the camera closer or further', at: () => $('camZoom'), done: () => zoomed, max: 7 }];
+    if (L === 9) return [{ when: () => wolfNear(6), text: 'Wait beside its dotted path, then cross when it walks away!', at: () => head(nearestWolf()), max: 5 }];
+    if (P.tutorial === 'light') return [
+      { text: `Tap the Lantern${kb('light')}`, at: () => card('light'), done: () => joker.trailOn },
+      { when: () => joker.trailOn && !hasKey, text: 'Follow the light to the key!', at: () => key.position, max: 4, done: () => hasKey },
+    ];
+    if (P.tutorial === 'smash') {
+      const crack = () => puzzles.firstCrack();
+      return [
+        { when: () => crack() && man(me(), crack()) > 1, text: 'Walk up to the cracked stone', at: () => tileP(crack(), 1.3), done: () => !crack() },
+        { when: () => crack() && man(me(), crack()) <= 1 && joker.aiming !== 'smash', text: `Tap the Hammer${kb('smash')}`, at: () => card('smash'), done: () => !crack() },
+        { when: () => joker.aiming === 'smash', text: PHONE ? 'Now swipe toward the stone' : 'Now press the arrow toward the stone', at: () => tileP(crack(), 1.3), done: () => !crack() },
+        { when: () => !crack() && !hasKey, text: 'Smashed! Grab the key', at: () => key.position, max: 3, done: () => hasKey },
+      ];
+    }
+    if (P.tutorial === 'freeze') { let iced = false; return [
+      { when: () => wolfNear(5) && !joker.frozen(), text: `A wolf! Tap the Snowflake to freeze it${kb('freeze')}`, at: () => card('freeze'), done: () => (iced ||= joker.frozen()) },
+      { when: () => joker.frozen(), text: 'Frozen! Slip past before the timer runs out', at: () => head(nearestWolf()), max: 5 },
+    ]; }
+    if (P.tutorial === 'build') {
+      const D = () => puzzles.den, mi = () => D() && D().mouth[1] * maze.N + D().mouth[0], built = () => D() && joker.builtAt(mi());
+      const grumpy = () => wolves.find(w => w.angry), inside = () => { const w = grumpy(), d = D(); if (!w || !d) return false; const deep = d.route.slice(0, d.route.length - 3); return deep.some(([x, z]) => x === w.x && z === w.z) && w.t >= 1; };
+      const atJ = () => D() && man(me(), D().junction) === 0, close = () => D() && man(me(), D().junction) <= 6;
+      return [
+        { when: () => close() && !built() && !inside(), text: 'A grumpy wolf! Wait for it to go back into its den', at: () => head(grumpy()) },
+        { when: () => close() && !built() && inside() && !atJ(), text: 'Now! Hurry to the den\u2019s door', at: () => tileP(D().junction, 0.2) },
+        { when: () => atJ() && !built() && inside() && joker.aiming !== 'build', text: `Tap the Wall${kb('build')}`, at: () => card('build') },
+        { when: () => joker.aiming === 'build' && !built(), ghost: () => D().mouth, text: PHONE ? 'Swipe toward the den to raise the stone there' : 'Press the arrow toward the den to raise the stone there', at: () => tileP(D().mouth, 1.3) },
+        { when: () => built(), text: 'Trapped! Hurry past before the stone sinks', at: () => head(grumpy()), max: 3.5 },
+      ];
+    }
+    if (P.tutorial === 'dash') return [
+      { when: () => wolfNear(6) && !joker.dashing, text: `Tap the Boots to run super fast${kb('dash')}`, at: () => card('dash'), done: () => joker.dashing },
+      { when: () => joker.dashing, text: 'Zoom! Run past the wolf!', at: () => player.position.clone().setY(0.9), max: 4 },
+    ];
+    return null;
+  }
+  function place(x, y, onScreen) {
+    hand.style.display = onScreen ? '' : 'none';
+    // the hand points down at the spot from above (or up from below, near the top of the screen); the bubble sits
+    // beyond the hand, kept on screen
+    const up = y < 170, hx = x - 27, hy = up ? y + 6 : y - 58;
+    hand.style.transform = `translate(${hx}px, ${hy}px)`; hand.classList.toggle('up', up);
+    ring.style.transform = `translate(${x - 32}px, ${y - 32}px)`; ring.style.display = onScreen ? '' : 'none';
+    const bx = Math.max(12, Math.min(innerWidth - bw - 12, x - bw / 2)), by = up ? y + 66 : Math.max(8, y - 70 - bh);
+    bub.style.transform = `translate(${bx}px, ${by}px)`;
+  }
+  return {
+    level(L0, stageNow, keep) { if (keep) return; done = new Set(); cur = null; zoomed = false; rules = L0 >= 0 && mode === 'levels' && !taught[L0] ? rulesFor(L0) : null; el.classList.remove('on'); },
+    learned(L0) { if (!rules) return; taught[L0] = 1; try { localStorage.setItem('buddy-taught', JSON.stringify(taught)); } catch {} rules = null; },
+    zoomed() { zoomed = true; },
+    get active() { return !!cur; },
+    get debug() { return { rules: rules && rules.length, cur: !!cur, done: done.size, taught }; },
+    tick(dt) {
+      const live = rules && state === 'play' && intro.t < 0 && !intro.hold && !tour.shots && warp.t < 0 && !won && !wolfOver;
+      let r = null;
+      if (live) for (const x of rules) { if (done.has(x)) continue; if (x.done && x.done()) { done.add(x); continue; } if (!x.when || x.when()) { r = x; break; } }
+      if (r !== cur) { joker.ghostFocus = r && r.ghost ? r.ghost() : null; }
+      if (r !== cur) { cur = r; curT = 0; if (r) { el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); sfx.ui('chime', 0.2); } }
+      if (cur && cur.max && (curT += dt) > cur.max) { done.add(cur); cur = null; }
+      el.classList.toggle('on', !!cur);
+      if (!cur) return;
+      if (cur.text !== text) { text = cur.text; bub.innerHTML = text; bw = bub.offsetWidth; bh = bub.offsetHeight; }
+      const t = cur.at && cur.at();
+      if (t instanceof Element) { const b = t.getBoundingClientRect(); place(b.left + b.width / 2, b.top + b.height / 2, true); }
+      else if (t) { _gp.copy(t).project(camera); const x = (_gp.x + 1) / 2 * innerWidth, y = (1 - _gp.y) / 2 * innerHeight, inside = x > 30 && x < innerWidth - 30 && y > 60 && y < innerHeight - 30; if (inside) place(x, y, true); else place(innerWidth / 2, innerHeight * 0.72, false); }
+      else place(innerWidth / 2, innerHeight * 0.72, false);
     },
   };
 })();
@@ -4506,7 +4746,7 @@ async function play(level) {
   warp.t = -1; $('fader').style.opacity = 0;
   buildLevel(level); show('play'); intro.t = 0; intro.warm = 3; intro.wave = false; intro.online = intro.hold = false;
   tour.i = 0; tour.t = 0; $('tourCap').classList.remove('on'); tour.shots = null; setTimeout(() => { if (L === level && intro.t >= 0) tour.shots = tourFor(level); }, 60); // (after the wolves and cards are placed)
-  const scene = startScene(level, LEVELS_PER_WORLD);
+  const scene = startScene(level, LEVELS_PER_WORLD) || (levelPlan(level).tutorial ? 'card-' + levelPlan(level).tutorial : null);
   if (scene && !story.seen(scene)) { intro.hold = true; await tell(scene); intro.hold = false; }
 }
 
@@ -4819,7 +5059,7 @@ $('nextBtn').addEventListener('click', () => {
 const face = (() => {
   const canvas = $('faceCanvas');
   const r = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-  r.setPixelRatio(Math.min(devicePixelRatio, LITE ? 1 : PHONE ? 1.5 : 2));
+  r.setPixelRatio(Math.min(devicePixelRatio, LITE ? 1 : PHONE || SLOWPC ? 1.5 : 2));
   r.outputColorSpace = THREE.SRGBColorSpace;
   r.toneMapping = THREE.ACESFilmicToneMapping;
   const sc = new THREE.Scene();
@@ -5170,6 +5410,7 @@ const INTRO = [0.6, 1.7, 1.95, 3.1]; // key hold | out to wide | wide hold | dow
 // the camera flies to it and a caption explains, before you play. Tap (or move) to go on to the next. ----------
 const tour = { shots: null, i: 0, t: 0 };
 function tourFor(L) {
+  if (save.stars(L) > 0) return null; // (a level you've already won doesn't explain itself again)
   const P = levelPlan(L), shots = [], tile = t => t && new THREE.Vector3(t[0] - origin, 0, t[1] - origin);
   if (L === 0) {
     shots.push({ p: () => key.position, W: 3.4, text: 'This is the key. Find it!' });
@@ -5180,11 +5421,14 @@ function tourFor(L) {
     shots.push({ p: () => tile([maze.doors[0].x, maze.doors[0].z]), W: 3.6, text: 'This tree is a doorway! The maze is split in two halves.' });
     shots.push({ p: () => portal.position, W: 3.8, text: 'The portal is on the other half: go down the doorway, find the key in the cave, and come back up.' });
   }
-  if (P.puzzle === 'misty') shots.push({ p: () => player.position, W: 3.2, text: P.handCard ? 'It\u2019s misty here: you can barely see. Tap your Lantern card to light the way to the key!' : 'Misty again! A Lantern card lies on your way.' });
-  if (P.puzzle === 'sealed' && puzzles.firstCrack()) shots.push({ p: () => key.position, W: 3.4, text: P.handCard ? 'The key is walled in by a cracked stone! Tap your Hammer card, then swipe at the stone to smash it.' : 'The key is walled in again: pick up the Hammer card on your way.' });
-  if (P.puzzle === 'den' && puzzles.den) shots.push({ p: () => tile(puzzles.den.mouth), W: 3.6, text: P.handCard ? 'A grumpy wolf lives in this tunnel and sees all around. When it goes back in, raise your Wall in the tunnel\u2019s mouth to trap it, then pass!' : 'A wolf den on your way: pick up the Wall card and trap it in its tunnel.' });
-  if (P.newCard && !P.handCard && !P.puzzle) shots.push({ p: () => { const c = joker.firstCard(); return c && tile(c); }, W: 3.4, text: `A ${JOKERS[P.newCard].name} card: it ${JOKERS[P.newCard].tip}. Walk over it to pick it up.` });
-  if (L === 9) shots.push({ p: () => wolves[0] && wolves[0].root.position, W: 3.8, text: 'A wolf! It walks back and forth on the dotted line and only sees straight ahead. Wait beside the line, cross when it walks away.' });
+  if (P.gateway && P.parts > 2 && levelPlan(L - 5).parts < P.parts) { // (the first maze in three parts, and in four)
+    shots.push({ p: () => player.position, W: Math.max(viewW, maze.N * 0.9), text: `This maze is cut into ${P.parts === 3 ? 'three' : 'four'} parts! Each doorway takes you down to a cave and up into the next part. The key waits in the last cave.` });
+  }
+  if (P.tutorial === 'light') shots.push({ p: () => player.position, W: 3.2, text: 'It\u2019s so misty here, you can barely see the way!' });
+  if (P.tutorial === 'smash' && puzzles.firstCrack()) shots.push({ p: () => key.position, W: 3.4, text: 'Oh no! The key is walled in by a cracked stone.' });
+  if (P.tutorial === 'build' && puzzles.den) shots.push({ p: () => tile(puzzles.den.mouth), W: 3.6, text: 'A grumpy wolf lives in this den. It comes out onto your path, and it sees all around!' });
+  if (P.tutorial === 'freeze' || P.tutorial === 'dash') shots.push({ p: () => wolves[0] && wolves[0].root.position, W: 3.8, text: P.tutorial === 'freeze' ? 'A wolf guards the way to the key.' : 'This wolf walks back and forth across your way.' });
+  if (L === 9) shots.push({ p: () => wolves[0] && wolves[0].root.position, W: 3.8, text: 'A wolf! It walks back and forth on the dotted line and only sees straight ahead.' });
   if (shots.length) shots.push({ p: () => player.position, W: viewW, text: 'Your turn!', hold: 1.2 });
   return shots.length ? shots : null;
 }
@@ -5295,7 +5539,7 @@ const atmosphere = (() => {
   scene.add(group);
 
   // dust motes: soft glowing specks drifting slowly around the player
-  const MOTES = LITE || off('nofx') ? 0 : PHONE ? 110 : 220, R = 4.5;
+  const MOTES = LITE || off('nofx') ? 0 : PHONE || SLOWPC ? 110 : 220, R = 4.5;
   const pos = new Float32Array(MOTES * 3), vel = [];
   for (let i = 0; i < MOTES; i++) {
     pos.set([rand(-R, R), rand(0.05, 2.2), rand(-R, R)], i * 3);
@@ -5351,7 +5595,7 @@ const atmosphere = (() => {
     autumn: { tex: leaf, colors: ['#e07a2e', '#f2a93b', '#c9542a', '#e9c24a'], size: 0.8, n: 35, fall: 0.16, sway: 0.35, wind: 0.15, opacity: 1 },
     cave: { tex: soft, colors: ['#7ff6e6', '#5fd8ff', '#c9a2ff', '#ff9ad8'], size: 0.4, n: 45, fall: 0.1, sway: 0.15, wind: 0, opacity: 0.9, glow: true }, // drifting spores
   };
-  const WN = off('nofx') ? 0 : LITE ? 80 : PHONE ? 160 : 320, WR = 6, TOP = 5;
+  const WN = off('nofx') ? 0 : LITE ? 80 : PHONE || SLOWPC ? 160 : 320, WR = 6, TOP = 5;
   const wpos = new Float32Array(WN * 3), wcol = new Float32Array(WN * 3), wvar = [];
   for (let i = 0; i < WN; i++) { wpos.set([rand(-WR, WR), rand(0, TOP), rand(-WR, WR)], i * 3); wvar.push([rand(0.7, 1.3), rand(0, 6.28), rand(0.6, 1.4)]); }
   const wgeo = new THREE.BufferGeometry();
@@ -5466,6 +5710,7 @@ $('camZoom').addEventListener('click', () => {
   viewW = CAM_STEPS[camStep];
   $('camZoomLbl').textContent = camStep + 1;
   try { localStorage.setItem('hidden-maze-cam', camStep); } catch {}
+  guide.zoomed();
 });
 const peekBtn = $('peek');
 const setPeek = v => e => { e.preventDefault(); peek = v; };
@@ -5481,7 +5726,8 @@ function goLite() {
   try { localStorage.setItem('buddy-lite', '1'); } catch {}
   sun.castShadow = false; renderer.shadowMap.needsUpdate = true;
   sceneryGroup.visible = false; atmosphere.group && (atmosphere.group.visible = false);
-  toast('Light mode on: smoother on this phone');
+  if (!PHONE) { mirror.visible = false; ground.material.transparent = false; ground.material.opacity = 1; ground.material.needsUpdate = true; }
+  toast(PHONE ? 'Light mode on: smoother on this phone' : 'Light mode on: smoother on this computer');
 }
 function adaptRes(raw) {
   // phones keep one resolution: every change reallocates the screen buffers (iPhones pile that memory up until Safari
@@ -5489,7 +5735,7 @@ function adaptRes(raw) {
   if ((PHONE && IOS) || state !== 'play' || raw > 0.25) return; // (a hitch from loading or a hidden tab says nothing)
   if (raw > 1 / 42) { slowT += raw; fastT = 0; } else { fastT += raw; if (raw < 1 / 55) slowT = Math.max(0, slowT - raw); }
   // Android phones only step down (never back up); still slow at the lowest step: light mode, from now on
-  if (PHONE && slowT > 3 && prNow <= 0.75 && !LITE && !liteAuto) { liteAuto = true; goLite(); }
+  if (slowT > 3 && prNow <= 0.75 && !LITE && !liteAuto && liteChoice !== '0') { liteAuto = true; goLite(); }
   const step = slowT > 1.2 && prNow > 0.75 ? -0.25 : !PHONE && fastT > 10 && prNow < PR_MAX ? 0.25 : 0; // (phones only step down)
   if (!step) return;
   prNow = Math.min(PR_MAX, Math.max(0.75, prNow + step)); slowT = fastT = 0;
@@ -5504,7 +5750,7 @@ function fitView() {
   renderer.setSize(w, h);
   if (!PHONE) composer.setSize(w, h);
   tiltH.uniforms.amt.value = 3.2 / w; tiltV.uniforms.amt.value = 3.2 / h; // blur step size in screen texels
-  const pr = renderer.getPixelRatio() * (PHONE ? 0.35 : 0.5);
+  const pr = renderer.getPixelRatio() * (PHONE || SLOWPC ? 0.3 : 0.5);
   mirror.getRenderTarget().setSize(Math.round(w * pr), Math.round(h * pr));
 }
 
@@ -5534,7 +5780,7 @@ function frame(now = performance.now()) {
   updateWarp(dt);
   updatePillars(dt, time);
   doorSpores(dt);
-  coach.tick();
+  coach.tick(); guide.tick(dt);
   sfx.tick(dt);
   updatePuffs(dt);
   atmosphere.update(dt, time);
@@ -5673,4 +5919,4 @@ show('title');
 { const j = params.get('join'); if (j) { $('friend').classList.add('guest'); $('friendTitle').textContent = 'Joining your friend…'; show('friend'); net.join(j); } } // opened from an invite: straight in
 $('loading').style.opacity = 0; setTimeout(() => $('loading').remove(), 450);
 frame();
-window.__game = { puzzles, joker, get keyAtNow() { return keyAt; }, stoneSet, get stoneSets() { return stoneSets; }, hunt, get raceCfg() { return raceCfg; }, startWolf, get wolves() { return wolves; }, get wolfOver() { return wolfOver; }, get state() { return state; }, get mode() { return mode; }, groundTexture, decorMat, get sceneryModels() { return sceneryModels; }, startRace, get rivals() { return rivals; }, intro, net, loadChar, st, stoneSet, async cave(L) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave" }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };
+window.__game = { guide, get tour() { return tour; }, get stage() { return stage; }, get caveIdx() { return caveIdx; }, get start() { return start; }, doorAhead, get optimal() { return optimal; }, puzzles, joker, get keyAtNow() { return keyAt; }, stoneSet, get stoneSets() { return stoneSets; }, hunt, get raceCfg() { return raceCfg; }, startWolf, get wolves() { return wolves; }, get wolfOver() { return wolfOver; }, get state() { return state; }, get mode() { return mode; }, groundTexture, decorMat, get sceneryModels() { return sceneryModels; }, startRace, get rivals() { return rivals; }, intro, net, loadChar, st, stoneSet, async cave(L, t = 0) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave", cave: t }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };

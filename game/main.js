@@ -41,6 +41,9 @@ function simplifyGeo(geo, ratio = 0.15, err = 0.02) {
   // a scan cut into many texture islands is nearly all "border", so locking it can leave it at full size (one snow
   // stone stayed at 35k): then the seams may move too (the simplifier keeps both sides of a seam together)
   if (out.length > want * 1.5) out = run(out, [], 0);
+  // still far too many (a few scans stop early at the error limit, staying ~10x heavier than asked): loosen the limit
+  // step by step until it gets there (on a phone a stone is ~80 px tall: the difference doesn't show)
+  for (const e of [err * 2.5, err * 6, err * 12]) if (out.length > want * 1.6) out = MeshoptSimplifier.simplify(out, pos, 3, want, e, [])[0];
   geo.setIndex(new THREE.BufferAttribute(out, 1));
 }
 
@@ -1516,7 +1519,10 @@ function stoneSet(name) {
   return stoneSetLoads[name] ||= (async () => {
     const B = BIOMES[name], loader = new GLB();
     const [doorG, ...pgs] = await Promise.all([loader.loadAsync(B.door), ...B.stones.map(f => loader.loadAsync(f))]);
-    const variants = pgs.map(prepPillar);
+    let variants = pgs.map(prepPillar);
+    // phones: a stone shape that stays far too heavy even simplified (a scan cut into countless texture patches,
+    // ~34k triangles where 3k was asked) is left out of the set; the world has plenty of others
+    if (PHONE) { const light = variants.filter(v => v.raw.index.count / 3 < 9000); if (light.length >= 3) variants = light; }
     const door = prepDoor(doorG);
     // cave: the bioluminescent bits (bright and colorful, any hue) keep their own colors; remember them before the rock is recolored
     const glows = B.stepGlow ? variants.map(v => captureGlow(v.mat.map)) : null;
@@ -1775,13 +1781,23 @@ function freeTree(o) {
 // stone to the graphics chip again each level; iPhones don't hand that memory back quickly and closed the page.
 const WHITE = new THREE.Color(1, 1, 1);
 const roomFor = T => Math.max(625, Math.ceil(T * 1.25)); // a little headroom so the next, bigger maze fits too
+const SHADOW_ONLY = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }); // (invisible in the picture, solid in the shadow map)
 function setMeshes(set, T) {
   if (set.meshes && set.meshes.room >= T) return set.meshes;
   if (set.meshes) for (const m of [...set.meshes.walls, ...set.meshes.caps]) m.dispose(); // (frees only their instance data)
   const room = roomFor(T);
   const walls = set.variants.map((v, i) => {
-    const m = new THREE.InstancedMesh(v.wall || v.raw, set.wallMats[i], room);
-    m.castShadow = true;
+    const geo = v.wall || v.raw, m = new THREE.InstancedMesh(geo, set.wallMats[i], room);
+    // its shadow comes from a plain block the size of the stone (sharing the stones' placements, drawn only into the
+    // shadow map): it looks the same from above, at about a hundredth of the triangles (the shadows are redrawn every
+    // frame something moves, which made phones lag)
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox, sz = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
+    const proxy = new THREE.InstancedMesh(new THREE.BoxGeometry(sz.x * 0.92, sz.y, sz.z * 0.92).translate(c.x, c.y, c.z), SHADOW_ONLY, 1);
+    proxy.instanceMatrix = m.instanceMatrix;
+    Object.defineProperty(proxy, 'count', { get: () => m.count, set() {} });
+    proxy.castShadow = true; proxy.frustumCulled = false;
+    m.add(proxy);
     return m;
   });
   // flat stones near the camera are drawn as the real stone top (no flattening); far ones use the lighter picture
@@ -2855,6 +2871,7 @@ function raceEnd(winner) {
 // adventure (and Wolf Chase): a gold arrow at the screen edge points to the key; once you have it, a blue one points to
 // the portal (on a door level's surface: to the door; in its cave: to the key, then the way back up)
 const _ga = new THREE.Vector3();
+let arrowOn = true, arrowBlue = null;
 function updateGoalArrow(time) {
   const el = $('goalArrow'), on = (mode === 'levels' || mode === 'wolf' || mode === 'hunt') && state === 'play' && intro.t < 0 && !won && warp.t < 0;
   let tgt = null, gold = true;
@@ -2865,13 +2882,13 @@ function updateGoalArrow(time) {
     else if (!hasKey && maze.doors && maze.doors.length) { const d = maze.doors[0]; tgt = _ga.set(d.x - origin, 0.4, d.z - origin); gold = false; }
     else if (portal && portal.visible) { tgt = portal.position; gold = false; }
   }
-  if (!tgt) { el.style.display = 'none'; return; }
+  if (!tgt) { if (arrowOn) { el.style.display = 'none'; arrowOn = false; } return; }
   _rp.copy(tgt); _rp.y += 0.5; _rp.project(camera);
   const W = innerWidth, H = innerHeight, cx = W / 2, cy = H / 2, top = 96, bottom = H - 150, left = 30, right = W - 30;
   let x = (_rp.x + 1) / 2 * W, y = (1 - _rp.y) / 2 * H;
   if (_rp.z > 1) { x = W - x; y = H - y; }
-  el.style.display = '';
-  el.classList.toggle('blue', !gold);
+  if (!arrowOn) { el.style.display = ''; arrowOn = true; }
+  if (arrowBlue !== !gold) { arrowBlue = !gold; el.classList.toggle('blue', arrowBlue); }
   const inside = x > left && x < right && y > top && y < bottom && _rp.z <= 1;
   if (inside) { el.style.transform = `translate(${x}px, ${y - 30 - Math.abs(Math.sin(time * 4)) * 10}px) translate(-50%, -50%) rotate(90deg)`; return; } // bobbing over it
   const dx = x - cx, dy = y - cy;
@@ -3268,7 +3285,7 @@ const joker = (() => {
   const trailMat = new THREE.MeshBasicMaterial({ color: '#ffe58a', transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false });
   const trailGeo = new THREE.CircleGeometry(0.09, 14).rotateX(-Math.PI / 2);
   // the cards fan out (glowing) for a few seconds when one arrives or you reach for them, then tuck away
-  let peekT = 0;
+  let peekT = 0, dockShown = null;
   function peek(toggle) { const d = $('jokerDock'); if (toggle && d.classList.contains('open')) { d.classList.remove('open'); peekT = 0; return; } d.classList.add('open'); peekT = 4.5; }
   function render() {
     const el = $('jokerBar'), counts = {};
@@ -3395,7 +3412,8 @@ const joker = (() => {
       for (const b of builds) if ((b.t -= dt) <= 0 && maze.g[b.i]) { maze.g[b.i] = 0; pillarsDirty = true; preyKey = ''; updateTargets(false); }
       builds = builds.filter(b => b.t > 0);
       for (const p of pickups) { p.s.position.y = 0.5 + Math.sin(performance.now() / 300 + p.x) * 0.05; p.s.material.rotation = 0; }
-      $('jokerDock').style.display = state === 'play' && (mode === 'levels' || mode === 'wolf' || mode === 'hunt') ? '' : 'none';
+      const dock = state === 'play' && (mode === 'levels' || mode === 'wolf' || mode === 'hunt') ? '' : 'none';
+      if (dock !== dockShown) { dockShown = dock; $('jokerDock').style.display = dock; } // (only when it changes: no style work every frame)
       if (peekT > 0 && !aiming && (peekT -= dt) <= 0) $('jokerDock').classList.remove('open');
       if (aiming) peekT = Math.max(peekT, 1);
     },
@@ -3621,7 +3639,7 @@ const hunt = (() => {
     update(dt, time) {
       if (!S) return;
       if (!S.endAt && intro.t < 0 && state === 'play') S.endAt = now() + HUNT.dur * 1000;
-      $('waitCard').classList.toggle('on', state === 'play' && intro.hold);
+      const wc = state === 'play' && intro.hold; if (wc !== S.wc) { S.wc = wc; $('waitCard').classList.toggle('on', wc); }
       const left = S.endAt ? Math.max(0, Math.ceil((S.endAt - now()) / 1000)) : HUNT.dur;
       const bar = `${S.o.round + 1}|${S.o.bestOf}|${S.pts}|${left}|${S.o.wins}`;
       if (bar !== S.bar) {

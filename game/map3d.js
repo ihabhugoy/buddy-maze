@@ -151,6 +151,7 @@ export function createMap3D({ canvas, renderer, layer, worlds, perWorld, stars, 
   let camX = 0, wantX = 0, w = 0, h = 0;
   const minX = nodePos(0).x + 2, maxX = nodePos(total - 1).x - 2;
   function refresh() {
+    shadowN = 0; // (the game's own shadows were in the shadow map: draw the board's again)
     const nx = next();
     for (let L = 0; L < total; L++) {
       const s = stars(L), open = unlocked(L), b = nodes[L];
@@ -177,6 +178,7 @@ export function createMap3D({ canvas, renderer, layer, worlds, perWorld, stars, 
   });
 
   const v = new THREE.Vector3();
+  let shadowX = 1e9, shadowN = 0;
   function render(dt, t) {
     const cw = canvas.clientWidth, ch = canvas.clientHeight;
     if (cw !== w || ch !== h) { w = cw; h = ch; if (own) r.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); }
@@ -192,7 +194,8 @@ export function createMap3D({ canvas, renderer, layer, worlds, perWorld, stars, 
       const want = m.userData.rise ? m.userData.rise + Math.sin(t * 2) * 0.03 : 0;
       m.position.y += (want - m.position.y) * Math.min(1, dt * 5);
     }
-    if (!own) r.shadowMap.needsUpdate = true;
+    // (the board's shadows only change when you scroll it: redrawn then, not every frame)
+    if (!own && (Math.abs(camX - shadowX) > 0.02 || shadowN < 3)) { r.shadowMap.needsUpdate = true; shadowX = camX; shadowN++; }
     r.render(sc, cam);
     for (let L = 0; L < total; L++) {
       const p = nodePos(L);

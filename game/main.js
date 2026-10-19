@@ -1018,7 +1018,7 @@ function pickDir(cands) {
   const seen = d => { const x = st.gx + d[0], z = st.gz + d[1]; return x < 0 || z < 0 || x >= maze.N || z >= maze.N || targets[z * maze.N + x] > 0; };
   const order = lastDir && b[0] === lastDir[0] && b[1] === lastDir[1] ? [b, a] : [a, b];
   if (open(order[0])) return order[0];
-  if (open(order[1]) && (gamesPlayed >= 1 || seen(order[0]))) return order[1];
+  if (open(order[1]) && (gamesPlayed >= 1 || seen(order[0]) || joker.dashing)) return order[1];
   return order[0];
 }
 
@@ -3103,7 +3103,7 @@ function wolfStep(w, d, prey) {
       return best;
     }
     w.toRoute = null;
-    if (at + w.rdir < 0 || at + w.rdir >= w.route.length) { w.rdir = -w.rdir; w.wait = 0.6; return null; } // looks around, turns back
+    if (at + w.rdir < 0 || at + w.rdir >= w.route.length || g[w.route[at + w.rdir][1] * N + w.route[at + w.rdir][0]]) { w.rdir = -w.rdir; w.wait = 0.6; return null; } // looks around, turns back (also at a raised wall)
     return w.route[at + w.rdir];
   }
   let opts = nb.filter(([x, z]) => !(x === w.fx && z === w.fz));
@@ -3221,12 +3221,14 @@ async function startWolf(run = 0) {
 // ---------- jokers ----------
 // Little helper cards (like the boosters in Candy Crush): find one glowing on the floor, or win one, and tap it when
 // you need it. Lantern: a trail of light to where you're headed. Hammer: the stone in front of you sinks for good.
-// Snowflake: every wolf freezes for a while. Boots: you run faster for a moment. They're kept between games (up to 9).
+// Snowflake: every wolf freezes for a while. Boots: you run faster for a moment. Wall: a stone rises in front of you
+// for 10 seconds (to block a wolf). They're kept between games (up to 9). Online, wolves and animals find different cards.
 const JOKERS = {
   light: { name: 'Lantern', icon: 'i-lantern', color: '#ffc43d', tip: 'a trail of light to where you’re going' },
   smash: { name: 'Hammer', icon: 'i-hammer', color: '#ff8c6b', tip: 'sinks the stone in front of you' },
   freeze: { name: 'Snowflake', icon: 'i-snow', color: '#6dbef0', tip: 'freezes the wolves for a while' },
   dash: { name: 'Boots', icon: 'i-boot', color: '#9c84ee', tip: 'run faster for a moment' },
+  build: { name: 'Wall', icon: 'i-brick', color: '#b08a5a', tip: 'raises a stone in front of you for 10 seconds' },
 };
 const joker = (() => {
   let bag = [];
@@ -3260,26 +3262,41 @@ const joker = (() => {
       { transform: `translate(${b.left + 30 - x0}px, ${b.top + 20 - y0}px) translate(-50%,-50%) scale(.4)`, opacity: 0.2 }], { duration: 1300, easing: 'cubic-bezier(.3,.7,.3,1)' }).onfinish = () => card.remove();
     sfx.ui('chime', 0.45);
   }
-  // cards on the floor: in dead ends off the way, about one per 6x6 of maze (always the same tiles for everyone online)
-  function place(n) {
+  // cards on the floor: on random open tiles away from where you start (online the spots come from the round's seed,
+  // so every phone has the same cards)
+  function spawnAt(x, z) {
+    const s = new THREE.Sprite(cardMat); s.scale.set(0.3, 0.4, 1); s.position.set(x - origin, 0.5, z - origin); s.renderOrder = 6;
+    const glow = new THREE.Sprite(wolfHaloMat); glow.scale.setScalar(0.9); s.add(glow);
+    scene.add(s); pickups.push({ x, z, s });
+  }
+  function freeTile(rnd = Math.random) {
+    const { N, g } = maze, dStart = distFrom([start]), busy = new Set([keyAt, goal, ...(maze.doors || []).map(d => [d.x, d.z]), ...(mode === 'hunt' ? hunt.flagAt || [] : [])].filter(Boolean).map(([x, z]) => z * N + x));
+    for (const p of pickups) busy.add(p.z * N + p.x);
+    for (let k = 0; k < 200; k++) { const i = Math.floor(rnd() * N * N); if (!g[i] && !busy.has(i) && dStart[i] >= 3) return [i % N, (i / N) | 0]; }
+    return null;
+  }
+  function place(n, rnd = Math.random) {
     clear();
     if (!maze || !n) return;
-    const { N, g } = maze, way = new Set(wayThrough().map(([x, z]) => z * N + x)), ends = [];
-    for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) {
-      const i = z * N + x; if (g[i] || way.has(i) || (keyAt && keyAt[0] === x && keyAt[1] === z) || (goal[0] === x && goal[1] === z) || (start[0] === x && start[1] === z)) continue;
-      const open = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dz]) => { const X = x + dx, Z = z + dz; return X >= 0 && Z >= 0 && X < N && Z < N && !g[Z * N + X]; }).length;
-      if (open === 1) ends.push([x, z]);
-    }
-    const step = Math.max(1, Math.floor(ends.length / n));
-    for (let k = 0; k < n && k * step < ends.length; k++) {
-      const [x, z] = ends[(k * step + Math.floor(step / 2)) % ends.length];
-      const s = new THREE.Sprite(cardMat); s.scale.set(0.3, 0.4, 1); s.position.set(x - origin, 0.5, z - origin); s.renderOrder = 6;
-      const glow = new THREE.Sprite(wolfHaloMat); glow.scale.setScalar(0.9); s.add(glow);
-      scene.add(s); pickups.push({ x, z, s, i: k });
-    }
+    for (let k = 0; k < n; k++) { const t = freeTile(rnd); if (t) spawnAt(t[0], t[1]); }
   }
-  function clear() { pickups.forEach(p => scene.remove(p.s)); pickups = []; if (trail) { scene.remove(trail); trail = null; } frozenT = dashT = 0; }
-  const randomKind = () => { const ks = wolves.length || mode === 'hunt' ? ['light', 'smash', 'freeze', 'dash'] : ['light', 'smash', 'dash', 'light']; return ks[Math.floor(Math.random() * ks.length)]; };
+  function clear() { builds = []; pickups.forEach(p => scene.remove(p.s)); pickups = []; if (trail) { scene.remove(trail); trail = null; } frozenT = dashT = 0; }
+  // which cards you can find: online, wolves and animals each have their own; on your own, the snowflake only with wolves about
+  const kindsFor = () => mode === 'hunt' ? (hunt.amWolf() ? ['build', 'dash', 'freeze', 'smash'] : ['smash', 'build', 'dash', 'light', 'freeze'])
+    : wolves.length ? ['light', 'smash', 'build', 'freeze', 'dash'] : ['light', 'smash', 'build', 'dash', 'light'];
+  const randomKind = () => { const ks = kindsFor(); return ks[Math.floor(Math.random() * ks.length)]; };
+  // a stone rises in front of you for 10 seconds (online, for everyone), then sinks again
+  let builds = [];
+  function buildAt(x, z, shared) {
+    const { N } = maze, i = z * N + x;
+    if (x <= 0 || z <= 0 || x >= N - 1 || z >= N - 1 || maze.g[i]) return false;
+    const taken = [[st.gx, st.gz], [st.tx, st.tz], keyAt, goal, ...wolves.map(w => [w.x, w.z]), ...(mode === 'hunt' ? hunt.occupied() : [])].filter(Boolean);
+    if (taken.some(([a, c]) => a === x && c === z)) return false;
+    maze.g[i] = 1; builds.push({ i, t: 10 }); pillarsDirty = true; updateTargets(false); preyKey = '';
+    sfx.play('rise', 0.5);
+    if (shared && mode === 'hunt') net.send({ t: 'build', x, z });
+    return true;
+  }
   // stepping on a card picks it up
   function onStep(x, z) {
     const k = pickups.findIndex(p => p.x === x && p.z === z); if (k < 0) return;
@@ -3316,23 +3333,31 @@ const joker = (() => {
       ok = smashAt(st.gx + d[0], st.gz + d[1], true);
       if (!ok) toast('Face a stone to use the Hammer');
     } else if (k === 'freeze') {
-      frozenT = 6; for (const w of wolves) { w.wait = Math.max(w.wait, 6); w.state = 'roam'; w.rest = 8; }
-      if (mode === 'hunt') net.send({ t: 'freeze' });
-      toast('The wolves are frozen!');
+      if (mode === 'hunt') { const side = hunt.amWolf() ? 'animals' : 'wolves'; net.send({ t: 'freeze', side }); hunt.freeze(side); }
+      else { frozenT = 6; for (const w of wolves) { w.wait = Math.max(w.wait, 6); w.state = 'roam'; w.rest = 8; } }
+      toast(mode === 'hunt' && hunt.amWolf() ? 'The animals are frozen!' : 'The wolves are frozen!');
     } else if (k === 'dash') { dashT = 5; toast('Zoom!'); }
+    else if (k === 'build') {
+      const d = [Math.round(Math.cos(st.facing)), Math.round(-Math.sin(st.facing))];
+      ok = buildAt(st.gx + d[0], st.gz + d[1], true);
+      if (!ok) toast('Face an empty path to raise a Wall');
+    }
     if (!ok) return;
     bag.splice(i, 1); save(); render(); sfx.ui('whoosh', 0.4);
     const b = document.querySelector(`.jcard[data-j="${k}"]`); if (b) b.animate([{ transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: 300 });
   }
   return {
-    give, place, clear, onStep, use, render, smashAt, takenElsewhere,
+    give, place, clear, onStep, use, render, smashAt, buildAt, takenElsewhere, spawnAt, freeTile,
     get bag() { return bag; },
     speed: () => dashT > 0 ? 0.62 : 1,
+    get dashing() { return dashT > 0; },
     frozen: () => frozenT > 0,
     freezeAll() { frozenT = 6; for (const w of wolves) { w.wait = Math.max(w.wait, 6); w.state = 'roam'; w.rest = 8; } },
     update(dt) {
       if (trailT > 0) { trailT -= dt; trailMat.opacity = Math.min(0.9, trailT / 1.5); if (trailT <= 0 && trail) { scene.remove(trail); trail = null; } }
       if (frozenT > 0) frozenT -= dt; if (dashT > 0) dashT -= dt;
+      for (const b of builds) if ((b.t -= dt) <= 0 && maze.g[b.i]) { maze.g[b.i] = 0; pillarsDirty = true; preyKey = ''; updateTargets(false); }
+      builds = builds.filter(b => b.t > 0);
       for (const p of pickups) { p.s.position.y = 0.5 + Math.sin(performance.now() / 300 + p.x) * 0.05; p.s.material.rotation = 0; }
       $('jokerBar').style.display = state === 'play' && (mode === 'levels' || mode === 'wolf' || mode === 'hunt') ? '' : 'none';
     },
@@ -3422,7 +3447,8 @@ const hunt = (() => {
         a.pid = i; a.role = p.role; a.stepTime = wolfy ? WOLF.human : CFG.stepTime; S.actors.set(i, a);
       }
     });
-    joker.place(4);
+    joker.place(5, mulberry32(o.seed + 99));
+    S.cardT = 20; S.cardRnd = mulberry32(o.seed + 7);
     hasKey = false;
     $('fog').style.display = this.amWolf() ? '' : 'none';
     $('huntBar').style.display = '';
@@ -3519,7 +3545,13 @@ const hunt = (() => {
     get flagAt() { return S && S.flagAt; }, get pts() { return S && S.pts; }, _end() { if (S) S.endAt = now() - 1; }, _forceWolf() { if (S) S.players[S.me].role = 'wolf'; },
     amWolf: () => !!S && role(S.me) === 'wolf',
     live: () => !!S && !S.over && state === 'play' && intro.t < 0,
-    canMove: () => !S || (!S.over && !isOut(S.me)),
+    canMove: () => !S || (!S.over && !isOut(S.me) && !(S.frozen > now())),
+    freeze(side) { // a snowflake card: the other side stands still for 4 seconds
+      if (!S) return;
+      if (side === 'wolves') joker.freezeAll();
+      if ((side === 'wolves') === (role(S.me) === 'wolf')) { S.frozen = now() + 4000; heldDir = queued = heldCands = queuedCands = null; toast('Brrr! Frozen for a moment'); }
+    },
+    occupied: () => S ? S.players.map((_, i) => tileOf(i)).filter(Boolean).concat(S.flagAt) : [],
     preyTiles: () => S ? S.players.map((p, i) => p.role !== 'wolf' && !isSafe(i) ? tileOf(i) : null).filter(Boolean) : [],
     nextTarget: () => { if (!S || role(S.me) === 'wolf') return null; if (S.carry.includes(S.me)) return S.tiles[S.me]; let best = null, bd = 1e9; S.flagAt.forEach((f, k) => { if (S.carry[k] < 0) { const d = Math.abs(f[0] - st.gx) + Math.abs(f[1] - st.gz); if (d < bd) { bd = d; best = f; } } }); return best; },
     onStep(x, z) {
@@ -3542,7 +3574,9 @@ const hunt = (() => {
       else if (m.t === 'rend') showRound(m);
       else if (m.t === 'jk') joker.takenElsewhere(m.x, m.z);
       else if (m.t === 'smash') joker.smashAt(m.x, m.z, false);
-      else if (m.t === 'freeze') { joker.freezeAll(); if (role(S.me) === 'wolf') { S.out.set(S.me, now() + 4000); toast('Brrr! You’re frozen for a moment'); } }
+      else if (m.t === 'freeze') this.freeze(m.side || 'wolves');
+      else if (m.t === 'build') joker.buildAt(m.x, m.z, false);
+      else if (m.t === 'jkspawn') joker.spawnAt(m.x, m.z);
       else if (S.host && m.t === 'grab') grab(m.k, m.p);
       else if (S.host && m.t === 'cap') cap(m.p);
     },
@@ -3582,7 +3616,10 @@ const hunt = (() => {
         if (Math.abs(r - (S.fogR || 0)) > 4) { S.fogR = r; $('fog').style.background = `radial-gradient(circle at 50% 50%, rgba(12,10,24,0) ${r * 0.62}px, rgba(12,10,24,.7) ${r}px, rgba(12,10,24,.97) ${r * 1.25}px)`; }
         $('fog').style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
       }
-      if (this.live() && S.host) referee();
+      if (this.live() && S.host) {
+        referee();
+        if ((S.cardT -= dt) <= 0) { S.cardT = 20; const t = joker.freeTile(S.cardRnd); if (t) { joker.spawnAt(t[0], t[1]); net.send({ t: 'jkspawn', x: t[0], z: t[1] }); } } // (a new card every 20 s)
+      }
     },
   };
 })();
@@ -3867,7 +3904,7 @@ const net = (() => {
       else if (m.t === 'pos' || m.t === 'win') { toAll(m, c); remote(m); } // pass it on to the others too
       else if (m.t === 'role') { c.role = m.r === 'wolf' ? 'wolf' : 'animal'; syncLobby(); }
       else if (m.t === 'grab' || m.t === 'cap') remote(m); // (Wolves vs Animals: the host decides)
-      else if (m.t === 'jk' || m.t === 'smash' || m.t === 'freeze') { toAll(m, c); remote(m); } // (cards picked up and used, for everyone)
+      else if (m.t === 'jk' || m.t === 'smash' || m.t === 'freeze' || m.t === 'build') { toAll(m, c); remote(m); } // (cards picked up and used, for everyone)
       else if (m.t === 'pong') {
         const r = performance.now() - m.s; c.rtt = c.rtt ? c.rtt * 0.7 + r * 0.3 : r;
         if (!(c.best <= r * 1.2)) { c.best = r; c.off = m.g - (m.s + r / 2); } // their clock minus mine
@@ -4204,6 +4241,13 @@ function show(name) {
   if (name === 'title') {
     const n = nextLevel();
     $('playSub').textContent = $('playSub2').textContent = `Level ${n + 1}`;
+    // the profile badge: your character, how far you've come in this world, cards in your bag, Wolf Chase best
+    const wi = Math.floor(n / LEVELS_PER_WORLD), done = n % LEVELS_PER_WORLD;
+    $('xpText').textContent = `Level ${n + 1} · ${WORLDS[wi].name}`; $('xpFill').style.width = `${Math.round(done / LEVELS_PER_WORLD * 100)}%`;
+    $('profileName').textContent = (CHARS.find(c => c.id === charId) || CHARS[0]).name;
+    charPreview(charId).then(u => { $('profilePic').src = u; });
+    $('cardCount').textContent = joker.bag.length;
+    $('wolfBestTxt').textContent = wolfBest ? `Best: ${wolfBest} map${wolfBest > 1 ? 's' : ''}` : 'Can you escape?';
     $('starCount').textContent = Array.from({ length: TOTAL_LEVELS }, (_, k) => save.stars(k)).reduce((a, b) => a + b, 0);
     const wd = WORLDS[Math.floor(n / LEVELS_PER_WORLD)];
     $('worldNameCard').textContent = wd.name;
@@ -4324,7 +4368,6 @@ document.addEventListener('click', e => {
 });
 $('playBtn').addEventListener('click', () => show('worlds')); // adventure opens the map
 $('contBtn').addEventListener('click', e => { e.stopPropagation(); play(nextLevel()); });
-$('contCard').addEventListener('click', () => play(nextLevel()));
 // soft UI sounds: a little pop on every button, a breath of a hover on menu items
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -4333,7 +4376,7 @@ document.addEventListener('click', e => {
   sfx.ui('pop', 0.45);
 }, true);
 document.addEventListener('pointerover', e => {
-  const b = e.target.closest('.mitem, .pitem, .btn, .round, .node, .cont'); if (!b || b.contains(e.relatedTarget)) return;
+  const b = e.target.closest('.mitem, .pitem, .btn, .round, .node, .hubtile, .event, .playbig'); if (!b || b.contains(e.relatedTarget)) return;
   sfx.ui('hover', 0.22);
 });
 // the 3D menu panels sway a little toward the mouse
@@ -4352,7 +4395,7 @@ function clearBadge() {
 }
 setTimeout(clearBadge, 2500); setTimeout(clearBadge, 7000); addEventListener('resize', () => setTimeout(clearBadge, 300));
 // title menu: the hovered item is the selected one; arrow keys / W S move it, Enter or Space picks it
-const menuItems = [...document.querySelectorAll('#sideMenu .mitem')];
+const menuItems = [...document.querySelectorAll('#sideMenu .hubtile')];
 const selectItem = el => menuItems.forEach(m => m.classList.toggle('sel', m === el));
 menuItems.forEach(m => m.addEventListener('pointerenter', () => selectItem(m)));
 addEventListener('keydown', e => {
@@ -4459,9 +4502,10 @@ addEventListener('blur', () => { if (state === 'play' && !net.online) show('paus
 $('pauseSoundBtn').addEventListener('click', () => openSettings('pause'));
 $('settingsDone').addEventListener('click', () => show(settingsBack));
 $('outfitBtn').addEventListener('click', () => show('outfit'));
+$('profileBtn').addEventListener('click', () => show('outfit'));
 $('raceBtn').addEventListener('click', () => show('race'));
 $('jokerBar').addEventListener('click', e => { const b = e.target.closest('[data-j]'); if (b) joker.use(b.dataset.j); });
-addEventListener('keydown', e => { const k = { Digit1: 'light', Digit2: 'smash', Digit3: 'freeze', Digit4: 'dash', KeyQ: 'light', KeyE: 'smash' }[e.code]; if (k && state === 'play') joker.use(k); });
+addEventListener('keydown', e => { const k = { Digit1: 'light', Digit2: 'smash', Digit3: 'build', Digit4: 'freeze', Digit5: 'dash', KeyQ: 'light', KeyE: 'smash', KeyR: 'build' }[e.code]; if (k && state === 'play') joker.use(k); });
 joker.render();
 $('wolfBtn').addEventListener('click', () => startWolf(0));
 // race setup screen: steppers for Buddies and teammates, a choice of rival speed, and a preview of the teams

@@ -599,6 +599,53 @@
   @keyframes gojump { from { transform: translateY(80px) scale(.2) rotate(-30deg); opacity: 0; } }
   @keyframes gobob { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-10px) rotate(3deg); } }
   @keyframes gogrr { 0%, 100% { transform: rotate(0) scale(1); } 15% { transform: rotate(-8deg) scale(1.06); } 30% { transform: rotate(8deg) scale(1.06); } 45% { transform: rotate(0) scale(1); } }
+
+  /* ---------- home: a game hub ---------- */
+  #title .hubtop { position: absolute !important; z-index: 4; left: 22px; right: 22px; top: calc(16px + env(safe-area-inset-top)); display: flex; align-items: center; gap: 12px; }
+  #title .hubtop .counters { position: static !important; display: flex; gap: 8px; margin-left: auto; pointer-events: none; }
+  #title .hubtop .topbtns { position: static !important; display: flex; gap: 8px; }
+  #title .hubtop .topbtns .round { width: 48px; height: 48px; border-radius: 16px; font-size: 0; }
+  .profile { display: flex; align-items: center; gap: 10px; padding: 6px 14px 6px 6px; border-radius: 999px; background: var(--card); box-shadow: inset 0 -4px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); text-align: left; }
+  .profile .avatar { width: 50px; height: 50px; border-radius: 50%; overflow: hidden; background: radial-gradient(circle at 50% 35%, #fff, #f1e3c8); box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--leaf); flex: none; }
+  .profile .avatar img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.25) translateY(6%); }
+  .profile .pinfo { display: flex; flex-direction: column; gap: 3px; line-height: 1; } .profile b { font-size: 17px; } .profile small { font-size: 11px; color: var(--ink-soft); }
+  .profile .xp { width: 110px; height: 9px; border-radius: 5px; background: rgba(160,120,70,.18); overflow: hidden; } .profile .xp i { display: block; height: 100%; width: 0; border-radius: 5px; background: linear-gradient(90deg, #8fd16f, #5fb54f); transition: width .6s var(--spring); }
+  .cardchip .ico { color: #e8823a; }
+  #title .logo { top: calc(76px + env(safe-area-inset-top)); } #title .logo .word { font-size: clamp(60px, 7.2vw, 118px); } #title .logo .sub { margin-top: 10px; }
+  .hubleft { position: absolute !important; z-index: 3; left: 24px; top: 52%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 12px; }
+  .hubtile { width: 86px; display: flex; flex-direction: column; align-items: center; gap: 6px; font-weight: 900; font-size: 14px; color: var(--ink); animation: fadeup .5s var(--spring) both; }
+  .hubtile:nth-child(2) { animation-delay: .06s; } .hubtile:nth-child(3) { animation-delay: .12s; } .hubtile:nth-child(4) { animation-delay: .18s; }
+  .hubtile i { width: 64px; height: 64px; border-radius: 22px; display: grid; place-items: center; background: var(--c); color: #fff; box-shadow: inset 0 -6px 0 rgba(0,0,0,.16), 0 0 0 3px #fff, var(--shadow-s); transition: transform .25s var(--bounce); }
+  .hubtile i .ico { width: 32px; height: 32px; } .hubtile:hover i, .hubtile.sel i { transform: translateY(-3px) scale(1.06) rotate(-4deg); } .hubtile:active i { transform: scale(.94); }
+  .hubtile span { display: flex; flex-direction: column; align-items: center; line-height: 1.05; text-shadow: 0 2px 0 #fff, 0 -1px 0 #fff, 1px 0 0 #fff, -1px 0 0 #fff; } .hubtile small { font-size: 10px; color: var(--ink-soft); }
+  .hubright { position: absolute !important; z-index: 3; right: 24px; top: 52%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 14px; }
+  .event { position: relative; width: 230px; display: flex; align-items: center; gap: 12px; padding: 10px 14px 12px 10px; border-radius: 24px; background: var(--card); box-shadow: inset 0 -5px 0 var(--lip), inset 0 0 0 2px var(--edge), var(--shadow-s); text-align: left; animation: fadeup .5s .1s var(--spring) both; transition: transform .25s var(--bounce); }
+  .event:hover { transform: translateY(-3px) rotate(-1deg); } .event:active { transform: scale(.97); }
+  .event img { width: 64px; height: 64px; border-radius: 18px; object-fit: cover; box-shadow: 0 0 0 3px #fff, 0 4px 10px rgba(0,0,0,.15); animation: gobob 2.6s ease-in-out infinite; }
+  .event > i { width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center; background: var(--coral); color: #fff; box-shadow: inset 0 -5px 0 rgba(0,0,0,.15), 0 0 0 3px #fff; } .event > i .ico { width: 32px; height: 32px; }
+  .event span { display: flex; flex-direction: column; gap: 3px; } .event b { font-size: 18px; } .event small { font-size: 12px; color: var(--ink-soft); }
+  .event .new { position: absolute; right: 10px; top: -9px; padding: 3px 9px 4px; border-radius: 9px; background: #ff5a4e; color: #fff; font-style: normal; font-size: 11px; font-weight: 900; letter-spacing: .08em; transform: rotate(6deg); animation: pulse 1s ease-in-out infinite; }
+  .wolfev { background: linear-gradient(135deg, #fffaf1, #eef0f6); }
+  .hubplay { position: absolute !important; z-index: 3; left: 50%; bottom: calc(26px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); transform: translateX(-50%); }
+  .playbig { display: flex; align-items: center; gap: 14px; min-width: 330px; padding: 10px 26px 16px 12px; border-radius: 30px; background: linear-gradient(180deg, #ffd85c, #ffc23a); color: #6b4a12; box-shadow: inset 0 -8px 0 #e3a21f, inset 0 0 0 3px #fff3c4, 0 14px 30px rgba(200,140,30,.35); animation: playglow 1.8s ease-in-out infinite; transition: transform .2s var(--bounce); }
+  .playbig:hover { transform: translateY(-3px) scale(1.03); } .playbig:active { transform: translateY(3px) scale(.97); box-shadow: inset 0 -3px 0 #e3a21f, inset 0 0 0 3px #fff3c4; }
+  .playbig .art { width: 62px; height: 62px; border-radius: 20px; overflow: hidden; background: rgba(255,255,255,.55); flex: none; } .playbig .art img { width: 100%; height: 100%; object-fit: contain; }
+  .playbig .pbtext { display: flex; flex-direction: column; text-align: left; line-height: 1; } .playbig b { font-family: var(--title); font-weight: 400; font-size: 40px; letter-spacing: .03em; color: #fff; text-shadow: 0 3px 0 #d98e14, 0 0 0 #000; -webkit-text-stroke: 1.5px #c97f10; } .playbig small { font-size: 13px; font-weight: 900; margin-top: 4px; }
+  .playbig > .ico { width: 34px; height: 34px; margin-left: auto; color: #fff; filter: drop-shadow(0 2px 0 #d98e14); }
+  @keyframes playglow { 0%, 100% { box-shadow: inset 0 -8px 0 #e3a21f, inset 0 0 0 3px #fff3c4, 0 14px 30px rgba(200,140,30,.35); } 50% { box-shadow: inset 0 -8px 0 #e3a21f, inset 0 0 0 3px #fff3c4, 0 14px 40px rgba(255,190,60,.65); } }
+  @media (max-width: 760px) {
+    #title .hubtop { left: 10px; right: 10px; gap: 6px; flex-wrap: wrap; }
+    .profile { padding: 4px 10px 4px 4px; } .profile .avatar { width: 40px; height: 40px; } .profile b { font-size: 14px; } .profile .xp { width: 70px; }
+    #title .hubtop .counters { gap: 5px; } #title .hubtop .counters .chip { font-size: 13px; padding: 4px 8px; } #title .hubtop .counters .chestchip i { width: 28px; }
+    #title .hubtop .topbtns .round { width: 40px; height: 40px; border-radius: 14px; }
+    #title .hubtop .counters { order: 3; width: 100%; justify-content: flex-start; margin: 0; }
+    #title .logo { top: calc(112px + env(safe-area-inset-top)); } #title .logo .word { font-size: 54px; } #title .logo .sub { font-size: 10px; margin-top: 6px; padding: 4px 12px 5px; }
+    #title .hubtile { font-size: 12px !important; padding: 0 !important; background: none !important; box-shadow: none !important; flex-direction: column !important; gap: 4px !important; justify-content: flex-start !important; color: var(--ink) !important; text-shadow: none; }
+    .hubleft { left: 8px; top: 56%; gap: 8px; } .hubtile { width: 64px; font-size: 12px; } .hubtile i { width: 50px; height: 50px; border-radius: 17px; } .hubtile i .ico { width: 26px; height: 26px; }
+    .hubright { right: 8px; top: 56%; gap: 10px; } .event { width: 76px; flex-direction: column; gap: 4px; padding: 8px 6px 10px; text-align: center; } .event img, .event > i { width: 52px; height: 52px; border-radius: 16px; } .event span { align-items: center; } .event b { font-size: 12px; } .event small { display: none; } .event .new { right: -4px; }
+    .hubplay { left: 14px; right: 14px; transform: none; bottom: calc(16px + env(safe-area-inset-bottom) + var(--badge-h, 0px)); } .playbig { min-width: 0; width: 100%; } .playbig b { font-size: 34px; }
+    #title .faceSlot { top: calc(150px + env(safe-area-inset-top)) !important; bottom: calc(110px + env(safe-area-inset-bottom)) !important; left: 70px !important; right: 70px !important; height: auto; }
+  }
   #jokerBar { position: fixed; left: 14px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 5; display: flex; gap: 8px; }
   .jcard { position: relative; width: 52px; height: 62px; border-radius: 16px; background: #fffaf1; color: var(--c); box-shadow: inset 0 -5px 0 color-mix(in srgb, var(--c) 35%, #d9c4a0), inset 0 0 0 3px var(--c), 0 6px 14px rgba(80,50,20,.18); display: grid; place-items: center; animation: jbob 2.4s ease-in-out infinite; }
   .jcard .ico { width: 28px; height: 28px; margin-top: -4px; } .jcard b { position: absolute; right: -6px; top: -6px; min-width: 20px; height: 20px; border-radius: 10px; background: var(--c); color: #fff; font-size: 12px; display: grid; place-items: center; box-shadow: 0 0 0 2px #fff; }
@@ -839,6 +886,8 @@
   <symbol id="i-snow" viewBox="0 0 24 24"><path d="M12 1.8a1.2 1.2 0 0 1 1.2 1.2v2.3l1.4-1.4a1.1 1.1 0 1 1 1.6 1.6l-3 3v2.4l2.1-1.2 1.1-4.1a1.1 1.1 0 1 1 2.2.6l-.5 1.9 2-1.2a1.2 1.2 0 1 1 1.2 2.1l-2 1.2 1.9.5a1.1 1.1 0 1 1-.6 2.2l-4.1-1.1-2.1 1.2 2.1 1.2 4.1-1.1a1.1 1.1 0 1 1 .6 2.2l-1.9.5 2 1.2a1.2 1.2 0 1 1-1.2 2.1l-2-1.2.5 1.9a1.1 1.1 0 1 1-2.2.6l-1.1-4.1-2.1-1.2v2.4l3 3a1.1 1.1 0 1 1-1.6 1.6l-1.4-1.4V21a1.2 1.2 0 0 1-2.4 0v-2.3l-1.4 1.4a1.1 1.1 0 1 1-1.6-1.6l3-3V13l-2.1 1.2-1.1 4.1a1.1 1.1 0 1 1-2.2-.6l.5-1.9-2 1.2a1.2 1.2 0 1 1-1.2-2.1l2-1.2-1.9-.5a1.1 1.1 0 1 1 .6-2.2l4.1 1.1L10.8 12 8.7 10.8l-4.1 1.1a1.1 1.1 0 1 1-.6-2.2l1.9-.5-2-1.2a1.2 1.2 0 1 1 1.2-2.1l2 1.2-.5-1.9a1.1 1.1 0 1 1 2.2-.6l1.1 4.1 2.1 1.2V8.5l-3-3a1.1 1.1 0 1 1 1.6-1.6l1.4 1.4V3A1.2 1.2 0 0 1 12 1.8z"/></symbol>
   <symbol id="i-boot" viewBox="0 0 24 24"><path d="M7 2.5h6.5a1 1 0 0 1 1 1V11l4.6 2.1a3.5 3.5 0 0 1 2.1 3.2v1.2a1 1 0 0 1-1 1H4.5a1 1 0 0 1-1-1V15a3 3 0 0 1 2-2.8V3.5a1 1 0 0 1 1-1zM3.5 19.8h17.7a.9.9 0 0 1 0 1.8H3.5a.9.9 0 0 1 0-1.8zM1.8 6.5h3a.8.8 0 0 1 0 1.6h-3a.8.8 0 0 1 0-1.6zm-.6 3.4h3.6a.8.8 0 0 1 0 1.6H1.2a.8.8 0 0 1 0-1.6z"/></symbol>
   <symbol id="i-gift" viewBox="0 0 24 24"><path d="M8.2 2.6c1.5-.5 2.9.6 3.8 2.2.9-1.6 2.3-2.7 3.8-2.2 1.6.5 2 2.5.9 3.6l-.4.4H20a1.5 1.5 0 0 1 1.5 1.5v2a1.5 1.5 0 0 1-1.5 1.5h-7.1V6.9h-1.8v4.7H4a1.5 1.5 0 0 1-1.5-1.5v-2A1.5 1.5 0 0 1 4 6.6h3.7l-.4-.4c-1.1-1.1-.7-3.1.9-3.6zM4.2 13.2h6.9v8.3H6.2a2 2 0 0 1-2-2zm8.7 0h6.9v6.3a2 2 0 0 1-2 2h-4.9z"/></symbol>
+  <symbol id="i-brick" viewBox="0 0 24 24"><path d="M3.5 4h7.3v5H2v-3.5A1.5 1.5 0 0 1 3.5 4zm9.2 0h7.8A1.5 1.5 0 0 1 22 5.5V9h-9.3zM2 10.9h4.6V16H2zm6.5 0h7V16h-7zm8.9 0H22V16h-4.6zM2 17.9h9.3V21H3.5A1.5 1.5 0 0 1 2 19.5zm11.2 0H22v1.6a1.5 1.5 0 0 1-1.5 1.5h-7.3z"/></symbol>
+  <symbol id="i-cards" viewBox="0 0 24 24"><path d="M9.6 3.2l8.6 2.3a2 2 0 0 1 1.4 2.4l-3 11.3a2 2 0 0 1-2.4 1.4l-8.6-2.3a2 2 0 0 1-1.4-2.4l3-11.3a2 2 0 0 1 2.4-1.4zm2.6 5.3l-.9 2-2.2.3 1.6 1.5-.4 2.2 2-1 1.9 1.1-.4-2.2 1.6-1.6-2.2-.3z"/><path d="M4.3 6.8l1.6-.4-2.4 9a3.4 3.4 0 0 0 .9 3.2l-.6-.2A2 2 0 0 1 2.4 16z" opacity=".55"/></symbol>
   <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 2.5a1.2 1.2 0 0 1 1.2 1.2V4h11.3a1 1 0 0 1 .8 1.6L16 9l2.3 3.4a1 1 0 0 1-.8 1.6H6.2v6.8a1.2 1.2 0 1 1-2.4 0V3.7A1.2 1.2 0 0 1 5 2.5z"/></symbol>
   <symbol id="i-star" viewBox="0 0 24 24"><path d="M11.1 2.6a1 1 0 0 1 1.8 0l2.4 4.9 5.4.8a1 1 0 0 1 .6 1.7l-3.9 3.8.9 5.4a1 1 0 0 1-1.5 1L12 17.7l-4.8 2.5a1 1 0 0 1-1.5-1l.9-5.4-3.9-3.8a1 1 0 0 1 .6-1.7l5.4-.8z"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M9.5 16.2 5.3 12a1.4 1.4 0 1 0-2 2l5.2 5.2a1.4 1.4 0 0 0 2 0L21.2 8.6a1.4 1.4 0 0 0-2-2z"/></symbol>
@@ -898,31 +947,34 @@
   <div class="motes"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
   <div class="faceSlot"><canvas id="faceCanvas"></canvas></div>
   <div class="motes near"><i></i><i></i><i></i><i></i><i></i></div>
-  <div class="counters">
-    <span class="chip"><i class="cbadge honey"><svg class="ico"><use href="#i-star"/></svg></i><b id="starCount">0</b></span>
-    <span class="chip chestchip" id="chestChip"></span>
+  <div class="hubtop">
+    <button class="profile" id="profileBtn" aria-label="Your character">
+      <span class="avatar"><img id="profilePic" alt=""></span>
+      <span class="pinfo"><b id="profileName">Buddy</b><span class="xp"><i id="xpFill"></i></span><small id="xpText">Level 1</small></span>
+    </button>
+    <div class="hubchips counters">
+      <span class="chip"><i class="cbadge honey"><svg class="ico"><use href="#i-star"/></svg></i><b id="starCount">0</b></span>
+      <span class="chip cardchip"><svg class="ico"><use href="#i-cards"/></svg><b id="cardCount">0</b></span>
+      <span class="chip chestchip" id="chestChip"></span>
+    </div>
+    <div class="topbtns">
+      <button class="round" id="installBtn" aria-label="Get the app"><svg class="ico"><use href="#i-download"/></svg><i class="dot" id="installDot"></i></button>
+      <button class="round" id="settingsBtn" aria-label="Settings"><svg class="ico"><use href="#i-gear"/></svg></button>
+    </div>
   </div>
   <div class="logo"><span class="word" id="logoA">Buddy</span><br><div class="sub">Remember the way</div></div>
-  <div class="topbtns">
-    <button class="round" id="installBtn" aria-label="Get the app"><svg class="ico"><use href="#i-download"/></svg>Get app<i class="dot" id="installDot"></i></button>
-    <button class="round" id="settingsBtn" aria-label="Settings"><svg class="ico"><use href="#i-gear"/></svg>Settings</button>
-  </div>
-  <nav class="side-menu" id="sideMenu">
-    <button class="mitem big sel" id="playBtn"><i class="mi"><svg class="ico"><use href="#i-map"/></svg></i><span>Adventure<small id="playSub2">Level 1-1</small></span><svg class="ico go"><use href="#i-next"/></svg></button>
-    <button class="mitem big" id="friendMenuBtn"><i class="mi"><svg class="ico"><use href="#i-heart"/></svg></i><span>Friends<small>Play together</small></span><svg class="ico go"><use href="#i-next"/></svg></button>
-    <div class="mtiles">
-      <button class="mitem tile" id="raceBtn"><i class="mi"><svg class="ico"><use href="#i-flag"/></svg></i><span>Race</span></button>
-      <button class="mitem tile" id="wolfBtn"><i class="mi"><svg class="ico"><use href="#i-paw"/></svg></i><span>Wolves</span></button>
-      <button class="mitem tile" id="outfitBtn"><i class="mi"><svg class="ico"><use href="#i-shirt"/></svg></i><span>Outfit</span></button>
-      <button class="mitem tile" id="helpBtn"><i class="mi"><svg class="ico"><use href="#i-help"/></svg></i><span>Help</span></button>
-    </div>
+  <nav class="hubleft" id="sideMenu">
+    <button class="hubtile" id="outfitBtn" style="--c:var(--lilac)"><i><svg class="ico"><use href="#i-shirt"/></svg></i><span>Outfit</span></button>
+    <button class="hubtile" id="friendMenuBtn" style="--c:#f27ba6"><i><svg class="ico"><use href="#i-heart"/></svg></i><span>Friends</span></button>
+    <button class="hubtile" id="playBtn" style="--c:var(--leaf)"><i><svg class="ico"><use href="#i-map"/></svg></i><span>Map<small id="playSub2">Level 1</small></span></button>
+    <button class="hubtile" id="helpBtn" style="--c:var(--sky)"><i><svg class="ico"><use href="#i-help"/></svg></i><span>Help</span></button>
   </nav>
-  <div class="cont" id="contCard">
-    <div class="tag">Continue</div>
-    <div class="art" id="contArt"></div>
-    <h3 id="worldNameCard">Mossy Woods</h3>
-    <p id="playSub">Level 1-1</p>
-    <button class="btn green small" id="contBtn"><svg class="ico"><use href="#i-play"/></svg>Play</button>
+  <div class="hubright">
+    <button class="event wolfev" id="wolfBtn"><img alt="" src="assets/story/sticker-wolf.webp"><span><b>Wolf Chase</b><small id="wolfBestTxt">Can you escape?</small></span><em class="new">NEW</em></button>
+    <button class="event raceev" id="raceBtn"><i><svg class="ico"><use href="#i-flag"/></svg></i><span><b>Race</b><small>First to the key</small></span></button>
+  </div>
+  <div class="hubplay">
+    <button class="playbig" id="contBtn"><span class="art" id="contArt"></span><span class="pbtext"><b>PLAY</b><small><span id="playSub">Level 1</span> · <span id="worldNameCard">Mossy Woods</span></small></span><svg class="ico"><use href="#i-play"/></svg></button>
   </div>
 </section>
 

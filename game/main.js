@@ -4149,19 +4149,45 @@ const rewards = (() => {
     if (n >= GIFT_EVERY) { put('buddy-gift-clears', 0); return true; }
     put('buddy-gift-clears', n); return false;
   }
-  function open(next) { // the present wobbles, pops open when tapped, the card flies into your bag; then: on, or out
-    const cards = pick(1);
+  // the opening: the present hops while it waits; a tap shakes it harder and harder, it bursts open in a flash with
+  // sparkles, the card rises out face down and flips over, and only then goes into your bag; then: on, or out
+  function open(next) {
+    const cards = pick(1), box = $('giftBox'), list = $('giftCards');
     $('giftTitle').textContent = 'A gift for you!'; $('giftSub').textContent = `For ${GIFT_EVERY} new levels cleared`;
-    $('giftBox').classList.remove('open'); $('giftOpen').style.display = ''; $('giftAfter').style.display = 'none';
-    $('giftCards').innerHTML = '';
+    box.className = 'gbox';
+    $('giftRays').classList.remove('lit'); $('giftFlash').classList.remove('go');
+    $('giftSpark').innerHTML = ''; list.innerHTML = ''; list.classList.toggle('many', cards.length > 1);
+    $('giftTip').classList.remove('on');
+    $('giftOpen').style.display = ''; $('giftAfter').style.display = 'none';
     show('gift');
-    $('giftOpen').onclick = $('giftBox').onclick = () => {
-      if ($('giftBox').classList.contains('open')) return;
-      $('giftBox').classList.add('open'); $('giftOpen').style.display = 'none'; sfx.ui('whoosh', 0.5); confetti();
-      $('giftCards').innerHTML = cards.map((k, i) => `<span class="jcard big" style="--c:${JOKERS[k].color};--art:url(${CARD_ART(k)});animation-delay:${0.15 * i}s"><small>${JOKERS[k].name}</small></span>`).join('');
-      cards.forEach((k, i) => setTimeout(() => { joker.give(k); }, 500 + i * 250));
-      setTimeout(() => { $('giftAfter').style.display = ''; }, 700 + cards.length * 250);
+    sfx.ui('modal', 0.4);
+    let opened = false;
+    $('giftOpen').onclick = box.onclick = () => {
+      if (opened) return;
+      opened = true;
+      $('giftOpen').style.display = 'none';
+      box.classList.add('shake');
+      [0, 180, 340, 480, 600].forEach((t, i) => setTimeout(() => sfx.play('pop', 0.25 + i * 0.06, 0, { rate: 0.9 + i * 0.12 }), t)); // taps rising in pitch
+      setTimeout(burst, 760);
     };
+    function burst() {
+      box.classList.remove('shake'); box.classList.add('open');
+      $('giftFlash').classList.add('go'); $('giftRays').classList.add('lit');
+      sfx.ui('whoosh', 0.55); confetti();
+      const COL = ['#ffd04d', '#fff3c4', '#ff8c6b', '#6dbef0', '#9fe08a'];
+      $('giftSpark').innerHTML = Array.from({ length: 22 }, (_, i) => {
+        const a = (i / 22) * Math.PI * 2 + Math.random() * 0.3, d = 120 + Math.random() * 110;
+        return `<i class="${i % 3 ? '' : 'dot'}" style="--c:${COL[i % COL.length]};--x:${Math.cos(a) * d}px;--y:${Math.sin(a) * d * 0.8 - 40}px;--r:${Math.random() * 360 - 180}deg;--d:${Math.random() * 0.12}s"></i>`;
+      }).join('');
+      list.innerHTML = cards.map((k, i) => `<div class="gcard" style="--c:${JOKERS[k].color};--art:url(${CARD_ART(k)});--d:${0.25 + i * 0.18}s">` +
+        `<div class="inner"><span class="face back"></span><span class="face front"></span></div><b class="gname">${JOKERS[k].name}</b></div>`).join('');
+      // flip them over one by one; each goes into the bag as it's shown
+      [...list.children].forEach((el, i) => setTimeout(() => { el.classList.add('shown'); sfx.ui('chime', 0.45); joker.give(cards[i]); }, 1250 + i * 550));
+      setTimeout(() => {
+        if (cards.length === 1) { const j = JOKERS[cards[0]]; $('giftTip').textContent = `${j.tip[0].toUpperCase()}${j.tip.slice(1)}.`; $('giftTip').classList.add('on'); }
+        const after = $('giftAfter'); after.style.display = ''; after.classList.remove('in'); void after.offsetWidth; after.classList.add('in');
+      }, 1250 + (cards.length - 1) * 550 + 650);
+    }
     $('giftNext').onclick = next;
     $('giftExit').onclick = () => show('worlds');
   }
@@ -6004,4 +6030,4 @@ show('title');
 { const j = params.get('join'); if (j) { $('friend').classList.add('guest'); $('friendTitle').textContent = 'Joining your friend…'; show('friend'); net.join(j); } } // opened from an invite: straight in
 $('loading').style.opacity = 0; setTimeout(() => $('loading').remove(), 450);
 frame();
-window.__game = { guide, get tour() { return tour; }, get stage() { return stage; }, get caveIdx() { return caveIdx; }, get start() { return start; }, doorAhead, get optimal() { return optimal; }, puzzles, joker, get keyAtNow() { return keyAt; }, stoneSet, get stoneSets() { return stoneSets; }, hunt, get raceCfg() { return raceCfg; }, startWolf, get wolves() { return wolves; }, get wolfOver() { return wolfOver; }, get state() { return state; }, get mode() { return mode; }, groundTexture, decorMat, get sceneryModels() { return sceneryModels; }, startRace, get rivals() { return rivals; }, intro, net, loadChar, st, stoneSet, async cave(L, t = 0) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave", cave: t }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win };
+window.__game = { guide, get tour() { return tour; }, get stage() { return stage; }, get caveIdx() { return caveIdx; }, get start() { return start; }, doorAhead, get optimal() { return optimal; }, puzzles, joker, get keyAtNow() { return keyAt; }, stoneSet, get stoneSets() { return stoneSets; }, hunt, get raceCfg() { return raceCfg; }, startWolf, get wolves() { return wolves; }, get wolfOver() { return wolfOver; }, get state() { return state; }, get mode() { return mode; }, groundTexture, decorMat, get sceneryModels() { return sceneryModels; }, startRace, get rivals() { return rivals; }, intro, net, loadChar, st, stoneSet, async cave(L, t = 0) { await stoneSet(levelBiome(L)); await stoneSet("cave"); buildLevel(L, null, { stage: "cave", cave: t }); show("play"); intro.t = -1; }, get atmosphere() { return atmosphere; }, scene, get maze() { return maze; }, tryMove, renderer, face, sfx, play, get assets() { return assets; }, get keyAt() { return keyAt; }, get goal() { return goal; }, get hasKey() { return hasKey; }, get portal() { return portal; }, levelPlan, genShapedMaze, SHAPES, show, win, rewards };

@@ -80,6 +80,9 @@ Puzzles: `sealed` (key walled in by a cracked stone: Hammer), `den` (grumpy wolf
 - **Gift:** every `GIFT_EVERY` (4) levels cleared for the first time, the win card shows "Open your gift!" instead of
   Map / Next; it holds one card, then asks Next level or Exit. Meter in `buddy-gift-clears`, shown on the title chip.
   No gifts pop up on the title.
+  Opening (`rewards.open`): the present hops; a tap shakes it harder (rising taps), it bursts (flash, rays, sparkles,
+  confetti), the card rises face down (`assets/cards/back.webp`) and flips with a shine; it goes into the bag on the
+  flip, then its tip and Next level / Exit appear. The `#gift` screen sits above the top bar (z-index 60).
 - **Daily quests** (`buddy-quests`): three goals a day; all three = one card.
 - **Stars:** 1-3 per level by steps vs the best path (`hidden-maze`).
 - **Story** (story.js): friends found at each world's last level; stickers on the map.

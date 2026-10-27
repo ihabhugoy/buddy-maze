@@ -1919,7 +1919,7 @@ function trimGPU() { // (every device: laptops held ~110 MB per world visited ot
 }
 function buildLevel(level, race = null, opts = {}) {
   L = level; mode = race ? race.kind || 'race' : 'levels'; pillarsDirty = true; shadowKick = 3;
-  clearWolves(); hunt.clear(); joker.clear(); puzzles.clear(); tour.shots = null; if ($('tourCap')) $('tourCap').classList.remove('on');
+  clearWolves(); hunt.clear(); joker.clear(); puzzles.clear(); tour.shots = null; cardMoment = false; if ($('tourCap')) $('tourCap').classList.remove('on');
   stage = opts.stage || 'surface';
   const world = race ? (WORLDS.find(w => w.biome === race.biome) || { tint: [1, 1, 1], reveal: 2.1, icon: 'i-w-cave' }) : WORLDS[Math.floor(L / LEVELS_PER_WORLD)];
   const bName = race ? race.biome || 'woods' : stage === 'cave' ? 'cave' : world.biome;
@@ -2671,8 +2671,13 @@ function collectKey() {
   toast('Got the key! Now find the portal');
   coach.keyGot();
 }
+// a moment that holds the level still (a story bubble, a card coming to you, the opening hold): no walking, the wolves
+// and the clock wait too. Never online (the others keep playing)
+let cardMoment = false;
+const heldStill = () => mode !== 'hunt' && !intro.online && (intro.hold || story.open || cardMoment);
 function tryMove(dx, dz) {
   if (won || wolfOver || state !== 'play' || warp.t >= 0 || (mode === 'hunt' && !hunt.canMove())) return false; // also stops the race once someone has the key
+  if (heldStill()) return false;
   if (intro.t >= 0) { skipIntro(); return false; }
   if (st.moving) { queued = [dx, dz]; return false; }
   const nx = st.gx + dx, nz = st.gz + dz;
@@ -3322,7 +3327,7 @@ function updateWolves(dt, time) {
   wolfMoving = false;
   if (!wolves.length) return;
   glowU.uGlowT.value = time * 2.6;
-  const live = state === 'play' && intro.t < 0 && (mode === 'hunt' ? hunt.live() : !won && !wolfOver) && !joker.frozen();
+  const live = state === 'play' && intro.t < 0 && (mode === 'hunt' ? hunt.live() : !won && !wolfOver) && !joker.frozen() && !heldStill();
   if (live) {
     const prey = wolfPrey(), k = prey.map(p => p.join(',')).join(';');
     preyNow = prey;
@@ -3469,6 +3474,15 @@ const JOKERS = {
 };
 // the cards' pictures: one deck, every card on the same frame (see tools/card_unify.py)
 const CARD_ART = k => `assets/cards/${k}.webp`;
+// every kind of card you have ever had (a card you never had shows a NEW tag when it comes to you)
+const ownedCards = (() => { try { return new Set(JSON.parse(localStorage.getItem('buddy-cards-owned') || '[]')); } catch { return new Set(); } })();
+const ownedCard = k => ownedCards.has(k) || story.seen('card-' + k); // (players from before this list: a card they were taught counts)
+function ownCard(k) { if (ownedCards.has(k)) return; ownedCards.add(k); try { localStorage.setItem('buddy-cards-owned', JSON.stringify([...ownedCards])); } catch {} }
+// the card's moment on screen (cardfx.js) and the pack opening (packs.js) load on the side: if either can't load, the
+// card simply flies into the dock and a pack's cards go straight into your bag
+let cardFx = null, packs = null;
+import('./cardfx.js').then(m => { cardFx = m.createCardFx({ sfx, art: CARD_ART, jokers: JOKERS }); }).catch(() => {});
+import('./packs.js').then(m => { packs = m.createPacks({ sfx, art: CARD_ART, jokers: JOKERS }); }).catch(() => {});
 const joker = (() => {
   let bag = [];
   try { bag = JSON.parse(localStorage.getItem('buddy-jokers') || 'null') || []; } catch { bag = []; }
@@ -3495,10 +3509,11 @@ const joker = (() => {
     el.innerHTML = Object.keys(JOKERS).filter(k => counts[k]).map(k => `<button class="jcard ${aiming === k ? 'armed' : ''}" data-j="${k}" style="--c:${JOKERS[k].color};--art:url(${CARD_ART(k)})" aria-label="${JOKERS[k].name}">${counts[k] > 1 ? `<b>${counts[k]}</b>` : ''}<kbd>${keyName(JOKER_KEYS[k])}</kbd></button>`).join('');
     $('jokerCount').textContent = bag.length; $('jokerDock').classList.toggle('empty', !bag.length);
   }
-  function give(k, from, force) { // a new card flies into the bar
+  function give(k, from, force, quiet) { // a new card flies into the bar (quiet: it already had its moment on screen)
     if (bag.length >= BAG && !force) { toast('Your bag is full (5 cards): use one first'); return; }
-    bag.push(k); save(); render();
+    bag.push(k); save(); render(); ownCard(k);
     const nb = document.querySelector(`.jcard[data-j="${k}"]`); if (nb) nb.classList.add('fresh'); // (the new card glows a moment)
+    if (quiet) return;
     const card = document.createElement('div'); card.className = 'jfly'; card.style.setProperty('--c', JOKERS[k].color);
     card.innerHTML = `<img alt="" src="${CARD_ART(k)}"><span>${JOKERS[k].name}!</span>`;
     const b = $('jokerBar').getBoundingClientRect(), x0 = from ? from.x : innerWidth / 2, y0 = from ? from.y : innerHeight / 2;
@@ -3595,10 +3610,16 @@ const joker = (() => {
     const k = pickups.findIndex(p => p.x === x && p.z === z); if (k < 0) return;
     const p = pickups[k]; scene.remove(p.s); pickups.splice(k, 1);
     const v = p.s.position.clone().project(camera);
-    const kind = p.kind || randomKind();
-    give(kind, { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight }); quests.add('card');
-    if (p.gold) setTimeout(() => toast('Golden card! You dared, and it paid off'), 400);
-    if (mode === 'levels' && !story.seen('card-' + kind)) { intro.hold = true; setTimeout(() => Promise.resolve(tell('card-' + kind)).then(() => { intro.hold = false; }), 900); } // (the first of its kind: what it does)
+    const kind = p.kind || randomKind(), from = { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight };
+    const firstOfKind = mode === 'levels' && !story.seen('card-' + kind);
+    const after = () => { if (firstOfKind && state === 'play') { intro.hold = true; Promise.resolve(tell('card-' + kind)).then(() => { intro.hold = false; }); } }; // (the first of its kind: what it does)
+    if (mode === 'hunt' || bag.length >= BAG || !cardFx) { give(kind, from); quests.add('card'); setTimeout(after, 900); } // (online the game can't wait; a full bag just says so)
+    else { // the card comes to you: a short moment where the level holds still, then it lands in your dock
+      cardMoment = true; heldDir = queued = heldCands = queuedCands = null;
+      const slot = () => { const d = $('jokerDock'); if (d.style.display === 'none') return null; peek(); const el = document.querySelector(`.jcard[data-j="${kind}"]`) || $('jokerBar').lastElementChild || $('jokerDeck'); return el ? el.getBoundingClientRect() : null; };
+      const shown = Promise.race([cardFx.reveal({ kind, from, to: slot, isNew: !ownedCard(kind), gold: !!p.gold }), new Promise(r => setTimeout(r, 8000))]); // (never longer than that, whatever happens)
+      shown.catch(() => {}).then(() => { cardMoment = false; give(kind, null, false, true); quests.add('card'); after(); });
+    }
     for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2; spawnPuff(x - origin, 0.5, z - origin, Math.cos(a) * 1.1, rand(0.3, 0.9), Math.sin(a) * 1.1, rand(0.04, 0.07), i % 2 ? '#ffd04d' : '#ffffff', 0.6); }
     if (mode === 'hunt') net.send({ t: 'jk', x, z });
   }
@@ -4149,58 +4170,27 @@ const rewards = (() => {
     if (n >= GIFT_EVERY) { put('buddy-gift-clears', 0); return true; }
     put('buddy-gift-clears', n); return false;
   }
-  // the opening: the present hops while it waits; a tap shakes it harder and harder, it bursts open in a flash with
-  // sparkles, the card rises out face down and flips over, and only then goes into your bag; then: on, or out
-  function open(next) {
-    const cards = pick(1), box = $('giftBox'), list = $('giftCards');
-    $('giftTitle').textContent = 'A gift for you!'; $('giftSub').textContent = `For ${GIFT_EVERY} new levels cleared`;
-    box.className = 'gbox';
-    $('giftRays').classList.remove('lit'); $('giftFlash').classList.remove('go');
-    $('giftSpark').innerHTML = ''; list.innerHTML = ''; list.classList.toggle('many', cards.length > 1);
-    $('giftTip').classList.remove('on');
-    $('giftOpen').style.display = ''; $('giftAfter').style.display = 'none';
-    show('gift');
-    sfx.ui('modal', 0.4);
-    let opened = false;
-    $('giftOpen').onclick = box.onclick = () => {
-      if (opened) return;
-      opened = true;
-      $('giftOpen').style.display = 'none';
-      box.classList.add('shake');
-      [0, 180, 340, 480, 600].forEach((t, i) => setTimeout(() => sfx.play('pop', 0.25 + i * 0.06, 0, { rate: 0.9 + i * 0.12 }), t)); // taps rising in pitch
-      setTimeout(burst, 760);
-    };
-    function burst() {
-      box.classList.remove('shake'); box.classList.add('open');
-      $('giftFlash').classList.add('go'); $('giftRays').classList.add('lit');
-      sfx.ui('whoosh', 0.55); confetti();
-      const COL = ['#ffd04d', '#fff3c4', '#ff8c6b', '#6dbef0', '#9fe08a'];
-      $('giftSpark').innerHTML = Array.from({ length: 22 }, (_, i) => {
-        const a = (i / 22) * Math.PI * 2 + Math.random() * 0.3, d = 120 + Math.random() * 110;
-        return `<i class="${i % 3 ? '' : 'dot'}" style="--c:${COL[i % COL.length]};--x:${Math.cos(a) * d}px;--y:${Math.sin(a) * d * 0.8 - 40}px;--r:${Math.random() * 360 - 180}deg;--d:${Math.random() * 0.12}s"></i>`;
-      }).join('');
-      list.innerHTML = cards.map((k, i) => `<div class="gcard" style="--c:${JOKERS[k].color};--art:url(${CARD_ART(k)});--d:${0.25 + i * 0.18}s">` +
-        `<div class="inner"><span class="face back"></span><span class="face front"></span></div><b class="gname">${JOKERS[k].name}</b></div>`).join('');
-      // flip them over one by one; each goes into the bag as it's shown
-      [...list.children].forEach((el, i) => setTimeout(() => { el.classList.add('shown'); sfx.ui('chime', 0.45); joker.give(cards[i]); }, 1250 + i * 550));
-      setTimeout(() => {
-        if (cards.length === 1) { const j = JOKERS[cards[0]]; $('giftTip').textContent = `${j.tip[0].toUpperCase()}${j.tip.slice(1)}.`; $('giftTip').classList.add('on'); }
-        const after = $('giftAfter'); after.style.display = ''; after.classList.remove('in'); void after.offsetWidth; after.classList.add('in');
-      }, 1250 + (cards.length - 1) * 550 + 650);
-    }
-    $('giftNext').onclick = next;
-    $('giftExit').onclick = () => show('worlds');
+  // a card pack: usually one card in a green pack, now and then a rare white pack with two. Opened with its little
+  // show (packs.js) right over the level you just finished; then the cards go into your bag and you play on: the next
+  // level, or this one again (no trip back to the menus: the pack is there to keep you playing)
+  function open(next, again) {
+    const rare = Math.random() < 0.3, cards = pick(rare ? 2 : 1);
+    if (!packs) { cards.forEach(k => joker.give(k)); return next(); }
+    document.body.classList.add('packing'); // (the win card steps aside: the pack opens over the level itself)
+    packs.open({ cards, rarity: rare ? 'rare' : 'common', title: rare ? 'A rare pack!' : 'A pack for you!', sub: `For ${GIFT_EVERY} new levels cleared`,
+      isNew: k => !ownedCard(k), actions: [{ id: 'again', label: 'Play again', icon: 'i-redo', color: 'blue' }, { id: 'next', label: 'Next level', icon: 'i-next', color: 'green', primary: true }] })
+      .then(id => { document.body.classList.remove('packing'); cards.forEach(k => joker.give(k, null, false, true)); id === 'again' ? again() : next(); });
   }
   function chip() { // the title's little meter toward the next gift
     const n = count();
-    $('chestChip').innerHTML = `<svg class="ico"><use href="#i-gift"/></svg><b>${n}/${GIFT_EVERY}</b><i style="--p:${n / GIFT_EVERY}"></i>`;
+    $('chestChip').innerHTML = `<svg class="ico"><use href="#i-cards"/></svg><b>${n}/${GIFT_EVERY}</b><i style="--p:${n / GIFT_EVERY}"></i>`;
   }
   // what's coming: the next friend to find, and how many new levels to the next gift
   function tease(L) {
     const fi = Math.floor(L / LEVELS_PER_WORLD), lastOfWorld = (fi + 1) * LEVELS_PER_WORLD, f = FRIENDS[fi];
     const a = f && !story.seen(`found-${f.id}`) && L + 1 < lastOfWorld ? `<span class="chip tease"><img alt="" src="${f.sticker}">${f.name} is waiting at level ${lastOfWorld}</span>` : '';
     const left = GIFT_EVERY - count();
-    const b = jokersKnown().length ? `<span class="chip tease"><svg class="ico"><use href="#i-gift"/></svg>${left} more new level${left > 1 ? 's' : ''} to a gift</span>` : '';
+    const b = jokersKnown().length ? `<span class="chip tease"><svg class="ico"><use href="#i-cards"/></svg>${left} more new level${left > 1 ? 's' : ''} to a card pack</span>` : '';
     return a + b;
   }
   return { cleared, open, chip, tease };
@@ -4818,7 +4808,7 @@ function show(name) {
     doorPreview(wd.biome).then(url => { if (lobbyMode.mode === 'adventure') $('contArt').innerHTML = `<img alt="" src="${url}">`; });
     charPreview(charId).then(u => { $('modeArtAdv').src = u; });
   }
-  if (name === 'title') rewards.chip();
+  if (name === 'title') { rewards.chip(); document.body.classList.toggle('newbie', save.stars(0) === 0); } // (a first-time player: the Play button gets a pointing hand)
   if (name === 'modes') $('title').classList.add('show'); // (opens over the title)
   if (['title', 'outfit', 'race', 'friend'].includes(name)) $(name).querySelector('.faceSlot').appendChild($('faceCanvas'));
   if (name === 'title' || name === 'outfit') face.setCrew([]);
@@ -5153,7 +5143,7 @@ $('nextBtn').addEventListener('click', () => {
   if (L + 1 >= TOTAL_LEVELS) return show('worlds');
   play(L + 1);
 });
-$('winGift').addEventListener('click', () => rewards.open(() => $('nextBtn').click()));
+$('winGift').addEventListener('click', () => rewards.open(() => $('nextBtn').click(), () => play(L)));
 // logo: letters bent along an arch in the hood color (set by setSkin), with an ink outline behind
 {
   const el = $('logoA'), letters = [...el.textContent], mid = (letters.length - 1) / 2;
@@ -5912,7 +5902,7 @@ function frame(now = performance.now()) {
     key.userData.shadow.position.y = 0.02 - key.position.y; key.userData.shadow.visible = true;
   }
   updatePortal(dt, time);
-  if (state === 'play' && !won && intro.t < 0) { elapsed += dt; if (mode !== 'hunt') ui.time.textContent = fmt(Math.floor(elapsed)); }
+  if (state === 'play' && !won && intro.t < 0 && !heldStill()) { elapsed += dt; if (mode !== 'hunt') ui.time.textContent = fmt(Math.floor(elapsed)); }
   updateCamera(dt);
   updateFocus();
   updateRaceUI();

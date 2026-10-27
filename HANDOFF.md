@@ -77,7 +77,8 @@ Then open http://localhost:8770.
 - **Desert stones** keep their natural colored layers (`tint 0.12`, `matchStrength 0.45`); the cactus door stays green.
   The map places big cacti (the door model, stone sunk) and the woods' arches far back with a hazy lower half.
 - **Pause:** a cream card with a list (Resume green, Restart, Map, Sound, Main menu).
-- **Cards and buttons:** soft white cards; candy buttons (green / yellow / blue) with a darker bottom lip. No ink outlines, no gradients on buttons.
+- **Cards and buttons:** soft white cards; candy buttons (green / yellow / blue) with a darker bottom lip and, since the
+  owner asked for 'a little bit of gradients', a soft top shine (`--shine`). No ink outlines.
 
 **World look:**
 - Warm light from the far side (top of screen), soft shadows.

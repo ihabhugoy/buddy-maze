@@ -35,7 +35,7 @@ fields (`INPUT`) must not trigger game keys.
 ## 2. Screens (`show(name)`, `body[data-state]`)
 
 title, modes (over title), outfit, worlds (the map), race, friend (online lobby), play, pause, settings, help,
-install, win, raceEnd, gameOver, gift (opens over the finished level). Hidden screens never catch clicks
+install, win, raceEnd, gameOver. Card packs (packs.js) and the card moment (cardfx.js) are their own overlays, not screens. Hidden screens never catch clicks
 (`.screen:not(.show) *`). The top bar shows on title, modes, outfit, worlds, friend, race.
 
 ## 3. Overlays that belong to the play screen only
@@ -46,7 +46,9 @@ install, win, raceEnd, gameOver, gift (opens over the finished level). Hidden sc
 out on purpose (no peeking through the mist from pause). `#story` and `#toast` may show on menus.
 
 Things that wait for the player: the level intro (`intro.t`, `intro.hold`), a camera tour (`tour.shots`), a story
-scene (`story.open`, holds the intro). Movement is blocked while any of them runs.
+scene (`story.open`), a card coming to you (`cardMoment`). `heldStill()` is the one freeze for mid-level moments: no
+walking, wolves and the clock wait too (never online: `hunt` and online races keep going). Anything new that talks to
+the player mid-level must hold the level through `heldStill()`.
 
 ## 4. Modes (`mode`)
 
@@ -77,12 +79,15 @@ Puzzles: `sealed` (key walled in by a cracked stone: Hammer), `den` (grumpy wolf
 
 ## 7. Rewards
 
-- **Gift:** every `GIFT_EVERY` (4) levels cleared for the first time, the win card shows "Open your gift!" instead of
-  Map / Next; it holds one card, then asks Next level or Exit. Meter in `buddy-gift-clears`, shown on the title chip.
-  No gifts pop up on the title.
-  Opening (`rewards.open`): the present hops; a tap shakes it harder (rising taps), it bursts (flash, rays, sparkles,
-  confetti), the card rises face down (`assets/cards/back.webp`) and flips with a shine; it goes into the bag on the
-  flip, then its tip and Next level / Exit appear. The `#gift` screen sits above the top bar (z-index 60).
+- **Card packs:** every `GIFT_EVERY` (4) levels cleared for the first time, the win card shows "Open your pack!" (`#winGift`)
+  instead of Map / Next. `rewards.open` -> `packs.open` (packs.js, its own overlay and CSS): usually a common aqua holo
+  pack with 1 card, 30% a rare pearly prism pack with 2. A pale Pokemon-style studio (no rays), a holographic foil that
+  follows the mouse, swipe/tap to tear, cards slide out and flip, NEW tags (`ownedCard`, `buddy-cards-owned`), then
+  **Next level** or **Play again** (no trip to the menus). The win card hides meanwhile (`body.packing`). Meter in
+  `buddy-gift-clears`, shown on the title chip. Nothing pops up on the title.
+- **Card moment** (cardfx.js): picking up a card holds the level (`cardMoment`) ~2 s while it spins to you, flips in a
+  pillar of its color and lands in the dock (tap skips; at most 8 s; online and with a full bag it just flies in).
+  Golden cards get a gold pillar. Both modules load lazily: if one fails, cards go straight to the bag.
 - **Daily quests** (`buddy-quests`): three goals a day; all three = one card.
 - **Stars:** 1-3 per level by steps vs the best path (`hidden-maze`).
 - **Story** (story.js): friends found at each world's last level; stickers on the map.
@@ -106,3 +111,5 @@ buddy-mode, buddy-role, buddy-exp, buddy-games, buddy-saved, buddy-lite. Wrap ev
 6. **Online:** does it behave in `hunt` / online `race` (host decides, messages after a game ended are ignored)?
 7. **Phones:** touch has no keys (cards are tapped, aiming is the next swipe); check 844x390 landscape.
 8. **Rewards:** is it a reward on top of others? The owner wants rewards earned by playing, not handed out.
+9. **Call to action:** one `.cta` per screen (the button to press next: home Play, win Next / Open your pack, Again):
+   it pops its icon, swells and sends a ring every 2.4 s. `body.newbie` adds a tapping hand on the home Play button.
